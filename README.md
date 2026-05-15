@@ -10,6 +10,18 @@ npx skills@latest add silvio-l/skills
 
 Pick the skills you want and the agents you want to install to. The installer is the generic [`skills` CLI by Vercel Labs](https://github.com/vercel-labs/skills) — the same one Matt Pocock uses.
 
+## Updating
+
+After new versions land upstream, refresh your local copy:
+
+```bash
+npx skills@latest update                 # interactive: picks scope, lists changes
+npx skills@latest update -g              # all global skills, no prompts
+npx skills@latest update -g ratchet-up   # one specific skill
+```
+
+The CLI tracks where each installed skill came from and pulls only what changed — across this repo, Matt's, and any others you have installed.
+
 ## Prerequisites: install Matt Pocock's skills first
 
 These skills are built on top of the conventions, vocabulary, and issue formats produced by [`mattpocock/skills`](https://github.com/mattpocock/skills). **Install Matt's skills first** — several of mine consume what his produce.
