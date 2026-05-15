@@ -1,0 +1,16 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Node (in case any skill ever ships JS tooling)
+node_modules/
+
+# Local scratch
+.scratch/

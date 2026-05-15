@@ -1,0 +1,66 @@
+# Skills
+
+My personal Claude Code skills. Engineering process, context hygiene, and AI-agent maintenance — distilled into composable skills, straight from my `.claude` directory.
+
+## Quickstart
+
+```bash
+npx skills@latest add silvio-l/skills
+```
+
+Pick the skills you want and the agents you want to install to. The installer is the generic [`skills` CLI by Vercel Labs](https://github.com/vercel-labs/skills) — the same one Matt Pocock uses.
+
+## Prerequisites: install Matt Pocock's skills first
+
+These skills are built on top of the conventions, vocabulary, and issue formats produced by [`mattpocock/skills`](https://github.com/mattpocock/skills). **Install Matt's skills first** — several of mine consume what his produce.
+
+```bash
+npx skills@latest add mattpocock/skills
+# then, inside an agent session:
+/setup-matt-pocock-skills
+```
+
+Which of mine depends on which of Matt's:
+
+| My skill | Depends on Matt's |
+|---|---|
+| `ratchet-up` | `/to-issues`, `/triage`, and the issue-tracker config from `/setup-matt-pocock-skills` |
+| `domain-glossary` | extends the `CONTEXT.md` philosophy from `/grill-with-docs` |
+| `full-quality-scan` | parallel-subagent dispatch pattern shared with Matt's process-oriented skills |
+| `context-optimization-audit` | audits the loaded surface, including Matt's installed skills |
+
+If you only want one of these, skip the dependencies you do not exercise.
+
+## The skills
+
+### `context-optimization-audit`
+
+**The Problem.** Claude Code loads everything in sight — skills, MCP servers, plugins, project instructions. Over time the context turns into a buffet. You lose tokens, signal-to-noise drops, and the model gets distracted.
+
+**The Fix.** Audit every loaded surface — skills, agents, slash commands, MCP/plugin config, project files — and propose what to cut, merge, condense, disable, or move. Nothing is changed without your approval; the skill produces a plan first.
+
+### `domain-glossary`
+
+**The Problem.** Devs and domain experts speak different languages. So do agents and the projects they wake up in. You burn tokens explaining the same nouns every session.
+
+**The Fix.** Build a `CONTEXT.md` collaboratively. The glossary is the artifact; the real work is getting the language right. Lifts Matt's "shared language" idea from `/grill-with-docs` and turns it into an explicit, repeatable authoring loop.
+
+### `full-quality-scan`
+
+**The Problem.** "Run all the linters" is fine until a scanner returns 200 findings and the agent tries to fix them inside a single context. Halfway through, you run out of room and lose the rest.
+
+**The Fix.** A threshold: ≤10 findings → fix directly. >10 → produce a plan first, then dispatch parallel subagents per finding cluster. Each subagent works in isolation; the orchestrator never holds the full pile in one head.
+
+### `ratchet-up`
+
+**The Problem.** An agentic loop that grinds through issues sounds great until you realize each iteration drags the whole feature's state back into the orchestrator's context. Six issues in, you are hallucinating dependencies that do not exist.
+
+**The Fix.** A context-safe ratchet — discover ready issues, respect `blocked-by`, dispatch isolated workers and read-only reviewers, gate on format/analyze, persist rework feedback to disk. The orchestrator stays small; the work moves forward one click at a time, never backward.
+
+## Credit
+
+These skills exist because [Matt Pocock](https://github.com/mattpocock) made his own [`mattpocock/skills`](https://github.com/mattpocock/skills) public and showed what a working skill ecosystem looks like. The structural choices here — directory layout, frontmatter conventions, the `npx skills@latest add` install path, the failure-mode/fix narrative pattern in this README — are his. If you find any of this useful, point upstream first.
+
+## License
+
+[MIT](./LICENSE).
