@@ -79,6 +79,7 @@ need() { [ -n "${1:-}" ] || die "missing argument: $2"; }
 
 # Run AppleScript from stdin with positional args via argv.
 osa() { /usr/bin/osascript - "$@"; }
+osa_file() { /usr/bin/osascript "$SKILL_DIR/applescripts/$1" "${@:2}"; }
 
 # Validate that a status is in the configured list.
 validate_status() {
@@ -91,62 +92,61 @@ validate_status() {
 
 # ───── templates (heredocs; idempotent on apply) ───────────────────────
 template_bug() { cat <<'BODY'
-BUG · severity: medium · platform: iOS | Android | macOS | Windows | Linux · tags: ...
+Was funktioniert nicht
+<kurz beschreiben, was kaputt ist>
 
-Was passiert
-<Was läuft tatsächlich falsch>
+Was hätte passieren sollen
+<was wäre die richtige Reaktion gewesen>
 
-Erwartet
-<Was sollte passieren>
-
-Schritte zum Nachstellen
+Wie kann man es nachstellen
 1.
 2.
 3.
 
-Wann zuletzt gesehen:
-Häufigkeit: einmalig | mehrfach | reproduzierbar
+Wann hast du es zuletzt gesehen?
+
+Passiert es immer wieder?  ja / nein / manchmal
 BODY
 }
 template_feat() { cat <<'BODY'
-FEAT · priority: medium · platform: alle · tags: ...
+Was soll die App können
+<in einem Satz>
 
-Worum geht's
-<Was soll die App können — in einem Satz>
+Warum brauchst du das
+<welches Problem löst es für dich>
 
-Warum
-<Welches Problem löst das, für wen>
+Wie könnte das aussehen
+<Skizze, Beispiel, oder Screenshot aus einer anderen App>
 
-Wie könnte es aussehen
-<Skizze, Beispiel, Screenshot aus anderer App>
-
-Akzeptanzkriterien
+Woran erkennst du, dass es klappt?
 - [ ]
 - [ ]
 BODY
 }
 template_idea() { cat <<'BODY'
-IDEA · tags: ...
+Deine Idee
+<in einem Satz>
 
-Kernidee
-<In einem Satz>
+Was hat dich darauf gebracht
+<Erlebnis, Beobachtung, Gespräch>
 
-Anlass
-<Was hat dich darauf gebracht>
-
-Offene Fragen
+Was ist dir noch unklar
 -
 -
 BODY
 }
 template_fb() { cat <<'BODY'
-FB · sentiment: positiv | neutral | negativ · quelle: <wer> · tags: ...
-
 Was wurde gesagt
-<Originalzitat oder Zusammenfassung>
+<Originalzitat oder kurze Zusammenfassung>
 
-Eigene Einschätzung
-<Was bedeutet das für uns>
+Von wem
+<Name, Rolle, oder z. B. „eine Nutzerin">
+
+Stimmung
+positiv / neutral / negativ
+
+Was bedeutet das für uns
+<deine Einschätzung>
 BODY
 }
 template_tech() { cat <<'BODY'
@@ -163,33 +163,37 @@ Skizze des Ansatzes
 BODY
 }
 cheatsheet() { cat <<'BODY'
-Anleitung: Bugs und Feedback einbringen
-───────────────────────────────────────
+So bringst du Bugs und Feedback ein
+───────────────────────────────────
 
-So bringst du ein neues Issue ein:
+1. Im Ordner „inbox" eine neue Notiz anlegen.
 
-1. Im inbox/-Ordner eine neue Notiz erstellen.
+2. Den Titel mit einem dieser Wörter starten (mit Doppelpunkt) —
+   das hilft uns beim Sortieren:
 
-2. Den Titel mit einem Prefix beginnen — das hilft uns beim Sortieren:
-   • BUG:   ← etwas funktioniert nicht
-   • FEAT:  ← neues Feature gewünscht
-   • IDEA:  ← halb-fertige Idee zur Diskussion
-   • FB:    ← allgemeines Feedback / Nutzerstimmen
-   • TECH:  ← technische Anmerkung / Refactoring
+   BUG:   wenn etwas nicht funktioniert
+   FEAT:  wenn du dir ein neues Feature wünschst
+   IDEA:  wenn du eine halb-fertige Idee hast
+   FB:    wenn du Feedback weitergeben willst
+   (TECH: ist nur für Silvio gedacht)
 
-3. Erste Zeile im Body sollte eine kurze Metadaten-Zeile sein, z.B.:
-   BUG · severity: medium · platform: iOS · tags: pairing, e2ee
+3. Im Ordner „docs" findest du fertige Vorlagen:
+   - Vorlage öffnen → Cmd+D → kopiert die Notiz
+   - Titel ändern: aus „VORLAGE BUG" wird z. B. „BUG: Login klappt nicht"
+   - Im Text die Platzhalter ausfüllen
+   - Notiz in den Ordner „inbox" ziehen
 
-4. Den Rest frei beschreiben. Screenshots gerne einfügen (Cmd+Shift+4 zum Aufnehmen, dann Cmd+V in der Notiz).
+4. Screenshots gerne mit einfügen:
+   - Cmd+Shift+4 zum Aufnehmen
+   - dann Cmd+V in die Notiz
 
-5. Vorlagen findest du hier im docs/-Ordner — einfach mit Cmd+D duplizieren, ausfüllen, in den inbox/-Ordner verschieben.
+So läuft es weiter:
 
-Status-Workflow:
-  inbox    ← du legst hier rein
-  ready    ← Silvio bestätigt: kann gemacht werden
-  done     ← erledigt
+   inbox    ← hier legst du es ab
+   ready    ← Silvio hat es gesichtet, wird bald gemacht
+   done     ← erledigt
 
-Vielen Dank fürs sorgfältige Schreiben!
+Danke fürs sorgfältige Schreiben!
 BODY
 }
 
@@ -230,14 +234,11 @@ Project layout convention
       done/                       merged / shipped
       docs/                       templates + briefing — NOT issues
 
-Title-prefix convention (recommended):
+Title-prefix convention (only requirement for non-technical partners):
   BUG:  | FEAT: | IDEA: | FB: | TECH:
 
-Body convention (optional but agent-friendly):
-  First line is metadata, rest is free text. Example:
-    BUG · severity: medium · platform: iOS · tags: onboarding,ux
-
-    Schieberegler ist zu empfindlich. …
+Body: free text. Optional metadata first-line (only TECH template
+uses this; the others are deliberately plain for non-technical partners).
 
 Status changes via:  apple-notes move <project> <title> <new-status>
 Configured statuses: $STATUSES
@@ -546,22 +547,7 @@ cmd_get() {
   [ -n "$status" ] || die "note not found in any subfolder of $project: $title"
 
   local out
-  out="$(osa "$ACCOUNT" "$COMPANY" "$project" "$status" "$title" <<'APPLESCRIPT'
-on run argv
-  set acct to item 1 of argv
-  set parentName to item 2 of argv
-  set proj to item 3 of argv
-  set theStatus to item 4 of argv
-  set t to item 5 of argv
-  tell application "Notes"
-    set sf to folder theStatus of folder proj of folder parentName of account acct
-    set matches to (notes of sf whose name is t)
-    if (count of matches) = 0 then return "ERR:race condition"
-    return body of (item 1 of matches)
-  end tell
-end run
-APPLESCRIPT
-)"
+  out="$(osa_file get_note.applescript "$ACCOUNT" "$COMPANY" "$project" "$status" "$title")"
   case "$out" in ERR:*) die "${out#ERR:}";; esac
   case "$format" in
     text) printf '%s' "$out" | python3 "$HELPER" to-text ;;
@@ -755,26 +741,7 @@ cmd_create() {
     body="$(wrap_plain "$body")"
   fi
   local out
-  out="$(osa "$ACCOUNT" "$COMPANY" "$project" "$status" "$title" "$body" <<'APPLESCRIPT'
-on run argv
-  set acct to item 1 of argv
-  set parentName to item 2 of argv
-  set proj to item 3 of argv
-  set theStatus to item 4 of argv
-  set t to item 5 of argv
-  set b to item 6 of argv
-  tell application "Notes"
-    try
-      set sf to folder theStatus of folder proj of folder parentName of account acct
-    on error
-      return "ERR:status folder missing: " & theStatus & " in " & proj & " (run: apple-notes init " & proj & ")"
-    end try
-    make new note at sf with properties {body:"<div>" & t & "</div>" & b}
-  end tell
-  return "OK"
-end run
-APPLESCRIPT
-)"
+  out="$(osa_file create_note.applescript "$ACCOUNT" "$COMPANY" "$project" "$status" "$title" "$body")"
   case "$out" in ERR:*) die "${out#ERR:}";; esac
   echo "created: $title in $project/$status"
 }
@@ -855,7 +822,9 @@ APPLESCRIPT
 }
 
 # ───── triage ───────────────────────────────────────────────────────────
-# Lists inbox notes with health score: title prefix + metadata first line.
+# Lists inbox notes with health score: title prefix only.
+# (Body metadata first-line is intentionally not scored — Normalo-templates
+# are plain free-form text and would otherwise be flagged as warn.)
 cmd_triage() {
   local project="${1:-}"; need "$project" "<project>"; shift
   local json=0
@@ -909,7 +878,6 @@ APPLESCRIPT
   printf '%s' "$out" | python3 -c "
 import sys, json, re
 PREFIX_RE = re.compile(r'^(BUG|FEAT|IDEA|FB|TECH):\s+\S')
-META_RE   = re.compile(r'·')
 rows=[]
 for line in sys.stdin:
     line=line.rstrip('\n')
@@ -920,23 +888,20 @@ for line in sys.stdin:
     issues=[]
     if not PREFIX_RE.match(title):
         issues.append('missing-prefix')
-    if not META_RE.search(meta):
-        issues.append('missing-metadata-line')
-    score='ok' if not issues else ('warn' if len(issues)==1 else 'error')
+    score='ok' if not issues else 'warn'
     rows.append({'title':title,'meta':meta,'score':score,'issues':issues})
 
 ok=sum(1 for r in rows if r['score']=='ok')
 warn=sum(1 for r in rows if r['score']=='warn')
-err=sum(1 for r in rows if r['score']=='error')
 
 if $json:
-    print(json.dumps({'total':len(rows),'ok':ok,'warn':warn,'error':err,'notes':rows}, ensure_ascii=False, indent=2))
+    print(json.dumps({'total':len(rows),'ok':ok,'warn':warn,'notes':rows}, ensure_ascii=False, indent=2))
 else:
-    sym={'ok':'✓','warn':'⚠','error':'✗'}
+    sym={'ok':'✓','warn':'⚠'}
     for r in rows:
         tag = (', '.join(r['issues']) or 'looks good')
         print(f\"  {sym[r['score']]} {r['title'][:55]:<55} {tag}\")
-    print(f\"\\nsummary: {len(rows)} notes — {ok} ok, {warn} warn, {err} error\")
+    print(f\"\\nsummary: {len(rows)} notes — {ok} ok, {warn} warn\")
 "
 }
 

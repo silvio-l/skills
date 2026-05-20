@@ -29,15 +29,17 @@ Recommended, surfaced by `triage`, not enforced by `create`:
 
 ## Body convention
 
-First non-empty line after the title = metadata, segments separated by `·`. Example:
+Body is free-form text. Non-technical partners use the BUG / FEAT / IDEA / FB templates seeded under `docs/`, which are intentionally plain (no metadata first-line, no jargon).
+
+Only the **TECH** template (Silvio's own notes) carries a compact `·`-separated metadata first line:
 
 ```
-BUG · severity: medium · platform: iOS · tags: onboarding, ux
+TECH · area: app · impact: medium · tags: dispatcher, refactor
 
-Schieberegler ist zu empfindlich. …
+Heredocs extrahieren, damit Snippets isoliert reviewbar werden.
 ```
 
-`triage` checks for the `·` character as a quick health signal; it does not parse the segments. Agents that want to act on severity/platform can split the line on `·` and the segment on `:`.
+`triage` does not parse body content — it only scores the title prefix. Agents that want to act on `area` / `impact` metadata from TECH notes can split the first line on `·` and each segment on `:`.
 
 ## Subcommands
 
@@ -102,14 +104,13 @@ Status transition inside the same project. `new-status` validated. Notes in non-
 
 ### `triage <project> [--json]`
 
-Scans the `inbox/` folder. For each note:
+Scans the `inbox/` folder. For each note, runs exactly one check:
 
 - **prefix** check: title matches `^(BUG|FEAT|IDEA|FB|TECH):\s+\S`.
-- **metadata** check: first non-title paragraph contains a `·` character.
 
-Output (default): ` ✓ <title-55>  looks good` / ` ⚠ <title-55>  missing-metadata-line` / ` ✗ <title-55>  missing-prefix, missing-metadata-line`. JSON adds counts.
+Output (default): ` ✓ <title-55>  looks good` / ` ⚠ <title-55>  missing-prefix`. JSON adds counts (`ok`, `warn`).
 
-The skill **does not** modify notes during triage. Use the output to guide manual or agent-led follow-up.
+Body content is not scored. The Normalo-templates seed plain free-form text, so any metadata expectation would penalise well-written partner notes. The skill **does not** modify notes during triage. Use the output to guide manual or agent-led follow-up.
 
 ### `config show | set <key> <value> | set-mapping <repo-key> <project>`
 
