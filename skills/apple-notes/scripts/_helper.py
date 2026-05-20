@@ -41,7 +41,15 @@ def strip_base64(html: str) -> str:
 
 def to_text(html: str) -> str:
     """Lossy HTML → plaintext for LLM consumption. Drops base64 entirely."""
-    html = strip_base64(html)
+    # Surround image placeholders with newlines so they sit on their own
+    # line after tag-stripping, rather than gluing to adjacent text.
+    counter = [0]
+
+    def repl(m: re.Match) -> str:
+        counter[0] += 1
+        return f"\n[image:{counter[0]}]\n"
+
+    html = INLINE_IMG_RE.sub(repl, html)
     # Convert line-level closing tags to newlines
     html = re.sub(r"</(div|p|li|h[1-6]|tr)>", "\n", html, flags=re.IGNORECASE)
     html = re.sub(r"<br\s*/?>", "\n", html, flags=re.IGNORECASE)
