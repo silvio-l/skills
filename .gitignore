@@ -12,5 +12,12 @@ Thumbs.db
 # Node (in case any skill ever ships JS tooling)
 node_modules/
 
+# Python bytecode (from running tests in tests/)
+__pycache__/
+*.py[cod]
+
 # Local scratch
 .scratch/
+
+# Claude Code local-only settings (per-project; never shared)
+.claude/settings.local.json
