@@ -1,12 +1,19 @@
 #!/usr/bin/env bash
 # apple-notes — Claude Code skill dispatcher for Apple Notes on macOS.
 #
-# Subcommands: projects, resolve, notes, get, images, search,
-#              create, update, append, delete, move, config.
+# Project structure (enforced by `init`, scanned by all reads):
+#   <company_folder>/                ← default: "Firma"
+#     <project>/                     ← e.g. HellerIO, Whispaste
+#       inbox/                       ← new, untriaged
+#       ready/                       ← triaged, ready-for-work
+#       done/                        ← merged / shipped
+#       docs/                        ← templates, specs, briefing — NOT issues
 #
-# All AppleScript invocations pass arguments via osascript's argv —
-# no shell-level string interpolation, no quoting bugs, safe for
-# Unicode titles and bodies of arbitrary size.
+# Title-prefix convention (recommended, not enforced):
+#   BUG:  | FEAT: | IDEA: | FB: | TECH:
+#
+# Subcommands: init, projects, resolve, notes, get, images, search,
+#              create, update, append, delete, move, triage, config.
 
 set -euo pipefail
 
@@ -22,14 +29,50 @@ mkdir -p "$CONFIG_DIR" "$CACHE_DIR"
 {
   "account": "iCloud",
   "company_folder": "Firma",
+  "statuses": ["inbox", "ready", "done", "docs"],
+  "default_status": "inbox",
   "default_image_dir": "/tmp/apple-notes-images"
 }
 JSON
 [ -f "$MAPPING_FILE" ] || echo '{}' > "$MAPPING_FILE"
 
-ACCOUNT="$(python3 -c "import json;print(json.load(open('$CONFIG_FILE')).get('account','iCloud'))")"
-COMPANY="$(python3 -c "import json;print(json.load(open('$CONFIG_FILE')).get('company_folder','Firma'))")"
-DEFAULT_IMG_DIR="$(python3 -c "import json;print(json.load(open('$CONFIG_FILE')).get('default_image_dir','/tmp/apple-notes-images'))")"
+# Gentle migration: backfill new keys onto pre-existing configs.
+python3 - "$CONFIG_FILE" <<'PY'
+import json, sys
+p = sys.argv[1]
+c = json.load(open(p))
+changed = False
+for k, v in [
+    ("account", "iCloud"),
+    ("company_folder", "Firma"),
+    ("statuses", ["inbox", "ready", "done", "docs"]),
+    ("default_status", "inbox"),
+    ("default_image_dir", "/tmp/apple-notes-images"),
+]:
+    if k not in c:
+        c[k] = v
+        changed = True
+if changed:
+    json.dump(c, open(p, "w"), indent=2, ensure_ascii=False)
+PY
+
+# ─── config readers (single-value via python; lists piped through `tr`) ───
+cfg_get() {
+  python3 -c "
+import json, sys
+v=json.load(open('$CONFIG_FILE')).get('$1')
+if v is None: sys.exit('missing config key: $1')
+if isinstance(v, list): print('\n'.join(v))
+else: print(v)
+"
+}
+
+ACCOUNT="$(cfg_get account)"
+COMPANY="$(cfg_get company_folder)"
+DEFAULT_STATUS="$(cfg_get default_status)"
+DEFAULT_IMG_DIR="$(cfg_get default_image_dir)"
+# STATUSES as space-separated list for shell loops
+STATUSES="$(cfg_get statuses | tr '\n' ' ')"
 
 die() { echo "Error: $*" >&2; exit 1; }
 need() { [ -n "${1:-}" ] || die "missing argument: $2"; }
@@ -37,18 +80,228 @@ need() { [ -n "${1:-}" ] || die "missing argument: $2"; }
 # Run AppleScript from stdin with positional args via argv.
 osa() { /usr/bin/osascript - "$@"; }
 
-# Format ISO date from AppleScript date string (locale-agnostic).
-iso_date() { python3 -c "
-import sys, datetime
-for line in sys.stdin:
-    ts = line.strip()
-    if not ts: continue
-    try:
-        # ts is epoch seconds (we set it in AppleScript)
-        print(datetime.datetime.fromtimestamp(int(ts)).strftime('%Y-%m-%d'))
-    except Exception:
-        print(ts)
-"; }
+# Validate that a status is in the configured list.
+validate_status() {
+  local s="$1"
+  for known in $STATUSES; do
+    [ "$s" = "$known" ] && return 0
+  done
+  die "unknown status '$s'. Configured: $STATUSES"
+}
+
+# ───── templates (heredocs; idempotent on apply) ───────────────────────
+template_bug() { cat <<'BODY'
+BUG · severity: medium · platform: iOS | Android | macOS | Windows | Linux · tags: ...
+
+Was passiert
+<Was läuft tatsächlich falsch>
+
+Erwartet
+<Was sollte passieren>
+
+Schritte zum Nachstellen
+1.
+2.
+3.
+
+Wann zuletzt gesehen:
+Häufigkeit: einmalig | mehrfach | reproduzierbar
+BODY
+}
+template_feat() { cat <<'BODY'
+FEAT · priority: medium · platform: alle · tags: ...
+
+Worum geht's
+<Was soll die App können — in einem Satz>
+
+Warum
+<Welches Problem löst das, für wen>
+
+Wie könnte es aussehen
+<Skizze, Beispiel, Screenshot aus anderer App>
+
+Akzeptanzkriterien
+- [ ]
+- [ ]
+BODY
+}
+template_idea() { cat <<'BODY'
+IDEA · tags: ...
+
+Kernidee
+<In einem Satz>
+
+Anlass
+<Was hat dich darauf gebracht>
+
+Offene Fragen
+-
+-
+BODY
+}
+template_fb() { cat <<'BODY'
+FB · sentiment: positiv | neutral | negativ · quelle: <wer> · tags: ...
+
+Was wurde gesagt
+<Originalzitat oder Zusammenfassung>
+
+Eigene Einschätzung
+<Was bedeutet das für uns>
+BODY
+}
+template_tech() { cat <<'BODY'
+TECH · area: app | website | infrastruktur · impact: low | medium | high · tags: ...
+
+Was
+<Welche technische Schuld / Refactoring>
+
+Warum jetzt
+<Wieso ist das wichtig>
+
+Skizze des Ansatzes
+<Wie würde man es lösen>
+BODY
+}
+cheatsheet() { cat <<'BODY'
+Anleitung: Bugs und Feedback einbringen
+───────────────────────────────────────
+
+So bringst du ein neues Issue ein:
+
+1. Im inbox/-Ordner eine neue Notiz erstellen.
+
+2. Den Titel mit einem Prefix beginnen — das hilft uns beim Sortieren:
+   • BUG:   ← etwas funktioniert nicht
+   • FEAT:  ← neues Feature gewünscht
+   • IDEA:  ← halb-fertige Idee zur Diskussion
+   • FB:    ← allgemeines Feedback / Nutzerstimmen
+   • TECH:  ← technische Anmerkung / Refactoring
+
+3. Erste Zeile im Body sollte eine kurze Metadaten-Zeile sein, z.B.:
+   BUG · severity: medium · platform: iOS · tags: pairing, e2ee
+
+4. Den Rest frei beschreiben. Screenshots gerne einfügen (Cmd+Shift+4 zum Aufnehmen, dann Cmd+V in der Notiz).
+
+5. Vorlagen findest du hier im docs/-Ordner — einfach mit Cmd+D duplizieren, ausfüllen, in den inbox/-Ordner verschieben.
+
+Status-Workflow:
+  inbox    ← du legst hier rein
+  ready    ← Silvio bestätigt: kann gemacht werden
+  done     ← erledigt
+
+Vielen Dank fürs sorgfältige Schreiben!
+BODY
+}
+
+# ensure_doc_note <project> <title> <body-text>
+# Creates the note in <project>/docs only if no note with that name exists there.
+ensure_doc_note() {
+  local project="$1" title="$2" body="$3"
+  local wrapped
+  wrapped="$(wrap_plain "$body")"
+  osa "$ACCOUNT" "$COMPANY" "$project" "$title" "$wrapped" <<'APPLESCRIPT' >/dev/null
+on run argv
+  set acct to item 1 of argv
+  set parentName to item 2 of argv
+  set proj to item 3 of argv
+  set t to item 4 of argv
+  set b to item 5 of argv
+  tell application "Notes"
+    set docsFolder to folder "docs" of folder proj of folder parentName of account acct
+    set matches to (notes of docsFolder whose name is t)
+    if (count of matches) = 0 then
+      make new note at docsFolder with properties {body:"<div>" & t & "</div>" & b}
+    end if
+  end tell
+end run
+APPLESCRIPT
+}
+
+# ───── init ─────────────────────────────────────────────────────────────
+cmd_init() {
+  if [ "${1:-}" = "--explain" ]; then
+    cat <<EOF
+Project layout convention
+─────────────────────────
+  $COMPANY/                       (company folder, in $ACCOUNT)
+    <project>/                    one subfolder per app/repo
+      inbox/                      new, untriaged
+      ready/                      triaged, ready for work
+      done/                       merged / shipped
+      docs/                       templates + briefing — NOT issues
+
+Title-prefix convention (recommended):
+  BUG:  | FEAT: | IDEA: | FB: | TECH:
+
+Body convention (optional but agent-friendly):
+  First line is metadata, rest is free text. Example:
+    BUG · severity: medium · platform: iOS · tags: onboarding,ux
+
+    Schieberegler ist zu empfindlich. …
+
+Status changes via:  apple-notes move <project> <title> <new-status>
+Configured statuses: $STATUSES
+EOF
+    return 0
+  fi
+  local project="${1:-}"; need "$project" "<project>"; shift
+  local skip_docs=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --no-docs) skip_docs=1; shift ;;
+      *) die "unknown flag: $1" ;;
+    esac
+  done
+  local out
+  out="$(osa "$ACCOUNT" "$COMPANY" "$project" $STATUSES <<'APPLESCRIPT'
+on run argv
+  set acct to item 1 of argv
+  set parentName to item 2 of argv
+  set proj to item 3 of argv
+  set wanted to items 4 thru -1 of argv
+  set output to ""
+  tell application "Notes"
+    try
+      set parentFolder to folder parentName of account acct
+    on error
+      return "ERR:company folder missing: " & parentName
+    end try
+    try
+      set projFolder to folder proj of parentFolder
+    on error
+      return "ERR:project folder missing: " & proj & " (create it in Apple Notes first)"
+    end try
+    set existing to {}
+    repeat with sf in (folders of projFolder)
+      set end of existing to name of sf
+    end repeat
+    repeat with s in wanted
+      if existing does not contain (s as text) then
+        make new folder at projFolder with properties {name:(s as text)}
+        set output to output & "folder created: " & s & linefeed
+      else
+        set output to output & "folder exists:  " & s & linefeed
+      end if
+    end repeat
+  end tell
+  return output
+end run
+APPLESCRIPT
+)"
+  case "$out" in ERR:*) die "${out#ERR:}";; esac
+  printf '%s\n' "$out" | sed '/^$/d'
+
+  if [ "$skip_docs" = "0" ]; then
+    echo "seeding templates + cheatsheet in $project/docs/ ..."
+    ensure_doc_note "$project" "VORLAGE BUG"   "$(template_bug)"
+    ensure_doc_note "$project" "VORLAGE FEAT"  "$(template_feat)"
+    ensure_doc_note "$project" "VORLAGE IDEA"  "$(template_idea)"
+    ensure_doc_note "$project" "VORLAGE FB"    "$(template_fb)"
+    ensure_doc_note "$project" "VORLAGE TECH"  "$(template_tech)"
+    ensure_doc_note "$project" "Anleitung: Bugs und Feedback einbringen" "$(cheatsheet)"
+    echo "docs seeded (existing notes were not overwritten)"
+  fi
+}
 
 # ───── projects ─────────────────────────────────────────────────────────
 cmd_projects() {
@@ -66,29 +319,24 @@ on run argv
     on error errMsg
       return "ERR:" & errMsg
     end try
-    set subs to folders of parentFolder
-    repeat with sf in subs
+    repeat with sf in (folders of parentFolder)
       set sName to name of sf
-      set nCount to (count of notes of sf)
-      set output to output & sName & tab & nCount & linefeed
+      set totalNotes to (count of notes of sf)
+      repeat with sub in (folders of sf)
+        set totalNotes to totalNotes + (count of notes of sub)
+      end repeat
+      set output to output & sName & tab & totalNotes & linefeed
     end repeat
   end tell
   return output
 end run
 APPLESCRIPT
 )"
-  case "$out" in
-    ERR:*) die "${out#ERR:}" ;;
-  esac
+  case "$out" in ERR:*) die "${out#ERR:}";; esac
   if [ "$json" = 1 ]; then
     printf '%s' "$out" | python3 -c "
 import sys, json
-rows=[]
-for line in sys.stdin:
-    line=line.rstrip()
-    if not line: continue
-    name,count=line.split('\t')
-    rows.append({'name':name,'notes':int(count)})
+rows=[{'name':n,'notes':int(c)} for n,c in (l.split('\t') for l in sys.stdin if l.strip())]
 print(json.dumps(rows, ensure_ascii=False, indent=2))
 "
   else
@@ -107,7 +355,6 @@ cmd_resolve() {
   key="$(echo "$repo" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9')"
   [ -n "$key" ] || die "could not derive a project key from '$repo'"
 
-  # Cache hit?
   local cached
   cached="$(python3 -c "
 import json
@@ -118,22 +365,18 @@ print(m.get('$key',''))
     echo "$cached"; return 0
   fi
 
-  # Fuzzy match against subfolders
   local subfolders match
   subfolders="$(cmd_projects | awk '{print $1}')"
   match="$(printf '%s\n' "$subfolders" | python3 -c "
 import sys, difflib
 key='$key'
 candidates=[l.strip() for l in sys.stdin if l.strip()]
-# 1) exact lowercase match
 exact=[c for c in candidates if c.lower()==key]
 if exact: print(exact[0]); sys.exit(0)
-# 2) substring (key in candidate or candidate in key)
 sub=[c for c in candidates if key in c.lower() or c.lower() in key]
 if len(sub)==1: print(sub[0]); sys.exit(0)
 if len(sub)>1:
     sys.stderr.write('AMBIGUOUS: '+', '.join(sub)+'\n'); sys.exit(2)
-# 3) difflib best
 best=difflib.get_close_matches(key,[c.lower() for c in candidates],n=1,cutoff=0.6)
 if best:
     for c in candidates:
@@ -143,14 +386,12 @@ sys.stderr.write('NOMATCH\n'); sys.exit(3)
     local rc=$?
     echo "Available projects:" >&2
     printf '  %s\n' $subfolders >&2
-    echo "" >&2
     if [ "$rc" = 2 ]; then
       die "ambiguous match for '$repo'. Set explicitly: apple-notes config set-mapping $key <ProjectName>"
     else
       die "no project matches '$repo'. Set explicitly: apple-notes config set-mapping $key <ProjectName>"
     fi
   }
-  # Cache and return
   python3 -c "
 import json
 m=json.load(open('$MAPPING_FILE'))
@@ -160,44 +401,37 @@ json.dump(m, open('$MAPPING_FILE','w'), indent=2, ensure_ascii=False)
   echo "$match"
 }
 
-# ───── notes ────────────────────────────────────────────────────────────
-cmd_notes() {
-  local project="${1:-}"; need "$project" "<project>"; shift
-  local limit=0 preview=80 json=0
-  while [ $# -gt 0 ]; do
-    case "$1" in
-      --limit) limit="$2"; shift 2 ;;
-      --preview) preview="$2"; shift 2 ;;
-      --json) json=1; shift ;;
-      *) die "unknown flag: $1" ;;
-    esac
-  done
-
-  local out
-  out="$(osa "$ACCOUNT" "$COMPANY" "$project" "$limit" <<'APPLESCRIPT'
+# ─── shared AppleScript helpers: isoDate + squash + folder scanning ────
+# scan_notes <project> <status_filter|"">  →  emits tab-separated
+#   "<status>\t<title>\t<iso-date>\t<preview400>" rows.
+scan_notes() {
+  local project="$1"; shift
+  local status_filter="${1:-}"
+  osa "$ACCOUNT" "$COMPANY" "$project" "$status_filter" <<'APPLESCRIPT'
 on run argv
   set acct to item 1 of argv
   set parentName to item 2 of argv
-  set sub to item 3 of argv
-  set lim to (item 4 of argv) as integer
+  set proj to item 3 of argv
+  set onlyStatus to item 4 of argv
   set output to ""
   tell application "Notes"
     try
-      set theFolder to folder sub of folder parentName of account acct
+      set projFolder to folder proj of folder parentName of account acct
     on error errMsg
       return "ERR:" & errMsg
     end try
-    set theNotes to notes of theFolder
-    set idx to 0
-    repeat with n in theNotes
-      set idx to idx + 1
-      if lim > 0 and idx > lim then exit repeat
-      set nName to name of n
-      set modDate to modification date of n
-      set firstPart to plaintext of n
-      if (count of firstPart) > 400 then set firstPart to (text 1 thru 400 of firstPart)
-      set firstPart to my squash(firstPart)
-      set output to output & nName & tab & my isoDate(modDate) & tab & firstPart & linefeed
+    set subs to folders of projFolder
+    repeat with sf in subs
+      set sName to name of sf
+      if (onlyStatus is "") or (onlyStatus is sName) then
+        repeat with n in (notes of sf)
+          set modDate to modification date of n
+          set p to plaintext of n
+          if (count of p) > 400 then set p to (text 1 thru 400 of p)
+          set p to my squash(p)
+          set output to output & sName & tab & (name of n) & tab & my isoDate(modDate) & tab & p & linefeed
+        end repeat
+      end if
     end repeat
   end tell
   return output
@@ -221,10 +455,24 @@ on squash(t)
   return t2
 end squash
 APPLESCRIPT
-)"
-  case "$out" in
-    ERR:*) die "${out#ERR:}" ;;
-  esac
+}
+
+# ───── notes ────────────────────────────────────────────────────────────
+cmd_notes() {
+  local project="${1:-}"; need "$project" "<project>"; shift
+  local status="" preview=80 json=0 limit=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --status) status="$2"; shift 2 ;;
+      --preview) preview="$2"; shift 2 ;;
+      --limit) limit="$2"; shift 2 ;;
+      --json) json=1; shift ;;
+      *) die "unknown flag: $1" ;;
+    esac
+  done
+  local out
+  out="$(scan_notes "$project" "$status")"
+  case "$out" in ERR:*) die "${out#ERR:}";; esac
 
   printf '%s' "$out" | python3 -c "
 import sys, json
@@ -233,17 +481,51 @@ preview=$preview
 for line in sys.stdin:
     line=line.rstrip('\n')
     if not line: continue
-    parts=line.split('\t', 2)
-    if len(parts)<3: continue
-    title, date, body = parts
-    rows.append({'title':title,'modified':date,'preview':body[:preview]})
+    parts=line.split('\t', 3)
+    if len(parts)<4: continue
+    st, title, date, body = parts
+    rows.append({'status':st,'title':title,'modified':date,'preview':body[:preview]})
+
+rows.sort(key=lambda r:(r['status'], r['modified']), reverse=True)
+limit=$limit
+if limit>0: rows=rows[:limit]
 
 if $json:
     print(json.dumps(rows, ensure_ascii=False, indent=2))
 else:
+    current=None
     for r in rows:
-        print(f\"{r['modified']}  {r['title'][:50]:<50}  {r['preview']}\")
+        if r['status']!=current:
+            current=r['status']
+            print(f\"\\n[{current}]\")
+        print(f\"  {r['modified']}  {r['title'][:50]:<50}  {r['preview']}\")
 "
+}
+
+# ─── locate a single note by title across all subfolders of <project> ──
+# Outputs: <status-folder-name>\n  (empty if not found, ERR: on error)
+locate_note() {
+  local project="$1" title="$2"
+  osa "$ACCOUNT" "$COMPANY" "$project" "$title" <<'APPLESCRIPT'
+on run argv
+  set acct to item 1 of argv
+  set parentName to item 2 of argv
+  set proj to item 3 of argv
+  set t to item 4 of argv
+  tell application "Notes"
+    try
+      set projFolder to folder proj of folder parentName of account acct
+    on error errMsg
+      return "ERR:" & errMsg
+    end try
+    repeat with sf in (folders of projFolder)
+      set matches to (notes of sf whose name is t)
+      if (count of matches) > 0 then return name of sf
+    end repeat
+  end tell
+  return ""
+end run
+APPLESCRIPT
 }
 
 # ───── get ──────────────────────────────────────────────────────────────
@@ -258,32 +540,29 @@ cmd_get() {
       *) die "unknown flag: $1" ;;
     esac
   done
+  local status
+  status="$(locate_note "$project" "$title")"
+  case "$status" in ERR:*) die "${status#ERR:}";; esac
+  [ -n "$status" ] || die "note not found in any subfolder of $project: $title"
 
   local out
-  out="$(osa "$ACCOUNT" "$COMPANY" "$project" "$title" <<'APPLESCRIPT'
+  out="$(osa "$ACCOUNT" "$COMPANY" "$project" "$status" "$title" <<'APPLESCRIPT'
 on run argv
   set acct to item 1 of argv
   set parentName to item 2 of argv
-  set sub to item 3 of argv
-  set t to item 4 of argv
+  set proj to item 3 of argv
+  set theStatus to item 4 of argv
+  set t to item 5 of argv
   tell application "Notes"
-    try
-      set theFolder to folder sub of folder parentName of account acct
-    on error errMsg
-      return "ERR:" & errMsg
-    end try
-    set matches to (notes of theFolder whose name is t)
-    if (count of matches) = 0 then return "ERR:note not found: " & t
-    set theNote to item 1 of matches
-    return body of theNote
+    set sf to folder theStatus of folder proj of folder parentName of account acct
+    set matches to (notes of sf whose name is t)
+    if (count of matches) = 0 then return "ERR:race condition"
+    return body of (item 1 of matches)
   end tell
 end run
 APPLESCRIPT
 )"
-  case "$out" in
-    ERR:*) die "${out#ERR:}" ;;
-  esac
-
+  case "$out" in ERR:*) die "${out#ERR:}";; esac
   case "$format" in
     text) printf '%s' "$out" | python3 "$HELPER" to-text ;;
     html) printf '%s' "$out" | python3 "$HELPER" strip-base64 ;;
@@ -304,35 +583,34 @@ cmd_images() {
       *) die "unknown flag: $1" ;;
     esac
   done
-  # Slug for subdir
+  local status
+  status="$(locate_note "$project" "$title")"
+  case "$status" in ERR:*) die "${status#ERR:}";; esac
+  [ -n "$status" ] || die "note not found in any subfolder of $project: $title"
+
   local slug
   slug="$(echo "${project}_${title}" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | sed 's/^-//;s/-$//' | cut -c1-60)"
   local target="$out_dir/$slug"
   mkdir -p "$target"
 
   local body
-  body="$(osa "$ACCOUNT" "$COMPANY" "$project" "$title" <<'APPLESCRIPT'
+  body="$(osa "$ACCOUNT" "$COMPANY" "$project" "$status" "$title" <<'APPLESCRIPT'
 on run argv
   set acct to item 1 of argv
   set parentName to item 2 of argv
-  set sub to item 3 of argv
-  set t to item 4 of argv
+  set proj to item 3 of argv
+  set theStatus to item 4 of argv
+  set t to item 5 of argv
   tell application "Notes"
-    try
-      set theFolder to folder sub of folder parentName of account acct
-    on error errMsg
-      return "ERR:" & errMsg
-    end try
-    set matches to (notes of theFolder whose name is t)
-    if (count of matches) = 0 then return "ERR:note not found: " & t
+    set sf to folder theStatus of folder proj of folder parentName of account acct
+    set matches to (notes of sf whose name is t)
+    if (count of matches) = 0 then return "ERR:race condition"
     return body of (item 1 of matches)
   end tell
 end run
 APPLESCRIPT
 )"
-  case "$body" in
-    ERR:*) die "${body#ERR:}" ;;
-  esac
+  case "$body" in ERR:*) die "${body#ERR:}";; esac
   printf '%s' "$body" | python3 "$HELPER" extract-images "$target"
 }
 
@@ -364,19 +642,22 @@ on run argv
       return "ERR:" & errMsg
     end try
     if onlyProject is "" then
-      set subs to folders of parentFolder
+      set projs to folders of parentFolder
     else
-      set subs to {folder onlyProject of parentFolder}
+      set projs to {folder onlyProject of parentFolder}
     end if
-    repeat with sf in subs
-      set sName to name of sf
-      set hits to (notes of sf whose name contains q or plaintext contains q)
-      repeat with n in hits
-        set modDate to modification date of n
-        set firstPart to plaintext of n
-        if (count of firstPart) > 400 then set firstPart to (text 1 thru 400 of firstPart)
-        set firstPart to my squash(firstPart)
-        set output to output & sName & tab & (name of n) & tab & my isoDate(modDate) & tab & firstPart & linefeed
+    repeat with proj in projs
+      set pName to name of proj
+      repeat with sf in (folders of proj)
+        set sName to name of sf
+        set hits to (notes of sf whose name contains q or plaintext contains q)
+        repeat with n in hits
+          set modDate to modification date of n
+          set p to plaintext of n
+          if (count of p) > 400 then set p to (text 1 thru 400 of p)
+          set p to my squash(p)
+          set output to output & pName & tab & sName & tab & (name of n) & tab & my isoDate(modDate) & tab & p & linefeed
+        end repeat
       end repeat
     end repeat
   end tell
@@ -402,9 +683,7 @@ on squash(t)
 end squash
 APPLESCRIPT
 )"
-  case "$out" in
-    ERR:*) die "${out#ERR:}" ;;
-  esac
+  case "$out" in ERR:*) die "${out#ERR:}";; esac
 
   printf '%s' "$out" | python3 -c "
 import sys, json
@@ -413,17 +692,17 @@ preview=$preview
 for line in sys.stdin:
     line=line.rstrip('\n')
     if not line: continue
-    parts=line.split('\t', 3)
-    if len(parts)<4: continue
-    proj, title, date, body = parts
-    rows.append({'project':proj,'title':title,'modified':date,'preview':body[:preview]})
+    parts=line.split('\t', 4)
+    if len(parts)<5: continue
+    proj, st, title, date, body = parts
+    rows.append({'project':proj,'status':st,'title':title,'modified':date,'preview':body[:preview]})
 rows.sort(key=lambda r:r['modified'], reverse=True)
 
 if $json:
     print(json.dumps(rows, ensure_ascii=False, indent=2))
 else:
     for r in rows:
-        print(f\"{r['modified']}  {r['project'][:15]:<15}  {r['title'][:40]:<40}  {r['preview']}\")
+        print(f\"{r['modified']}  {r['project'][:12]:<12}  {r['status'][:10]:<10}  {r['title'][:40]:<40}  {r['preview']}\")
 "
 }
 
@@ -445,34 +724,59 @@ read_body() {
   fi
 }
 
+wrap_plain() {
+  printf '%s' "$1" | python3 -c "
+import sys, html
+lines=sys.stdin.read().splitlines() or ['']
+out=[]
+for l in lines:
+    out.append('<div>'+html.escape(l)+'</div>' if l else '<div><br></div>')
+print(''.join(out))
+"
+}
+
 cmd_create() {
   local project="${1:-}"; need "$project" "<project>"
   local title="${2:-}"; need "$title" "<title>"
   shift 2
+  local status="$DEFAULT_STATUS"
+  local body_args=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --status) status="$2"; shift 2 ;;
+      --body-file) body_args+=("--body-file" "$2"); shift 2 ;;
+      *) die "unknown flag: $1" ;;
+    esac
+  done
+  validate_status "$status"
   local body
-  body="$(read_body "$@")"
-  # Wrap plain text in <div> if it doesn't already contain HTML
+  body="$(read_body "${body_args[@]+"${body_args[@]}"}")"
   if ! printf '%s' "$body" | grep -q '<'; then
-    body="$(printf '%s' "$body" | python3 -c "
-import sys, html
-lines=sys.stdin.read().splitlines() or ['']
-print(''.join('<div>'+html.escape(l or '<br>')+'</div>' for l in lines))
-")"
+    body="$(wrap_plain "$body")"
   fi
-  osa "$ACCOUNT" "$COMPANY" "$project" "$title" "$body" <<'APPLESCRIPT' >/dev/null
+  local out
+  out="$(osa "$ACCOUNT" "$COMPANY" "$project" "$status" "$title" "$body" <<'APPLESCRIPT'
 on run argv
   set acct to item 1 of argv
   set parentName to item 2 of argv
-  set sub to item 3 of argv
-  set t to item 4 of argv
-  set b to item 5 of argv
+  set proj to item 3 of argv
+  set theStatus to item 4 of argv
+  set t to item 5 of argv
+  set b to item 6 of argv
   tell application "Notes"
-    set theFolder to folder sub of folder parentName of account acct
-    make new note at theFolder with properties {body:"<div>" & t & "</div>" & b}
+    try
+      set sf to folder theStatus of folder proj of folder parentName of account acct
+    on error
+      return "ERR:status folder missing: " & theStatus & " in " & proj & " (run: apple-notes init " & proj & ")"
+    end try
+    make new note at sf with properties {body:"<div>" & t & "</div>" & b}
   end tell
+  return "OK"
 end run
 APPLESCRIPT
-  echo "created: $title in $project"
+)"
+  case "$out" in ERR:*) die "${out#ERR:}";; esac
+  echo "created: $title in $project/$status"
 }
 
 cmd_update() {
@@ -482,24 +786,26 @@ cmd_update() {
   local body
   body="$(read_body "$@")"
   if ! printf '%s' "$body" | grep -q '<'; then
-    body="$(printf '%s' "$body" | python3 -c "
-import sys, html
-lines=sys.stdin.read().splitlines() or ['']
-print(''.join('<div>'+html.escape(l or '<br>')+'</div>' for l in lines))
-")"
+    body="$(wrap_plain "$body")"
   fi
+  local status
+  status="$(locate_note "$project" "$title")"
+  case "$status" in ERR:*) die "${status#ERR:}";; esac
+  [ -n "$status" ] || die "note not found in any subfolder of $project: $title"
+
   local out
-  out="$(osa "$ACCOUNT" "$COMPANY" "$project" "$title" "$body" <<'APPLESCRIPT'
+  out="$(osa "$ACCOUNT" "$COMPANY" "$project" "$status" "$title" "$body" <<'APPLESCRIPT'
 on run argv
   set acct to item 1 of argv
   set parentName to item 2 of argv
-  set sub to item 3 of argv
-  set t to item 4 of argv
-  set b to item 5 of argv
+  set proj to item 3 of argv
+  set theStatus to item 4 of argv
+  set t to item 5 of argv
+  set b to item 6 of argv
   tell application "Notes"
-    set theFolder to folder sub of folder parentName of account acct
-    set matches to (notes of theFolder whose name is t)
-    if (count of matches) = 0 then return "ERR:note not found: " & t
+    set sf to folder theStatus of folder proj of folder parentName of account acct
+    set matches to (notes of sf whose name is t)
+    if (count of matches) = 0 then return "ERR:race condition"
     set body of (item 1 of matches) to "<div>" & t & "</div>" & b
   end tell
   return "OK"
@@ -507,7 +813,7 @@ end run
 APPLESCRIPT
 )"
   case "$out" in ERR:*) die "${out#ERR:}";; esac
-  echo "updated: $title in $project"
+  echo "updated: $title in $project/$status"
 }
 
 cmd_append() {
@@ -517,34 +823,121 @@ cmd_append() {
   local body
   body="$(read_body "$@")"
   if ! printf '%s' "$body" | grep -q '<'; then
-    body="$(printf '%s' "$body" | python3 -c "
-import sys, html
-lines=sys.stdin.read().splitlines() or ['']
-print(''.join('<div>'+html.escape(l or '<br>')+'</div>' for l in lines))
-")"
+    body="$(wrap_plain "$body")"
   fi
+  local status
+  status="$(locate_note "$project" "$title")"
+  case "$status" in ERR:*) die "${status#ERR:}";; esac
+  [ -n "$status" ] || die "note not found in any subfolder of $project: $title"
+
   local out
-  out="$(osa "$ACCOUNT" "$COMPANY" "$project" "$title" "$body" <<'APPLESCRIPT'
+  out="$(osa "$ACCOUNT" "$COMPANY" "$project" "$status" "$title" "$body" <<'APPLESCRIPT'
 on run argv
   set acct to item 1 of argv
   set parentName to item 2 of argv
-  set sub to item 3 of argv
-  set t to item 4 of argv
-  set b to item 5 of argv
+  set proj to item 3 of argv
+  set theStatus to item 4 of argv
+  set t to item 5 of argv
+  set b to item 6 of argv
   tell application "Notes"
-    set theFolder to folder sub of folder parentName of account acct
-    set matches to (notes of theFolder whose name is t)
-    if (count of matches) = 0 then return "ERR:note not found: " & t
+    set sf to folder theStatus of folder proj of folder parentName of account acct
+    set matches to (notes of sf whose name is t)
+    if (count of matches) = 0 then return "ERR:race condition"
     set theNote to item 1 of matches
-    set existing to body of theNote
-    set body of theNote to existing & b
+    set body of theNote to (body of theNote) & b
   end tell
   return "OK"
 end run
 APPLESCRIPT
 )"
   case "$out" in ERR:*) die "${out#ERR:}";; esac
-  echo "appended to: $title in $project"
+  echo "appended to: $title in $project/$status"
+}
+
+# ───── triage ───────────────────────────────────────────────────────────
+# Lists inbox notes with health score: title prefix + metadata first line.
+cmd_triage() {
+  local project="${1:-}"; need "$project" "<project>"; shift
+  local json=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --json) json=1; shift ;;
+      *) die "unknown flag: $1" ;;
+    esac
+  done
+  local out
+  out="$(osa "$ACCOUNT" "$COMPANY" "$project" <<'APPLESCRIPT'
+on run argv
+  set acct to item 1 of argv
+  set parentName to item 2 of argv
+  set proj to item 3 of argv
+  set output to ""
+  tell application "Notes"
+    try
+      set inboxFolder to folder "inbox" of folder proj of folder parentName of account acct
+    on error
+      return "ERR:inbox folder missing — run: apple-notes init " & proj
+    end try
+    repeat with n in (notes of inboxFolder)
+      set nName to name of n
+      set p to plaintext of n
+      -- First non-empty paragraph of plaintext, excluding the title line.
+      set firstMeta to ""
+      set pars to paragraphs of p
+      set seenTitle to false
+      repeat with par in pars
+        set parText to par as text
+        if parText is not "" then
+          if seenTitle is false then
+            set seenTitle to true
+          else
+            set firstMeta to parText
+            exit repeat
+          end if
+        end if
+      end repeat
+      if (count of firstMeta) > 200 then set firstMeta to (text 1 thru 200 of firstMeta)
+      set output to output & nName & tab & firstMeta & linefeed
+    end repeat
+  end tell
+  return output
+end run
+APPLESCRIPT
+)"
+  case "$out" in ERR:*) die "${out#ERR:}";; esac
+
+  printf '%s' "$out" | python3 -c "
+import sys, json, re
+PREFIX_RE = re.compile(r'^(BUG|FEAT|IDEA|FB|TECH):\s+\S')
+META_RE   = re.compile(r'·')
+rows=[]
+for line in sys.stdin:
+    line=line.rstrip('\n')
+    if not line: continue
+    parts=line.split('\t', 1)
+    if len(parts)<2: parts.append('')
+    title, meta = parts
+    issues=[]
+    if not PREFIX_RE.match(title):
+        issues.append('missing-prefix')
+    if not META_RE.search(meta):
+        issues.append('missing-metadata-line')
+    score='ok' if not issues else ('warn' if len(issues)==1 else 'error')
+    rows.append({'title':title,'meta':meta,'score':score,'issues':issues})
+
+ok=sum(1 for r in rows if r['score']=='ok')
+warn=sum(1 for r in rows if r['score']=='warn')
+err=sum(1 for r in rows if r['score']=='error')
+
+if $json:
+    print(json.dumps({'total':len(rows),'ok':ok,'warn':warn,'error':err,'notes':rows}, ensure_ascii=False, indent=2))
+else:
+    sym={'ok':'✓','warn':'⚠','error':'✗'}
+    for r in rows:
+        tag = (', '.join(r['issues']) or 'looks good')
+        print(f\"  {sym[r['score']]} {r['title'][:55]:<55} {tag}\")
+    print(f\"\\nsummary: {len(rows)} notes — {ok} ok, {warn} warn, {err} error\")
+"
 }
 
 # ───── delete / move ────────────────────────────────────────────────────
@@ -558,17 +951,23 @@ cmd_delete() {
     echo "About to delete '$title' in '$project'. Re-run with --force to confirm." >&2
     exit 1
   fi
+  local status
+  status="$(locate_note "$project" "$title")"
+  case "$status" in ERR:*) die "${status#ERR:}";; esac
+  [ -n "$status" ] || die "note not found in any subfolder of $project: $title"
+
   local out
-  out="$(osa "$ACCOUNT" "$COMPANY" "$project" "$title" <<'APPLESCRIPT'
+  out="$(osa "$ACCOUNT" "$COMPANY" "$project" "$status" "$title" <<'APPLESCRIPT'
 on run argv
   set acct to item 1 of argv
   set parentName to item 2 of argv
-  set sub to item 3 of argv
-  set t to item 4 of argv
+  set proj to item 3 of argv
+  set theStatus to item 4 of argv
+  set t to item 5 of argv
   tell application "Notes"
-    set theFolder to folder sub of folder parentName of account acct
-    set matches to (notes of theFolder whose name is t)
-    if (count of matches) = 0 then return "ERR:note not found: " & t
+    set sf to folder theStatus of folder proj of folder parentName of account acct
+    set matches to (notes of sf whose name is t)
+    if (count of matches) = 0 then return "ERR:race condition"
     delete (item 1 of matches)
   end tell
   return "OK"
@@ -576,26 +975,43 @@ end run
 APPLESCRIPT
 )"
   case "$out" in ERR:*) die "${out#ERR:}";; esac
-  echo "deleted: $title from $project (moved to Recently Deleted)"
+  echo "deleted: $title from $project/$status (moved to Recently Deleted)"
 }
 
+# move <project> <title> <new-status>  →  changes status within same project
 cmd_move() {
-  local from="${1:-}"; need "$from" "<from-project>"
+  local project="${1:-}"; need "$project" "<project>"
   local title="${2:-}"; need "$title" "<title>"
-  local to="${3:-}"; need "$to" "<to-project>"
+  local new_status="${3:-}"; need "$new_status" "<new-status>"
+  validate_status "$new_status"
+  local from_status
+  from_status="$(locate_note "$project" "$title")"
+  case "$from_status" in ERR:*) die "${from_status#ERR:}";; esac
+  [ -n "$from_status" ] || die "note not found in any subfolder of $project: $title"
+  if [ "$from_status" = "$new_status" ]; then
+    echo "already in $new_status: $title"
+    return 0
+  fi
+
   local out
-  out="$(osa "$ACCOUNT" "$COMPANY" "$from" "$title" "$to" <<'APPLESCRIPT'
+  out="$(osa "$ACCOUNT" "$COMPANY" "$project" "$from_status" "$title" "$new_status" <<'APPLESCRIPT'
 on run argv
   set acct to item 1 of argv
   set parentName to item 2 of argv
-  set fromSub to item 3 of argv
-  set t to item 4 of argv
-  set toSub to item 5 of argv
+  set proj to item 3 of argv
+  set fromStatus to item 4 of argv
+  set t to item 5 of argv
+  set toStatus to item 6 of argv
   tell application "Notes"
-    set fromFolder to folder fromSub of folder parentName of account acct
-    set toFolder to folder toSub of folder parentName of account acct
+    set projFolder to folder proj of folder parentName of account acct
+    set fromFolder to folder fromStatus of projFolder
+    try
+      set toFolder to folder toStatus of projFolder
+    on error
+      return "ERR:target status folder missing: " & toStatus & " (run: apple-notes init " & proj & ")"
+    end try
     set matches to (notes of fromFolder whose name is t)
-    if (count of matches) = 0 then return "ERR:note not found: " & t
+    if (count of matches) = 0 then return "ERR:race condition"
     move (item 1 of matches) to toFolder
   end tell
   return "OK"
@@ -603,7 +1019,7 @@ end run
 APPLESCRIPT
 )"
   case "$out" in ERR:*) die "${out#ERR:}";; esac
-  echo "moved: $title from $from to $to"
+  echo "moved: $title from $project/$from_status to $project/$new_status"
 }
 
 # ───── config ───────────────────────────────────────────────────────────
@@ -649,23 +1065,29 @@ usage() {
   cat <<EOF
 apple-notes — Apple Notes access for Claude Code
 
+Status folders (per project, configurable): $STATUSES
+Default status for create: $DEFAULT_STATUS
+
 Usage:
+  apple-notes init <PROJECT> [--no-docs]                create folders + seed templates
+  apple-notes init --explain                            print convention doc
   apple-notes projects [--json]
   apple-notes resolve [REPO]
-  apple-notes notes <PROJECT> [--limit N] [--preview N] [--json]
+  apple-notes notes <PROJECT> [--status S] [--preview N] [--limit N] [--json]
   apple-notes get <PROJECT> <TITLE> [--format text|html|raw]
   apple-notes images <PROJECT> <TITLE> [--out DIR]
   apple-notes search <QUERY> [--project NAME] [--json] [--preview N]
-  apple-notes create <PROJECT> <TITLE> [--body-file FILE]   (body on stdin)
-  apple-notes update <PROJECT> <TITLE> [--body-file FILE]   (body on stdin)
-  apple-notes append <PROJECT> <TITLE> [--body-file FILE]   (body on stdin)
+  apple-notes create <PROJECT> <TITLE> [--status S] [--body-file F]  (body on stdin)
+  apple-notes update <PROJECT> <TITLE> [--body-file F]               (body on stdin)
+  apple-notes append <PROJECT> <TITLE> [--body-file F]               (body on stdin)
   apple-notes delete <PROJECT> <TITLE> --force
-  apple-notes move <FROM_PROJECT> <TITLE> <TO_PROJECT>
+  apple-notes move <PROJECT> <TITLE> <NEW_STATUS>
+  apple-notes triage <PROJECT> [--json]                 inbox health check
   apple-notes config show
   apple-notes config set <key> <value>
   apple-notes config set-mapping <repo-key> <project-name>
 
-Config: $CONFIG_FILE
+Config:  $CONFIG_FILE
 Mapping: $MAPPING_FILE
 EOF
 }
@@ -674,6 +1096,7 @@ EOF
 cmd="${1:-}"
 shift || true
 case "$cmd" in
+  init)     cmd_init "$@" ;;
   projects) cmd_projects "$@" ;;
   resolve)  cmd_resolve "$@" ;;
   notes)    cmd_notes "$@" ;;
@@ -685,6 +1108,7 @@ case "$cmd" in
   append)   cmd_append "$@" ;;
   delete)   cmd_delete "$@" ;;
   move)     cmd_move "$@" ;;
+  triage)   cmd_triage "$@" ;;
   config)   cmd_config "$@" ;;
   -h|--help|help|"") usage ;;
   *) usage; die "unknown command: $cmd" ;;

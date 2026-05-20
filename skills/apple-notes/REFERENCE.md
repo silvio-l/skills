@@ -1,120 +1,158 @@
 # apple-notes — Reference
 
-Detailed contract for each subcommand. The skill is a single Bash dispatcher (`scripts/apple-notes`) that wraps AppleScript and pipes results through a small Python helper (`scripts/_helper.py`) for HTML→text and base64 image extraction.
+Detailed contract for each subcommand. Single Bash dispatcher (`scripts/apple-notes`) wrapping AppleScript; small Python helper (`scripts/_helper.py`) for HTML→text and base64 image extraction.
+
+## Project structure (the contract)
+
+```
+<company_folder>/                    default: Firma (in iCloud)
+  <project>/                         per app/repo, manually created in Apple Notes UI
+    inbox/                           new issues, untriaged
+    ready/                           triaged, ready for work (by agent or human)
+    done/                            merged / shipped
+    docs/                            templates + briefing — NOT issues
+```
+
+`init <project>` enforces this structure. All read subcommands scan **all** subfolders of `<project>` so notes that landed in legacy folders (e.g. a pre-existing `issues/`) still show up in `notes` / `search` output with the legacy folder name as the status column. Writes (`create`, `move`) only address the configured statuses.
+
+## Title-prefix convention
+
+Recommended, surfaced by `triage`, not enforced by `create`:
+
+| Prefix | Meaning |
+|--------|---------|
+| `BUG:` | Something broken |
+| `FEAT:` | Feature request |
+| `IDEA:` | Half-baked thought worth keeping |
+| `FB:` | User feedback |
+| `TECH:` | Tech debt / refactor |
+
+## Body convention
+
+First non-empty line after the title = metadata, segments separated by `·`. Example:
+
+```
+BUG · severity: medium · platform: iOS · tags: onboarding, ux
+
+Schieberegler ist zu empfindlich. …
+```
+
+`triage` checks for the `·` character as a quick health signal; it does not parse the segments. Agents that want to act on severity/platform can split the line on `·` and the segment on `:`.
 
 ## Subcommands
 
+### `init <project> [--no-docs]` · `init --explain`
+
+Creates the four status folders inside `<project>` (must already exist as a subfolder of the company folder). Seeds `docs/` with five `VORLAGE …` templates and an `Anleitung: Bugs und Feedback einbringen` cheatsheet. **Idempotent**: existing folders / notes are not touched.
+
+`--no-docs` skips template seeding.
+`--explain` prints the convention without any AppleScript calls.
+
 ### `projects [--json]`
 
-Lists subfolders of the company folder.
-
-- **Default output**: `<name>` left-padded to 30 chars + `<count> notes`.
-- **`--json`**: array of `{name, notes}`.
+Counts notes recursively (project root + every direct subfolder, one level deep).
 
 ### `resolve [REPO]`
 
-Resolves a repo name to a project subfolder name.
+Repo-name → project subfolder. Lookup chain: mapping cache → exact lowercase match → substring match → `difflib.get_close_matches` (cutoff 0.6). Caches to `~/.config/claude/apple-notes/mapping.json`. Override: `apple-notes config set-mapping <repo-key> <project>`.
 
-- If `REPO` is omitted, derives it from `git rev-parse --show-toplevel` (basename), falling back to `basename $PWD`.
-- Lookup order: mapping cache → exact lowercase match → substring match → `difflib.get_close_matches` (cutoff 0.6).
-- Caches a successful resolution to `~/.config/claude/apple-notes/mapping.json`.
-- Exit 1 if no match or ambiguous; stderr lists the available projects and prints the `config set-mapping` hint.
+### `notes <project> [--status S] [--preview N] [--limit N] [--json]`
 
-### `notes <PROJECT> [--limit N] [--preview N] [--json]`
+Scans all subfolders of `<project>`. AppleScript pulls `plaintext` (HTML stripped server-side, faster, smaller); skill squashes newlines/tabs to space within each row.
 
-Lists notes in a project. AppleScript-side `plaintext` is read (not HTML), then truncated to 400 chars and squashed (newlines/tabs → space) per row to avoid breaking the record format. Final preview clipped to `--preview` (default 80).
+- Default output: grouped by status, `<date>  <title-50>  <preview>` rows.
+- `--status` filters to one subfolder.
+- `--limit` caps after sort (most-recent-first within each status).
 
-- **Default output**: `YYYY-MM-DD  <title-padded-50>  <preview>`.
-- **`--json`**: array of `{title, modified, preview}`.
+### `get <project> <title> [--format text|html|raw]`
 
-### `get <PROJECT> <TITLE> [--format text|html|raw]`
+`locate_note` finds which subfolder holds the note (first match wins). Then `body of note` (raw HTML) is fetched.
 
-Reads a note. AppleScript fetches `body of note` (HTML). Then:
+- `text` (default): replace inline base64 `<img>` with `[image:N]` placeholders, decode block tags to newlines, unescape HTML entities, normalize whitespace.
+- `html`: keep HTML, only base64 stripped to placeholders.
+- `raw`: untouched body (potentially large; use sparingly).
 
-- `text` (default): strip inline base64 → `[image:N]` placeholders, convert block tags to newlines, decode HTML entities, normalize whitespace.
-- `html`: keep HTML structure, strip base64 only (replace with placeholders).
-- `raw`: full HTML body including base64 (use sparingly; large).
+### `images <project> <title> [--out DIR]`
 
-Errors: `ERR:note not found: <title>` if no matching note name.
+Same locate-then-fetch. Inline base64 images decoded into `<DIR>/<project-title-slug>/image-NN-<sha8>.<ext>`. Output: JSON `[{index, path, bytes, mime}]`. MIMEs mapped: jpeg/jpg/png/gif/webp/heic/heif/tiff/svg/bmp.
 
-### `images <PROJECT> <TITLE> [--out DIR]`
+**Limitation**: AppleScript provides no file-path API for non-inline attachments (videos, PDFs, audio, rich-linked images). They appear in the body as `￼` placeholder characters but cannot be extracted by this skill.
 
-Extracts inline base64 images from the note body to a project+title slug subdirectory of `DIR` (default `/tmp/apple-notes-images`). Slug is lowercased alphanumeric+hyphen, max 60 chars.
+### `search <query> [--project NAME] [--preview N] [--json]`
 
-- Output: JSON array `[{index, path, bytes, mime}]`.
-- Files are named `image-NN-<sha256_prefix>.<ext>`. Extensions resolved from MIME (jpg/png/gif/webp/heic/heif/tiff/svg/bmp).
-- **AppleScript limitation**: only inline-base64 images are extracted. Attached files (PDFs, audio, non-inlined images) have no accessible file path via AppleScript.
+Server-side AppleScript filter: `whose name contains q or plaintext contains q`. Iterates every project + every status subfolder. Default output: `<date>  <project-12>  <status-10>  <title-40>  <preview>`, sorted most-recent first.
 
-### `search <QUERY> [--project NAME] [--json] [--preview N]`
+### `create <project> <title> [--status S] [--body-file F]`
 
-Full-text search across the company folder (or one project with `--project`). Uses AppleScript `whose name contains q or plaintext contains q`.
+Body from `--body-file` or stdin. Plain text (no `<`) is wrapped per line in `<div>…</div>`; empty lines become `<div><br></div>`; characters HTML-escaped. HTML markup is passed through verbatim. The note title is prepended as `<div>TITLE</div>` so it renders correctly in Apple Notes UI.
 
-- **Default output**: `YYYY-MM-DD  <project-15>  <title-40>  <preview>`, sorted by date descending.
-- **`--json`**: array of `{project, title, modified, preview}`.
+Default status: `inbox`. Validated against the configured `statuses` array.
 
-### `create <PROJECT> <TITLE> [--body-file FILE]`
+### `update <project> <title>` · `append <project> <title>`
 
-Creates a new note. Body is read from `--body-file` or stdin.
+`update` = full body replacement (keeps the note in its current status folder). `append` = concatenate to existing body. Both auto-locate the note across all subfolders. Both accept body via stdin or `--body-file`.
 
-- If the body contains no `<` character, it's treated as plain text: each line wrapped in `<div>…</div>`, empty lines become `<div><br></div>`, characters HTML-escaped.
-- If it contains HTML markup, it's passed through verbatim.
-- The note title is also prefixed as `<div>TITLE</div>` to match Apple Notes' convention (the first line becomes the displayed title).
+### `delete <project> <title> --force`
 
-### `update <PROJECT> <TITLE> [--body-file FILE]`
+Without `--force`: prints confirmation hint, exits 1. With `--force`: AppleScript `delete note` — Apple Notes moves to **Recently Deleted** (30-day recovery). Permanent deletion requires manually emptying Recently Deleted.
 
-**Full replacement** of the body. Same body-handling as `create`. To append safely, use `append`.
+### `move <project> <title> <new-status>`
 
-### `append <PROJECT> <TITLE> [--body-file FILE]`
+Status transition inside the same project. `new-status` validated. Notes in non-status folders (legacy) can be moved out of them, but not back into them.
 
-Reads existing body, concatenates new HTML/text. Use for "mark as done", "add fix-commit reference", etc.
+### `triage <project> [--json]`
 
-### `delete <PROJECT> <TITLE> --force`
+Scans the `inbox/` folder. For each note:
 
-Without `--force`, prints a confirmation message and exits 1. With `--force`, AppleScript `delete` — Apple Notes moves the note to **Recently Deleted** (30-day recovery window). Genuinely permanent deletion requires manual emptying of Recently Deleted.
+- **prefix** check: title matches `^(BUG|FEAT|IDEA|FB|TECH):\s+\S`.
+- **metadata** check: first non-title paragraph contains a `·` character.
 
-### `move <FROM_PROJECT> <TITLE> <TO_PROJECT>`
+Output (default): ` ✓ <title-55>  looks good` / ` ⚠ <title-55>  missing-metadata-line` / ` ✗ <title-55>  missing-prefix, missing-metadata-line`. JSON adds counts.
 
-Moves a note between subfolders of the company folder. Must be within the same account.
+The skill **does not** modify notes during triage. Use the output to guide manual or agent-led follow-up.
 
 ### `config show | set <key> <value> | set-mapping <repo-key> <project>`
 
-- `show`: prints config + mapping JSON.
-- `set`: rewrites a key in `config.json`. Recognized keys: `account`, `company_folder`, `default_image_dir`.
-- `set-mapping`: lowercases+alphanumerics the repo-key, then maps it to the given project name. Use to break ties or override a wrong fuzzy match.
+`set` rewrites top-level string keys in `config.json`. List-valued keys (`statuses`) must be edited in the file directly. `set-mapping` normalizes the repo-key (lowercase + alphanumeric) and writes to `mapping.json`.
 
-## Exit codes
-
-- `0` — success.
-- `1` — handled error (missing arg, note not found, ambiguous resolve, AppleScript error). Message on stderr.
-- non-zero from AppleScript — surfaced as `ERR:<msg>` then re-raised as exit 1.
-
-## File layout
+## Files
 
 ```
 ~/.config/claude/apple-notes/
-├── config.json     # account, company_folder, default_image_dir
-└── mapping.json    # repo-key → project-name overrides + cache
+├── config.json    account, company_folder, statuses, default_status, default_image_dir
+└── mapping.json   repo-key → project-name cache + overrides
 
-~/.cache/claude/apple-notes/    # reserved; currently unused
-
-/tmp/apple-notes-images/<slug>/ # default image extraction target
+/tmp/apple-notes-images/<slug>/   default image extraction target
 ```
+
+`config.json` is gently migrated on every run — new keys with sane defaults are backfilled, never overwriting.
+
+## Exit codes
+
+- `0` success.
+- `1` handled error: bad arg, note not found, ambiguous resolve, AppleScript error surfaced as `ERR:…`. Message on stderr.
 
 ## AppleScript caveats
 
-- **`whose` filtering** is database-level (fast) but case-sensitive on titles. Use exact title from `notes` output.
-- **`plaintext` vs `body`**: `plaintext` strips all HTML server-side (faster, smaller). `body` returns raw HTML with inline images. The skill uses `plaintext` for list/search previews, `body` for `get` and `images`.
-- **Epoch math**: AppleScript dates are subtracted from `date "Thursday, 1 January 1970 at 00:00:00"` to yield UTC seconds. Locale-independent.
-- **Argv passing**: every AppleScript runs as a heredoc with `on run argv`; args go via `osascript - "$@" <<APPLESCRIPT`. No string escaping needed.
+- **Locale-independent dates**: month/day are extracted as integers (`(month of d) as integer` returns 1–12 regardless of system locale) and zero-padded by the skill.
+- **No apostrophes in single-quoted heredocs inside `$(…)`**: Bash 3.2's parser breaks on `AppleScript's text item delimiters` inside `out="$(osa … <<'TAG' …)"`. The skill uses `text item delimiters of AppleScript` instead.
+- **Reserved word avoidance**: variable names `st`, `from`, `to` collide with AppleScript keywords in some contexts. The skill uses `theStatus`, `fromStatus`, `toStatus`, and avoids one-letter names other than `t` (note title) and `b` (body).
+- **`whose` filtering** is case-sensitive on titles. Get the exact title from `notes` output before calling `get` / `move` / `delete`.
+- **Argv passing**: every AppleScript runs via `osascript - "$@" <<APPLESCRIPT … APPLESCRIPT`. Args go through argv — no shell-level string interpolation, safe for Unicode and special characters.
 
-## Adding a project
+## Adding a new status
 
-Apple Notes UI: create a new subfolder under the company folder. The skill picks it up automatically (no config change needed). On first `resolve` for a new repo, it caches the match.
+1. Edit `~/.config/claude/apple-notes/config.json`, append to `statuses`.
+2. `apple-notes init <project>` for each project to materialize the new folder.
 
-## Removing the cache
+## Removing the mapping cache
 
 ```bash
 rm ~/.config/claude/apple-notes/mapping.json
 ```
 
 Re-resolves on next `resolve` call.
+
+## Reseeding templates
+
+`apple-notes init` is idempotent. If you want to reset the templates to the latest version: delete them in Apple Notes (or via `apple-notes delete <project> "VORLAGE …" --force`), then `apple-notes init <project>` recreates them.
