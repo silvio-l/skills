@@ -8,6 +8,8 @@ description: Collaboratively build and maintain the project's domain vocabulary,
 Work with the user to create or improve the project's domain vocabulary and key conceptual decisions.
 CONTEXT.md is the storage vehicle — the real work is getting the language right.
 
+The target CONTEXT.md is the one in the **current project's root** — not this skills-source repo's CONTEXT.md. If invoked inside the `silvio-l/skills` repo itself, treat the existing CONTEXT.md as a skill-authoring meta-glossary (not a business domain) and confirm with the user before extending it.
+
 ## Start
 
 1. Check whether CONTEXT.md exists in the project root.
