@@ -37,13 +37,19 @@ Which of mine depends on which of Matt's:
 | My skill | Depends on Matt's |
 |---|---|
 | `ratchet-up` | `/to-issues`, `/triage`, and the issue-tracker config from `/setup-matt-pocock-skills` |
-| `domain-glossary` | extends the `CONTEXT.md` philosophy from `/grill-with-docs` |
+| `domain-glossary` | `/grill-me` (mandatory in the interview loop); extends the `CONTEXT.md` philosophy from `/grill-with-docs` |
 | `full-quality-scan` | parallel-subagent dispatch pattern shared with Matt's process-oriented skills |
 | `context-optimization-audit` | audits the loaded surface, including Matt's installed skills |
 
 If you only want one of these, skip the dependencies you do not exercise.
 
 ## The skills
+
+### `apple-notes`
+
+**The Problem.** Non-technical collaborators write bug reports, ideas, and feedback wherever it is comfortable — for me, that is Apple Notes. The agent cannot reach into Notes; the human cannot reach into the issue tracker. The result is a swamp of half-captured intent that never makes it into a session.
+
+**The Fix.** A single dispatcher (`scripts/apple-notes`) wraps AppleScript to read, search, write, and image-extract from Notes on macOS. Subfolders of one configured "company folder" map to projects (auto-resolved from the current git repo). Each project enforces a four-folder layout — `inbox` / `ready` / `done` / `docs` — with title prefixes (`BUG:` `FEAT:` `IDEA:` `FB:` `TECH:`) so the partner drops things in `inbox`, the agent triages from there, and nothing has to leave Notes until it is ready to become a real issue.
 
 ### `context-optimization-audit`
 
