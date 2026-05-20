@@ -9,50 +9,42 @@ description: Runs all configured linters and security scanners (cppcheck, ESLint
 
 Threshold: **≤ 10 findings → fix directly. > 10 → plan first, then fix with subagents.**
 
-## Phase 1 — Scan (run all tools in parallel)
+## Phase 1 — Scan
 
-Run each applicable tool. Collect raw output into named buckets.
+Run the bundled wrapper. It is the single source of truth for tool flags and skip-rules — never duplicate the tool invocations into the agent's prompt.
 
 ```bash
-# Dart/Flutter — always
-flutter analyze --fatal-infos 2>&1
-
-# C++ — if windows/runner/ exists
-cppcheck \
-  --enable=style,warning,performance,portability \
-  --platform=win64 --std=c++17 \
-  --suppressions-list=windows/runner/.cppcheck-suppress \
-  --inline-suppr --quiet \
-  windows/runner/ 2>&1 | grep -E ': (error|warning|style|performance|portability):'
-
-# JS/TS — if website/eslint.config.mjs exists
-(cd website && node_modules/.bin/eslint src/ 2>&1)
-
-# SAST — if semgrep installed
-semgrep --config p/ci --error --quiet \
-  --include="*.ts" --include="*.js" --include="*.mjs" \
-  --include="*.cpp" --include="*.h" --include="*.go" \
-  --exclude="node_modules" --exclude="dist" --exclude="build" --exclude=".dart_tool" \
-  . 2>&1
-
-# Dependency vulnerabilities — if osv-scanner installed
-osv-scanner scan \
-  $([ -f pubspec.lock ] && echo "--lockfile pubspec.lock") \
-  $([ -f website/package-lock.json ] && echo "--lockfile website/package-lock.json") \
-  2>&1
+bash skills/full-quality-scan/scripts/scan-all.sh
+# or, when invoked as the installed skill:
+bash ~/.claude/skills/full-quality-scan/scripts/scan-all.sh
 ```
+
+Output contract — **one finding per line**:
+
+```
+BUCKET|FILE:LINE|MESSAGE
+…
+---
+TOTAL_FINDINGS=<n>
+```
+
+Exit code: `0` = clean, `1` = findings present. The wrapper skips silently for tools that are not installed; the summary line is always emitted.
+
+Bucket names emitted by the wrapper: `dart`, `cpp`, `js_ts`, `sast`, `deps`. Anything else is a wrapper bug, not an unknown tool — fix the wrapper.
 
 ## Phase 2 — Triage
 
-Count and group findings:
+Parse each `BUCKET|FILE:LINE|MESSAGE` row and group by bucket. The bucket names map directly to fix strategies:
 
-| Bucket | Tool | Fix strategy |
+| Bucket | Source tool | Fix strategy |
 |---|---|---|
-| dart | flutter analyze | `dart fix --apply`, then manual |
-| cpp | cppcheck | manual C++ edits |
-| js_ts | eslint | `eslint --fix`, then manual |
-| sast | semgrep | manual, case-by-case |
-| deps | osv-scanner | `npm audit fix` / `flutter pub upgrade` |
+| `dart` | flutter analyze | `dart fix --apply`, then manual |
+| `cpp` | cppcheck | manual C++ edits |
+| `js_ts` | eslint | `eslint --fix`, then manual |
+| `sast` | semgrep | manual, case-by-case |
+| `deps` | osv-scanner | `npm audit fix` / `flutter pub upgrade` |
+
+`TOTAL_FINDINGS` from the wrapper's summary line is the threshold input:
 
 **≤ 10 total → go directly to Phase 4 (fix inline).**
 **> 10 total → build a plan in Phase 3.**
@@ -93,21 +85,20 @@ For each bucket (inline or via subagent):
 
 ## Phase 5 — Verify
 
-Re-run the full Phase 1 scan. All buckets must return zero findings before proceeding.
+Re-run `bash scripts/scan-all.sh`. The wrapper must exit `0` with `TOTAL_FINDINGS=0` before proceeding.
 
-If any finding remains: return to Phase 4 for that bucket only.
+If any finding remains: return to Phase 4 for the affected bucket only — do not loop through clean buckets again.
 
 ## Phase 6 — Commit
 
 ```bash
-flutter analyze --fatal-infos   # must be clean
-flutter test                    # must be green (or pre-existing failures noted)
+bash scripts/scan-all.sh        # must exit 0
 git add <changed files>
-git commit -m "fix(quality): resolve all <tool> findings\n\n<summary>"
+git commit -m "fix(quality): resolve <tool> findings\n\n<summary>"
 ```
 
-One commit per major bucket is fine; one combined commit is also acceptable.
+The wrapper is the only quality gate at this stage; project-specific test/typecheck commands are out of scope for this skill and live in the project's own commit hooks or `CLAUDE.md`. One commit per major bucket is fine; one combined commit is also acceptable.
 
 ## Tool availability
 
-Skip any tool silently if not installed — note which were skipped in the final report. Never install tools on behalf of the user without asking.
+The wrapper skips silently for any tool that is not installed — its summary line is the authoritative record of what ran. Never install tools on behalf of the user without asking.
