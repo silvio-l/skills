@@ -20,15 +20,10 @@ Firma/                       ← company folder (configurable; default "Firma" i
     inbox/  ready/  done/  docs/
 ```
 
-**Title-prefix convention** (recommended, surfaced by `triage`):
+**Title-prefix convention** (the only requirement, surfaced by `triage`):
 `BUG:` `FEAT:` `IDEA:` `FB:` (user feedback) `TECH:` (tech debt / refactor).
 
-**Body convention**: first non-empty line = compact metadata separated by `·`, rest free-form. Example:
-```
-BUG · severity: medium · platform: iOS · tags: onboarding, ux
-
-Schieberegler ist zu empfindlich. Beim Loslassen verspringt der Wert …
-```
+**Body**: free-form text. Non-technical partners write plain prose using the BUG / FEAT / IDEA / FB templates seeded under `docs/`. Only the TECH template (Silvio's own notes) carries a compact `·`-separated metadata first line — agents and `triage` do not require it for any other prefix.
 
 ## Quick start
 
@@ -58,7 +53,7 @@ S=~/.claude/skills/apple-notes/scripts/apple-notes
 | `update <project> <title>` / `append <project> <title>` | Replace / append. Auto-locates the note; status stays. |
 | `delete <project> <title> --force` | Moves to "Recently Deleted" (recoverable for 30 days). |
 | `move <project> <title> <new-status>` | Status transition: `apple-notes move HellerIO "BUG: …" ready`. |
-| `triage <project> [--json]` | Inbox health: per-note score (✓ / ⚠ / ✗) based on title prefix and metadata first-line. |
+| `triage <project> [--json]` | Inbox health: per-note score (✓ / ⚠) based on whether the title carries one of the configured prefixes (`BUG:` / `FEAT:` / `IDEA:` / `FB:` / `TECH:`). Body content is no longer scored. |
 | `config show \| set <k> <v> \| set-mapping <repo> <project>` | Read/write config + manual repo→project overrides. |
 
 ## Token-efficiency rules
