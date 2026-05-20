@@ -272,9 +272,14 @@ on run argv
     on error
       return "ERR:project folder missing: " & proj & " (create it in Apple Notes first)"
     end try
+    -- Collect existing folder names; tolerate unreadable folders so a
+    -- single stale CoreData entry does not block a re-init.
     set existing to {}
-    repeat with sf in (folders of projFolder)
-      set end of existing to name of sf
+    set folderCount to count of folders of projFolder
+    repeat with i from 1 to folderCount
+      try
+        set end of existing to name of folder i of projFolder
+      end try
     end repeat
     repeat with s in wanted
       if existing does not contain (s as text) then
@@ -320,13 +325,21 @@ on run argv
     on error errMsg
       return "ERR:" & errMsg
     end try
-    repeat with sf in (folders of parentFolder)
-      set sName to name of sf
-      set totalNotes to (count of notes of sf)
-      repeat with sub in (folders of sf)
-        set totalNotes to totalNotes + (count of notes of sub)
-      end repeat
-      set output to output & sName & tab & totalNotes & linefeed
+    set folderCount to count of folders of parentFolder
+    repeat with i from 1 to folderCount
+      set sName to ""
+      try
+        set sf to folder i of parentFolder
+        set sName to name of sf
+        set totalNotes to (count of notes of sf)
+        set subCount to count of folders of sf
+        repeat with j from 1 to subCount
+          try
+            set totalNotes to totalNotes + (count of notes of folder j of sf)
+          end try
+        end repeat
+        set output to output & sName & tab & totalNotes & linefeed
+      end try
     end repeat
   end tell
   return output
@@ -421,17 +434,26 @@ on run argv
     on error errMsg
       return "ERR:" & errMsg
     end try
-    set subs to folders of projFolder
-    repeat with sf in subs
-      set sName to name of sf
-      if (onlyStatus is "") or (onlyStatus is sName) then
-        repeat with n in (notes of sf)
-          set modDate to modification date of n
-          set p to plaintext of n
-          if (count of p) > 400 then set p to (text 1 thru 400 of p)
-          set p to my squash(p)
-          set output to output & sName & tab & (name of n) & tab & my isoDate(modDate) & tab & p & linefeed
-        end repeat
+    -- Indexed iteration with per-folder try/skip: tolerates unreadable
+    -- subfolders (CoreData sync state can leave a folder addressable by
+    -- id but unreadable when its notes are fetched).
+    set folderCount to count of folders of projFolder
+    repeat with i from 1 to folderCount
+      set sName to ""
+      try
+        set sf to folder i of projFolder
+        set sName to name of sf
+      end try
+      if sName is not "" and ((onlyStatus is "") or (onlyStatus is sName)) then
+        try
+          repeat with n in (notes of sf)
+            set modDate to modification date of n
+            set p to plaintext of n
+            if (count of p) > 400 then set p to (text 1 thru 400 of p)
+            set p to my squash(p)
+            set output to output & sName & tab & (name of n) & tab & my isoDate(modDate) & tab & p & linefeed
+          end repeat
+        end try
       end if
     end repeat
   end tell
@@ -519,9 +541,13 @@ on run argv
     on error errMsg
       return "ERR:" & errMsg
     end try
-    repeat with sf in (folders of projFolder)
-      set matches to (notes of sf whose name is t)
-      if (count of matches) > 0 then return name of sf
+    set folderCount to count of folders of projFolder
+    repeat with i from 1 to folderCount
+      try
+        set sf to folder i of projFolder
+        set matches to (notes of sf whose name is t)
+        if (count of matches) > 0 then return name of sf
+      end try
     end repeat
   end tell
   return ""
@@ -634,16 +660,25 @@ on run argv
     end if
     repeat with proj in projs
       set pName to name of proj
-      repeat with sf in (folders of proj)
-        set sName to name of sf
-        set hits to (notes of sf whose name contains q or plaintext contains q)
-        repeat with n in hits
-          set modDate to modification date of n
-          set p to plaintext of n
-          if (count of p) > 400 then set p to (text 1 thru 400 of p)
-          set p to my squash(p)
-          set output to output & pName & tab & sName & tab & (name of n) & tab & my isoDate(modDate) & tab & p & linefeed
-        end repeat
+      set folderCount to count of folders of proj
+      repeat with i from 1 to folderCount
+        set sName to ""
+        try
+          set sf to folder i of proj
+          set sName to name of sf
+        end try
+        if sName is not "" then
+          try
+            set hits to (notes of sf whose name contains q or plaintext contains q)
+            repeat with n in hits
+              set modDate to modification date of n
+              set p to plaintext of n
+              if (count of p) > 400 then set p to (text 1 thru 400 of p)
+              set p to my squash(p)
+              set output to output & pName & tab & sName & tab & (name of n) & tab & my isoDate(modDate) & tab & p & linefeed
+            end repeat
+          end try
+        end if
       end repeat
     end repeat
   end tell
