@@ -12,6 +12,29 @@ Glossary:
 
 ---
 
+## Script convention (since 2026-05-20)
+
+Future implementation work in Track B3 of `.scratch/architecture-deepenings/` replaces several prose-form passages in this document with calls to dedicated scripts under `skills/ratchet-up/scripts/`:
+
+- `guard-feature-path.sh` — replaces the §1 / §17 Hard-Deletion-Guard prose.
+- `detect-project.sh` — replaces `gates.md` §1 Project Type Detection prose.
+- `classify-diff.sh` — replaces `gates.md` §2 Quick-Path Heuristic prose.
+- `verify-final.sh` — replaces §15 Objective Final Verification prose.
+
+**Hard Requirement.** These scripts are mandatory. If one is missing or not executable at runtime, the orchestrator sets the current issue to `Status: needs-human` and logs exactly:
+
+```text
+✗ ratchet-up script missing or non-executable: scripts/<name>.sh — run `npx skills@latest update silvio-l/skills`
+```
+
+No soft fallback to the prose form at runtime. The prose form for each section is removed once the corresponding script lands, so there is exactly one source of truth.
+
+Until the B3 scripts ship, the prose form in §1, §15 and in `gates.md` §1 / §2 remains authoritative. The Hard Requirement applies from the moment the first script lands.
+
+Rationale: single-user repo, frequent updates via `npx skills@latest update -g`, drift between prose and script is the bigger risk than a transient missing-script eskalation.
+
+---
+
 ## §1 — Parse Arguments
 
 Extract:
