@@ -177,15 +177,33 @@ So bringst du Bugs und Feedback ein
    FB:    wenn du Feedback weitergeben willst
    (TECH: ist nur für Silvio gedacht)
 
-3. Im Ordner „docs" findest du fertige Vorlagen:
-   - Vorlage öffnen → Cmd+D → kopiert die Notiz
-   - Titel ändern: aus „VORLAGE BUG" wird z. B. „BUG: Login klappt nicht"
-   - Im Text die Platzhalter ausfüllen
-   - Notiz in den Ordner „inbox" ziehen
+3. Im Ordner „docs" findest du fertige Vorlagen — eine je
+   Titel-Typ. So nutzt du sie (funktioniert auf iPhone, iPad,
+   Mac und auf iCloud.com unter Windows):
 
-4. Screenshots gerne mit einfügen:
-   - Cmd+Shift+4 zum Aufnehmen
-   - dann Cmd+V in die Notiz
+   - die passende Vorlage öffnen (z. B. „VORLAGE BUG")
+   - den gesamten Text markieren und kopieren
+   - im Ordner „inbox" eine neue, leere Notiz anlegen
+   - den Text einfügen
+   - den Titel anpassen (aus „VORLAGE BUG" wird z. B.
+     „BUG: Login klappt nicht")
+   - die Platzhalter im Text ausfüllen
+
+   Tipp für Mac-Nutzer: Vorlage anklicken, dann im Menü
+   „Datei" → „Notiz duplizieren" — fertig, dann nur noch in
+   den inbox-Ordner ziehen.
+
+4. Screenshots helfen sehr — wie du sie aufnimmst, hängt vom
+   Gerät ab:
+
+   - iPhone / iPad: Screenshot wie gewohnt, dann unten links
+     auf die Vorschau tippen und „In Notizen sichern" wählen
+     (oder das Bild aus der Fotos-App per Teilen-Knopf in die
+     Notiz schicken).
+   - Windows (iCloud.com im Browser): mit dem Snipping-Tool
+     aufnehmen (Windows-Taste + Shift + S), dann in der Notiz
+     mit Strg+V einfügen.
+   - Mac: Shift+Cmd+4 aufnehmen, dann mit Cmd+V einfügen.
 
 So läuft es weiter:
 
