@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
-"""seo-audit dispatcher (v1).
+"""seo-audit dispatcher.
 
-Phase order: inventory → brand-konsistenz → synthesis → write report.
-External probes and push are implemented in later slices; the flags
-`--quick`, `--push`, and `--compare-last` are parsed already so the
-CLI surface stays stable across versions.
+Phase order: inventory → brand-konsistenz → (external probes) →
+synthesis → write report → (push, opt-in).
+
+External probes run when `--url <url>` is passed. Push (slice 03) runs
+when `--push` is passed; `--push --dry-run` only renders the plan.
 
 Usage:
     python3 audit.py --root <repo-root> [--report-dir <dir>]
                      [--dist <dist-dir>] [--quick] [--push]
-                     [--compare-last]
+                     [--dry-run] [--compare-last]
 
 Defaults:
     --report-dir defaults to `<root>/.scratch/seo-audit/`
@@ -32,6 +33,7 @@ import glossary_parser as GP  # noqa: E402
 import brand_scan as BS  # noqa: E402
 import synthesis as SY  # noqa: E402
 from probes import probe as PROBE  # noqa: E402
+from push import push as PUSH  # noqa: E402
 
 GENERATOR_VERSION = "v1.1.0"
 TEMPLATE_PATH = os.path.join(
@@ -121,10 +123,43 @@ def _render(template: str, ctx: dict) -> str:
     return out
 
 
+def _resolve_public_dir(root: str, dist: str) -> str:
+    """Return the framework-appropriate `public/` path for push output.
+
+    Astro builds to `dist/`, Next to `out/`, static sites use a
+    top-level `public/`. We prefer dist if it exists (matches the
+    brand-scan input), falling back to `public/`, then `out/`, then
+    the dist path itself even if missing.
+    """
+    candidates = [
+        dist,
+        os.path.join(root, "public"),
+        os.path.join(root, "out"),
+    ]
+    for p in candidates:
+        if p and os.path.isdir(p):
+            return p
+    return dist
+
+
+def _domain_doc_path(root: str, inv: dict) -> str | None:
+    """Resolve the domain doc to an absolute path."""
+    doc = inv.get("domain_doc") or ""
+    if not doc:
+        return None
+    full = os.path.join(root, doc)
+    return full if os.path.isfile(full) else None
+
+
 def run(args: argparse.Namespace) -> int:
     root = os.path.abspath(args.root)
     if not os.path.isdir(root):
         print(f"error: --root does not exist: {root}", file=sys.stderr)
+        return 2
+
+    if args.dry_run and not args.push:
+        print("error: --dry-run is only meaningful with --push.",
+              file=sys.stderr)
         return 2
 
     dist = args.dist or os.path.join(root, "dist")
@@ -183,8 +218,29 @@ def run(args: argparse.Namespace) -> int:
     print(out_path)
 
     if args.push:
-        print("warning: --push is implemented in slice 03; ignoring.",
-              file=sys.stderr)
+        public_dir = _resolve_public_dir(root, dist)
+        ctx_path = _domain_doc_path(root, inv)
+        site_url = args.url[0] if args.url else ""
+        urls = list(args.url) if args.url else []
+        state_dir = report_dir  # reuse report dir for the rate-limit counter
+        plans = PUSH.plan_all(
+            public_dir=public_dir,
+            urls=urls,
+            site_url=site_url,
+            context_path=ctx_path or os.path.join(root, "CONTEXT.md"),
+            state_dir=state_dir,
+            env=os.environ,
+        )
+        if args.dry_run:
+            print(PUSH.render_dry_run(plans))
+        else:
+            print(
+                "push plan ready. Confirm operations interactively, "
+                "then call push.execute_all(...) with the chosen confirmations. "
+                "See skills/seo-audit/push.md §Live-Smoke for the shell snippet.",
+                file=sys.stderr,
+            )
+            print(PUSH.render_dry_run(plans))
 
     return 0
 
@@ -208,7 +264,11 @@ def parse_args(argv) -> argparse.Namespace:
                    help="Probe a live URL with the external adapters "
                         "(repeatable). Slice 02. Requires network.")
     p.add_argument("--push", action="store_true",
-                   help="Enable push module (slice 03; no-op in v1).")
+                   help="Enable push module — IndexNow, Bing Webmaster, "
+                        "llms.txt. Opt-in; confirmation per operation.")
+    p.add_argument("--dry-run", dest="dry_run", action="store_true",
+                   help="Only valid with --push: render the push plan "
+                        "without performing any submissions or writes.")
     p.add_argument("--compare-last", action="store_true",
                    help="Diff against the most recent prior report.")
     return p.parse_args(argv)
