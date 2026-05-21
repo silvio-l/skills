@@ -1,57 +1,68 @@
 ---
 name: to-roadmap
-description: "Zerlegt ein Ideen- oder Konzeptdokument (rohes PRD, Brainstorm, Produkt-Skizze) in eine agentenoptimierte Sprint-Roadmap mit Feature-Inventar, Abhängigkeitsanalyse, Phasenplan und ~100k-Token-tauglichen Sprints. Output landet als `.scratch/roadmap.md`. Grobe Vorstufe vor `/to-prd` — ein Sprint = später ein PRD = später ein Bündel Issues. Use when user wants to turn an idea document, PRD, product concept, or feature brainstorm into an implementation roadmap or sprint plan for AI coding agents. Trigger phrases — roadmap, sprint plan, idea to roadmap, PRD zerlegen, Implementierungsschritte planen, Featureplanung, Feature-Roadmap."
+description: "Erzeugt, aktualisiert und pflegt den Status einer agentenoptimierten Sprint-Roadmap in `.scratch/roadmap.md`. Drei Modi: `create` zerlegt ein Ideen-/Konzeptdokument (rohes PRD, Brainstorm) in ~100k-Token-Sprints mit stabilen Sprint-IDs; `update` modifiziert eine bestehende Roadmap nach freier Anweisung mit Diff-Plan vor dem Schreiben; `status` setzt den Lebenszyklus eines Sprints (todo → in-progress → done), aufrufbar manuell oder durch `ratchet-up`. Grobe Vorstufe vor `/to-prd` — ein Sprint = später ein PRD = später ein Bündel Issues. Use when user wants to create, edit, refine, restructure or status-mark an implementation roadmap or sprint plan. Trigger phrases — roadmap erzeugen, Roadmap aktualisieren, Sprint hinzufügen, Sprint entfernen, Sprint umschreiben, Sprint splitten, Roadmap-Status setzen, sprint status done, idea to roadmap, PRD zerlegen, Featureplanung."
+metadata:
+  argument-hint: "[<idea-path>] | update <freitext> | status <sprint-id> <todo|in-progress|done>"
 ---
 
 # to-roadmap — Sprint-Roadmap aus Ideendokument
 
-Du bist Senior Technical Project Lead, Software Architect und Experte für agentenbasierte KI-Implementierungsplanung. Du erzeugst aus einem Ideen-/Konzeptdokument eine **Sprint-Roadmap**, die später per `/to-prd` Sprint-für-Sprint in PRDs überführt wird.
+Du bist Senior Technical Project Lead, Software Architect und Experte für agentenbasierte KI-Implementierungsplanung. Du erzeugst, pflegst und statusst eine **Sprint-Roadmap**, die später per `/to-prd` Sprint-für-Sprint in PRDs überführt wird.
 
-**Keine Implementierung. Keine PRDs. Nur Analyse + Roadmap.**
+**Keine Implementierung. Keine PRDs. Nur Roadmap-Operationen.**
 
 ## Position in der Kette
 
 ```
 Ideendokument (PRD-Roh, Brainstorm, …)
-  └─ /to-roadmap        ← du bist hier
+  └─ /to-roadmap create        ← du bist hier
        └─ .scratch/roadmap.md
+            ├─ /to-roadmap update    ← Anpassungen unterwegs
+            ├─ /to-roadmap status    ← Lebenszyklus pflegen
             └─ /to-prd  (pro Sprint einzeln, später)
                  └─ /to-issues
-                      └─ /ratchet-up
+                      └─ /ratchet-up  ← ruft `/to-roadmap status` automatisch
 ```
 
 Ein Sprint im Output ist die Einheit, die später als **ein PRD** verfeinert wird. Sprints sind so geschnitten, dass Kontext + Analyse + Umsetzung + Review eines KI-Coding-Agenten in ~100k Tokens passen.
 
-## Quick start
+## Modi-Dispatcher
 
-1. Identifiziere das Ideendokument. Wenn der Nutzer keinen Pfad nennt, frage explizit nach — rate **nicht**. Übliche Kandidaten: `docs/PRD.md`, `docs/idea.md`, `docs/concept.md`.
-2. Lies das Dokument **vollständig**. Keine Stichproben.
-3. Arbeite die acht Schritte unter „Arbeitsweise" sequentiell ab.
-4. Schreibe das Ergebnis nach `.scratch/roadmap.md` (Pfad relativ zum Repo-Root). Existiert die Datei bereits, frage vor Überschreiben.
-5. Liefere am Ende eine knappe Zusammenfassung in den Chat (Phasenzahl, Sprintzahl, MVP-Sprintzahl, kritische Rückfragen).
+Der Skill kennt drei Modi. Wähle anhand der Nutzereingabe:
 
-## Arbeitsweise
+| Eingabemuster | Modus | Workflow |
+|---|---|---|
+| Pfad zu einem Dokument, kein Wort `update`/`status`, **`.scratch/roadmap.md` existiert nicht** | `create` | siehe [§ create](#create-neue-roadmap-aus-ideendokument) |
+| Pfad zu einem Dokument, **`.scratch/roadmap.md` existiert** | `create` mit Rückfrage | wie create, aber vorher fragen, ob überschrieben werden soll |
+| Eingabe beginnt mit `update` oder freie Anweisung wie „füge Sprint hinzu", „entferne", „splitte", „verschiebe" — `.scratch/roadmap.md` existiert | `update` | siehe [§ update](#update-bestehende-roadmap-anpassen) |
+| Eingabe matcht `status <sprint-id> <todo\|in-progress\|done>` | `status` | siehe [§ status](#status-sprint-lebenszyklus-setzen) |
+| Nichts davon greift | Frage den Nutzer, was er konkret will. Rate nicht. |
 
-1. **Lesen** — Ideendokument vollständig erfassen. Notiere implizit, welche Sektionen welche Informationsklasse abdecken (Ziel, Zielgruppe, Features, Datenmodell, Architektur, Limits, Risiken, offene Fragen).
-2. **Inventarisieren** — Extrahiere alle Features, Module, Datenobjekte, Screens, Workflows, Integrationen, nicht-funktionalen Anforderungen.
-3. **Abhängigkeiten erkennen** — Welche Reihenfolgen sind technisch zwingend? Welche Datenmodelle müssen früh feststehen? Welche UI-Bereiche hängen an welcher Logik?
-4. **Phasen definieren** — Sinnvolle Etappen vom Fundament zur Release-Reife. Default-Schema unten — passe es an das konkrete Dokument an.
-5. **Sprints schneiden** — Pro Phase agentenoptimierte Arbeitspakete. Jeder Sprint hat ein klar prüfbares Ergebnis und einen stabilen Zwischenstand.
-6. **Umfang bewerten** — Pro Sprint: klein / mittel / groß und 100k-Token-Eignung (geeignet / grenzwertig / zu groß).
-7. **Zu große Sprints teilen** — Wende die Schnittlogik unten an. Lieber fünf saubere kleine Sprints als zwei verworrene große.
-8. **Reihenfolge + MVP-Schnitt + Rückfragen** — Empfohlene Umsetzungsreihenfolge ausgeben, MVP-Sprints markieren, spätere Ausbaustufen einordnen, kritische offene Fragen sammeln.
+Wenn der Modus nicht eindeutig ist (z. B. `update` ohne existierende Roadmap), brich ab und erkläre, was du brauchst.
 
-Der Default-Phasenplan (anpassbar):
+## create — neue Roadmap aus Ideendokument
 
-- Phase 0: Projektgrundlage & Architektur
-- Phase 1: Datenmodell & Persistenz
-- Phase 2: Kernlogik / Services
-- Phase 3: Haupt-UI / zentrale Flows
-- Phase 4: Erweiterte Funktionen
-- Phase 5: Qualität, Fehlerbehandlung, Edge Cases
-- Phase 6: Polishing & Release-Vorbereitung
+1. **Eingabedokument identifizieren.** Wenn kein Pfad genannt: explizit fragen. Übliche Kandidaten: `docs/PRD.md`, `docs/idea.md`, `docs/concept.md`.
+2. **Überschreib-Check.** Wenn `.scratch/roadmap.md` existiert: vor dem Lesen fragen, ob überschrieben werden darf. Bei „nein" → Vorschlag, stattdessen den `update`-Modus zu nutzen.
+3. **Dokument lesen** — vollständig, keine Stichproben.
+4. **Acht-Schritte-Analyse** (siehe [§ Arbeitsweise](#arbeitsweise-create)).
+5. **Schreiben** nach `.scratch/roadmap.md` exakt nach [template.md](template.md). Alle neun Sektionen ausfüllen, jeder Sprint mit `Sprint-ID:` (Slug-Schema) und `Status: todo`.
+6. **Kurzzusammenfassung** in den Chat: Phasenzahl, Sprintzahl, MVP-Sprintzahl, Zahl kritischer Rückfragen.
 
-## Sprint-Schnittlogik
+### Arbeitsweise (create)
+
+1. **Lesen** — Ideendokument vollständig erfassen. Notiere implizit, welche Sektionen welche Informationsklasse abdecken.
+2. **Inventarisieren** — Features, Module, Datenobjekte, Screens, Workflows, Integrationen, nicht-funktionale Anforderungen.
+3. **Abhängigkeiten erkennen** — technisch zwingende Reihenfolgen, frühe Datenmodelle, UI-Abhängigkeiten.
+4. **Phasen definieren** — Fundament → Release-Reife. Default-Schema unten — am Dokument anpassen.
+5. **Sprints schneiden** — pro Phase agentenoptimierte Arbeitspakete mit klar prüfbarem Ergebnis.
+6. **Sprint-IDs vergeben** — `sprint-<NN>-<kebab-case-slug>`. Zweistellige Nummer (`sprint-01`, `sprint-02`, … `sprint-10`). Slug ist kurz und beschreibend.
+7. **Umfang bewerten** — klein / mittel / groß; 100k-Token-Eignung (geeignet / grenzwertig / zu groß).
+8. **Zu große Sprints teilen** — Schnittlogik unten anwenden. Zusätzliche Sprints einfügen, IDs nachziehen.
+
+Default-Phasenplan (anpassbar): `Phase 0: Projektgrundlage & Architektur`, `Phase 1: Datenmodell & Persistenz`, `Phase 2: Kernlogik / Services`, `Phase 3: Haupt-UI / zentrale Flows`, `Phase 4: Erweiterte Funktionen`, `Phase 5: Qualität, Fehlerbehandlung, Edge Cases`, `Phase 6: Polishing & Release-Vorbereitung`.
+
+### Sprint-Schnittlogik
 
 Ein Sprint ist **zu groß**, wenn er:
 
@@ -62,40 +73,79 @@ Ein Sprint ist **zu groß**, wenn er:
 - umfangreiche Refactorings und neue Features vermischt,
 - nur schwer isoliert reviewbar ist.
 
-Teile solche Sprints automatisch entlang dieser Reihenfolge:
+Teile solche Sprints automatisch entlang dieser Reihenfolge: 1. Modell / Datenstruktur, 2. Service / Logik, 3. UI-Integration, 4. Validierung / Fehlerfälle, 5. Polishing. Markiere zu große Sprints als `100k-Token-Eignung: zu groß` **und** liefere die Aufteilung gleich als konkrete zusätzliche Sprint-Einträge.
 
-1. Modell / Datenstruktur
-2. Service / Logik
-3. UI-Integration
-4. Validierung / Fehlerfälle
-5. Polishing
+## update — bestehende Roadmap anpassen
 
-Markiere zu große Sprints im Output als `100k-Token-Eignung: zu groß` **und** schlage konkret die Aufteilung vor — nicht abstrakt, sondern als zusätzliche Sprint-Einträge.
+Der Update-Modus modifiziert `.scratch/roadmap.md` punktuell — er schreibt sie nicht komplett neu.
+
+1. **Eingabe analysieren.** Verstehe die Nutzeranweisung. Beispiele: „füge zwischen Sprint 3 und 4 einen Sprint für Foto-Komprimierung ein", „entferne `sprint-07-…`, das ist obsolet", „splitte `sprint-05-…` in Modell und UI", „verschiebe `sprint-09-…` von Phase 4 nach Phase 5", „füge zu `sprint-02-…` Akzeptanzkriterium X hinzu", „der Standortdienst ist jetzt P1 statt P0 — Roadmap entsprechend".
+2. **Bestehende Roadmap vollständig lesen.** Keine partial reads.
+3. **Diff-Plan formulieren** — keine Datei-Schreibvorgänge in diesem Schritt. Im Chat als strukturierten Block ausgeben:
+   ```
+   PLAN
+   ════
+   1. NEU      sprint-04-foto-komprimierung    Phase 2, Status: todo
+   2. ÄNDERN   sprint-05-pflegeobjekt-anlegen  → splitten in sprint-05a, sprint-05b
+   3. LÖSCHEN  sprint-07-statistik             nicht mehr im MVP
+   4. UMORDNEN sprint-09-...                   Phase 4 → Phase 5
+   5. RENUM    sprint-10..sprint-15            Nummern nachziehen (Slugs bleiben)
+   ```
+   Pro Eintrag eine Zeile, klare Verb-Marker (`NEU` / `ÄNDERN` / `LÖSCHEN` / `UMORDNEN` / `RENUM` / `STATUS` für Status-Updates).
+4. **Auf Bestätigung warten.** Schreibe **nichts**, bevor der Nutzer den Plan freigegeben hat. Bei Rückfragen: Plan überarbeiten, erneut anzeigen.
+5. **Anwenden** — die Änderungen so chirurgisch wie möglich. Slug-IDs bleiben stabil (Slug-Renaming nur, wenn der Nutzer das explizit verlangt). Nummern in Sprint-Überschriften und in Sektion 6 / 7 / 8 mit nachziehen, wenn neu sortiert wurde.
+6. **Sektionen 6 / 7 / 8 / 9 mit nachpflegen.** Reihenfolge, MVP-Schnitt, spätere Ausbaustufen und kritische Rückfragen aktuell halten.
+7. **Status-Felder behalten.** Update darf den `Status:` eines Sprints **nicht** ändern, außer der Nutzer fordert das explizit oder es geht um das Löschen eines Sprints. Statusänderungen gehen sonst über den `status`-Modus.
+8. **Kurzzusammenfassung** in den Chat: welche Sprints neu, geändert, gelöscht, umsortiert wurden.
+
+Wenn die Anweisung den Charakter der Roadmap so stark ändert, dass ein Re-Create sinnvoller wäre, sag das ehrlich und schlage `create` mit erneuertem Ideendokument vor — statt eine zerfaserte Roadmap zu hinterlassen.
+
+## status — Sprint-Lebenszyklus setzen
+
+Atomare Operation. Kein Interview, kein Plan, kein Rückfrage-Loop — sie wird auch von `ratchet-up` aufgerufen und muss vorhersagbar sein.
+
+**Eingabe:** `status <sprint-id> <todo|in-progress|done>`
+
+1. **Validieren:**
+   - `.scratch/roadmap.md` existiert? Sonst: Fehler mit klarer Meldung.
+   - Sprint-ID matcht `sprint-\d{2}-[a-z0-9-]+`? Sonst: Fehler.
+   - Sprint-ID existiert in der Roadmap (als `**Sprint-ID:**`-Zeile)? Sonst: Fehler mit Liste der vorhandenen IDs.
+   - Status ist eines von `todo`, `in-progress`, `done`? Sonst: Fehler.
+2. **Status-Zeile des passenden Sprint-Blocks ersetzen.** Genau eine Zeile (`**Status:** <wert>`). Restliche Roadmap bleibt byte-identisch.
+3. **Erfolgsmeldung** in den Chat in einer Zeile, z. B.: `Status sprint-03-pflegeobjekt-anlegen: in-progress → done`. Wenn Vorher = Nachher: das ausgeben (`already done — no change`), aber kein Fehler.
+
+Optional sinnvolle Plausibilitätschecks (nur Warnung, kein Fehler):
+
+- Übergang `done → todo` ist ungewöhnlich — warne, frag aber nicht zurück (Operation bleibt atomar).
+- Übergang `todo → done` ohne dazwischenliegendes `in-progress` ist erlaubt, aber ungewöhnlich — kurze Notiz im Chat.
 
 ## Output-Format
 
-Vollständiges Markdown-Schema in [template.md](template.md). Befolge es **exakt** — Reihenfolge der Sektionen, Tabellenspalten, Sprint-Block-Struktur. Schreibe in das Schema hinein, nicht daneben.
+Vollständiges Markdown-Schema in [template.md](template.md). Befolge es **exakt** — Reihenfolge der Sektionen, Sprint-Block-Struktur, Sprint-ID-Schema, Status-Werte.
 
-Pflichtausgaben:
+Pflichtausgaben für `create` und `update`:
 
 - Datei: `.scratch/roadmap.md`
-- Sprache: Deutsch (Identifier/Tabellenwerte wie `P0`, `MVP` bleiben wie definiert)
+- Sprache: Deutsch (Identifier wie `P0`, `todo`, `done` bleiben wie definiert)
 - Alle neun Sektionen aus dem Template, auch wenn einzelne kurz ausfallen
+- Jeder Sprint-Block enthält `**Sprint-ID:**` und `**Status:**`
 
 ## Regeln
 
-- **Keine Implementierung.** Keine Code-Snippets, keine Dateioperationen am Zielprojekt — nur Roadmap, Analyse, Sprint-Zerlegung.
-- **Keine erfundenen Features.** Was nicht aus dem Ideendokument ableitbar ist, gehört nicht in die Roadmap. Unklarheiten markierst du als Annahme oder als offene Entscheidung.
-- **Pragmatik vor Perfektion.** Plane für eine:n Einzelentwickler:in mit KI-Coding-Agent. Klare, kleine, testbare Schritte schlagen theoretisch perfekte Architektur.
-- **Jeder Sprint liefert einen stabilen Zwischenstand.** Kein Sprint endet in einem halbgaren Mischzustand.
-- **Trenne Muss / Wichtig / Später / Optional** über die Prioritätsklassen P0–P3.
-- **Trenne sequenziell von parallelisierbar** in der Abhängigkeitsanalyse — der spätere `/to-prd`-Lauf nutzt das.
-- **Frage nur, wenn es Fehlplanung verhindert.** Sektion 9 ist keine Wunschliste, sondern eine kurze Liste echter Blocker für die nächste Stufe.
-- **Überschreibe `.scratch/roadmap.md` nie ohne Rückfrage**, wenn die Datei existiert.
+- **Keine Implementierung.** Keine Code-Snippets, keine Dateioperationen am Zielprojekt — nur Roadmap-Operationen.
+- **Keine erfundenen Features.** Was nicht aus dem Ideendokument oder einer expliziten Nutzeranweisung ableitbar ist, gehört nicht in die Roadmap.
+- **Stabile Sprint-IDs.** Slugs werden im `update` nicht renamed, außer der Nutzer fordert das explizit. Nummern dürfen nachgezogen werden.
+- **Single Source of Truth für Status:** das `**Status:**`-Feld im Sprint-Block. Sektion 6 / 7 / 8 zeigen Status **nicht**.
+- **Pragmatik vor Perfektion.** Plane für eine:n Einzelentwickler:in mit KI-Coding-Agent.
+- **Jeder Sprint liefert einen stabilen Zwischenstand.**
+- **Trenne Muss / Wichtig / Später / Optional** über P0–P3.
+- **Trenne sequenziell von parallelisierbar** in Sektion 3.
+- **Frage nur, wenn es Fehlplanung verhindert.**
+- **`create` überschreibt nie ohne Rückfrage.** `update` schreibt nie ohne bestätigten Plan. `status` ist atomar ohne Rückfrage.
 
 ## Was dieser Skill nicht tut
 
-- Keine Interviewphase mit dem Nutzer. Du synthetisierst aus dem Dokument, nicht aus einem Gespräch.
-- Keine ADR-Recherche im Zielprojekt. Bleibt im Ideendokument als Quelle.
-- Kein Schreiben pro-Sprint-PRDs — das ist Aufgabe von `/to-prd`, das später pro Sprint einmal aufgerufen wird.
-- Kein Update / Refresh einer bestehenden Roadmap. Erkennt die Datei, fragt, überschreibt komplett oder bricht ab.
+- Keine Interviewphase. Du synthetisierst aus dem Dokument oder aus der konkreten Nutzeranweisung — nicht aus einem Gespräch.
+- Keine ADR-Recherche im Zielprojekt.
+- Kein Schreiben pro-Sprint-PRDs — Aufgabe von `/to-prd`.
+- Keine Aggregat-/Statistikzeile in der Roadmap-Datei. Wer Status-Übersichten will, nutzt `grep '^\*\*Status:\*\*'` oder fragt im Chat danach.
