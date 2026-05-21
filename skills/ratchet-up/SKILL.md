@@ -19,7 +19,7 @@ The skill is **project-agnostic** and works on the **active branch** (typically 
 
 | Concern | File |
 |---|---|
-| Step-by-step state machine (§1–§17) | [algorithm.md](algorithm.md) |
+| Step-by-step state machine (§1–§17, incl. roadmap hooks §3.5 + §15.5) | [algorithm.md](algorithm.md) |
 | Project detection, gate, commit, quick-path | [gates.md](gates.md) |
 | Issue contract, synonyms, status transitions | [formats.md](formats.md) |
 | Worker prompt template | [worker.md](worker.md) |
@@ -89,9 +89,20 @@ feature_marker: "/.scratch/"   # feature_path must contain this substring
 | Trigger | Action |
 |---|---|
 | User runs `/ratchet-up <feature>` | Start at `algorithm.md` §1 |
+| `.scratch/roadmap.md` exists at repo root | `algorithm.md` §3.5: read/ask for `<feature>/.roadmap-sprint`, flip linked Sprint `todo → in-progress` |
 | Choosing gate commands | `gates.md` §1 (override → CLAUDE.md → auto-detect) |
 | Worker returned `DONE:` | Run `scripts/check-evidence.sh`, then gate (`gates.md` §3 — quick-path if diff is doc-only) |
 | Reviewer returned `REWORK:` | `persist_rework_feedback` (`algorithm.md` §9), then re-queue |
 | Reviewer output malformed | Retry **once**, then escalate to `needs-human` (`algorithm.md` §7) |
-| All issues `done` | Verify (`algorithm.md` §15) → summary (§16) → cleanup (§17) |
+| All issues `done` | Verify (`algorithm.md` §15) → roadmap status to `done` (§15.5, if linked) → summary (§16) → cleanup (§17) |
 | Issue under-specified | Issue quality gate sets `needs-info` (`algorithm.md` §5, format rules in `formats.md`) |
+
+## Roadmap integration (optional)
+
+If the repo has a `.scratch/roadmap.md` produced by [`to-roadmap`](../to-roadmap/SKILL.md), `ratchet-up` will:
+
+- on the first run for a given feature directory, ask once which Sprint-ID this feature implements (or `none`) and persist the answer in `<feature>/.roadmap-sprint`,
+- on every run, flip the linked Sprint from `todo` to `in-progress` at the start (§3.5),
+- on a successful run that ends with **all** issues `done`, flip the Sprint to `done` at the end (§15.5).
+
+If the roadmap file is absent, the marker is `none`, or the marker references an unknown Sprint-ID, the loop runs unchanged and prints `(no link)` in the summary. The link is feature-local — different features in the same repo can target different Sprints, and re-running `ratchet-up` on an already-`done` Sprint logs a warning but does not auto-flip backward.

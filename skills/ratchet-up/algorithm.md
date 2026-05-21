@@ -97,6 +97,47 @@ If the working tree contains unrelated changes, stop and report — do not auto-
 
 ---
 
+## §3.5 — Roadmap Linkage (optional, runs only when roadmap exists)
+
+If `.scratch/roadmap.md` does **not** exist at the repo root, skip this section entirely — no questions, no logs.
+
+If it exists:
+
+1. **Read marker.** Look for `<feature_path>/.roadmap-sprint`. If present and non-empty, its first line is either a Sprint-ID (`sprint-\d{2}-[a-z0-9-]+`) or the literal string `none` (= user explicitly opted out of linking this feature).
+2. **Ask once if missing.** If the marker file is absent, extract all Sprint-IDs from the roadmap:
+
+   ```bash
+   grep -E '^\*\*Sprint-ID:\*\* sprint-' .scratch/roadmap.md
+   ```
+
+   Show the user the list and ask which Sprint this feature implements. Accept also `none` / `skip` if the feature is not tied to the roadmap. Persist the answer to `<feature_path>/.roadmap-sprint` (one line, exact Sprint-ID or the literal `none`). Ask **exactly once** — never again on later invocations.
+3. **Skip if `none`.** If the marker says `none`, skip the rest of §3.5 silently.
+4. **Sync status to `in-progress` (idempotent).** Read the current `**Status:**` line of the matching Sprint block in `.scratch/roadmap.md`. Apply the table:
+
+   | Current | Action |
+   |---|---|
+   | `todo` | Edit the line to `**Status:** in-progress`. Log `roadmap: <sprint-id> todo → in-progress` to `run-log.md`. |
+   | `in-progress` | No-op. |
+   | `done` | No-op, but log a warning: `roadmap: <sprint-id> already done — ratchet-up continuing anyway`. The user may be reopening a finished sprint; do not auto-flip back. |
+
+   Use the `Edit` tool with the unique two-line anchor — Sprint-IDs are guaranteed unique in a roadmap file, so the anchor disambiguates:
+
+   ```text
+   old_string:
+   **Sprint-ID:** <sprint-id>
+
+   **Status:** todo
+
+   new_string:
+   **Sprint-ID:** <sprint-id>
+
+   **Status:** in-progress
+   ```
+
+5. **Validation guards:** if the Sprint-ID from the marker is not found in the roadmap, do **not** invent a new block. Log `roadmap: marker references unknown sprint-id <id> — skipping status sync` and continue without setting status. The user can fix the marker file manually.
+
+---
+
 ## §4 — Discover Issues (metadata only)
 
 ```bash
@@ -444,7 +485,7 @@ grep -rl "^Status: ready-for-agent" "$feature_path/issues/" || true
 grep -rL "^Status: done" "$feature_path/issues/" || true
 ```
 
-**A) All Done** — every issue file has `Status: done` and none have `ready-for-agent`, `needs-info`, or `needs-human` → proceed to §16, then §17.
+**A) All Done** — every issue file has `Status: done` and none have `ready-for-agent`, `needs-info`, or `needs-human` → proceed to §15.5, then §16, then §17.
 
 **B) Incomplete** — at least one issue is not `done` → print summary, **do not delete**, ask explicitly:
 
@@ -464,6 +505,25 @@ Möchtest du den Ordner <feature_path> trotzdem löschen? (ja/nein)
 ```
 
 Only delete if the user answers `ja` explicitly.
+
+---
+
+## §15.5 — Roadmap Status (final, only on Branch A — All Done)
+
+Runs only when §15 classified the result as "All Done". For Branch B (Incomplete), §15.5 is skipped entirely — the Sprint stays `in-progress` until the next ratchet-up run finishes the remaining issues.
+
+1. Read `<feature_path>/.roadmap-sprint`. If absent or equal to `none`, skip.
+2. Read the `**Status:**` line of the matching Sprint block in `.scratch/roadmap.md`.
+3. Apply the table:
+
+   | Current | Action |
+   |---|---|
+   | `in-progress` | Edit to `**Status:** done`. Log `roadmap: <sprint-id> in-progress → done`. Include the transition line in §16 summary. |
+   | `todo` | Edit to `**Status:** done` (covers the edge case where §3.5 was skipped — e.g. user added the marker mid-flight). Log `roadmap: <sprint-id> todo → done`. |
+   | `done` | No-op. |
+
+   Use the same two-line anchor pattern as §3.5 (`**Sprint-ID:**` followed by `**Status:**`).
+4. If the marker references a Sprint-ID not present in the roadmap, log `roadmap: marker references unknown sprint-id <id> — skipping final status` and continue. Do **not** create a new Sprint block.
 
 ---
 
@@ -497,7 +557,13 @@ Print a compact markdown summary:
 ## Gate mode
 - format / analyze / test commands actually used (or `skipped`)
 - quick-path hits: <count>
+
+## Roadmap
+- linked sprint: <sprint-id> | none | (no roadmap)
+- transition: <todo → in-progress | in-progress → done | none>
 ```
+
+If `.scratch/roadmap.md` does not exist or the marker is `none`, print `## Roadmap\n- (no link)` and skip transition.
 
 ---
 
