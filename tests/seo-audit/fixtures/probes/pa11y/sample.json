@@ -1,0 +1,43 @@
+[
+  {
+    "_comment": "Shape source: `npx pa11y <url> --runner axe --reporter json` — array of issue objects. Reference: https://github.com/pa11y/pa11y#configuration",
+    "code": "color-contrast",
+    "type": "error",
+    "typeCode": 1,
+    "message": "Elements must have sufficient color contrast",
+    "context": "<a href=\"/\">Home</a>",
+    "selector": "html > body > header > a",
+    "runner": "axe",
+    "runnerExtras": {"impact": "serious"}
+  },
+  {
+    "code": "image-alt",
+    "type": "error",
+    "typeCode": 1,
+    "message": "Images must have alternate text",
+    "context": "<img src=\"/logo.png\">",
+    "selector": "html > body > header > img",
+    "runner": "axe",
+    "runnerExtras": {"impact": "critical"}
+  },
+  {
+    "code": "landmark-one-main",
+    "type": "warning",
+    "typeCode": 2,
+    "message": "Document should have one main landmark",
+    "context": "<body>",
+    "selector": "html > body",
+    "runner": "axe",
+    "runnerExtras": {"impact": "moderate"}
+  },
+  {
+    "code": "region",
+    "type": "notice",
+    "typeCode": 3,
+    "message": "All page content should be contained by landmarks",
+    "context": "<div class=\"floating\"></div>",
+    "selector": "html > body > div",
+    "runner": "axe",
+    "runnerExtras": {"impact": "minor"}
+  }
+]

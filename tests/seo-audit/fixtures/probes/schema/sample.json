@@ -1,0 +1,24 @@
+{
+  "_comment": "Shape source: validator.schema.org returns a list of detected `tripleGroups` with errors per JSON-LD block. We model the trimmed shape: `numTriples` + a `tripleGroups` array, each with `nodes[*].typeName` and `errors[*]{severity,description,path}`. Reference: https://validator.schema.org/",
+  "url": "https://whispaste.de/",
+  "numTriples": 42,
+  "tripleGroups": [
+    {
+      "nodes": [{"typeName": "WebSite"}],
+      "errors": []
+    },
+    {
+      "nodes": [{"typeName": "Article"}],
+      "errors": [
+        {"severity": "error",   "description": "Missing required property: author", "path": "Article"},
+        {"severity": "warning", "description": "Recommended property publisher is missing", "path": "Article"}
+      ]
+    },
+    {
+      "nodes": [{"typeName": "Organization"}],
+      "errors": [
+        {"severity": "error", "description": "The property logo is required", "path": "Organization"}
+      ]
+    }
+  ]
+}
