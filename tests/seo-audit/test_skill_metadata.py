@@ -61,7 +61,7 @@ class SkillMd(unittest.TestCase):
 
 class PhaseDocs(unittest.TestCase):
     REQUIRED = ["inventory.md", "brand.md", "probes.md", "push.md",
-                "synthesis.md", "report.md"]
+                "setup.md", "synthesis.md", "report.md"]
 
     def test_phase_docs_exist(self):
         for name in self.REQUIRED:
@@ -75,6 +75,66 @@ class PhaseDocs(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertIn(name, text,
                               msg=f"SKILL.md should reference {name}")
+
+
+class SetupModule(unittest.TestCase):
+    REQUIRED = [
+        "scripts/setup/__init__.py",
+        "scripts/setup/urls.py",
+        "scripts/setup/diagnoses.py",
+        "scripts/setup/doctor.py",
+        "scripts/setup/verify.py",
+        "scripts/setup/setup_indexnow.py",
+        "scripts/setup/setup_pagespeed.py",
+        "scripts/setup/setup_bing.py",
+        "scripts/setup/setup_gsc.py",
+    ]
+
+    def test_setup_module_files_exist(self):
+        for relpath in self.REQUIRED:
+            with self.subTest(relpath=relpath):
+                self.assertTrue((SKILL_DIR / relpath).is_file(),
+                                msg=f"missing skills/seo-audit/{relpath}")
+
+    def test_setup_md_has_live_smoke_section(self):
+        body = _read(SKILL_DIR / "setup.md")
+        self.assertRegex(body, r"(?m)^## Live-Smoke",
+                         "setup.md must have a `## Live-Smoke` section")
+
+    def test_skill_md_references_setup_md(self):
+        text = _read(SKILL_MD)
+        self.assertIn("setup.md", text)
+
+    def test_skill_md_argument_hint_mentions_doctor_setup_verify(self):
+        text = _read(SKILL_MD)
+        for flag in ("--doctor", "--setup", "--verify"):
+            with self.subTest(flag=flag):
+                self.assertIn(flag, text,
+                              msg=f"SKILL.md should mention {flag}")
+
+
+class FreeTierTable(unittest.TestCase):
+    """AC11 — free-tier table stays consistent (no new tools)."""
+
+    EXPECTED_ROWS = [
+        "Lighthouse",
+        "pa11y",
+        "W3C Nu validator",
+        "Schema.org validator",
+        "Mozilla HTTP Observatory",
+        "Google Search Console API",
+        "Google PageSpeed Insights API",
+        "IndexNow",
+        "Bing Webmaster URL Submission API",
+        "`llms.txt`",
+    ]
+
+    def test_existing_free_tier_rows_are_present(self):
+        body = _read(SKILL_MD)
+        for row in self.EXPECTED_ROWS:
+            with self.subTest(row=row):
+                self.assertIn(row, body,
+                              msg=f"free-tier row '{row}' must remain")
 
 
 class Template(unittest.TestCase):
