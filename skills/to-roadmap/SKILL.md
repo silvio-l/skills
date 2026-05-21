@@ -1,6 +1,6 @@
 ---
 name: to-roadmap
-description: Zerlegt ein Ideen- oder Konzeptdokument (rohes PRD, Brainstorm, Produkt-Skizze) in eine agentenoptimierte Sprint-Roadmap mit Feature-Inventar, Abhängigkeitsanalyse, Phasenplan und ~100k-Token-tauglichen Sprints. Output landet als `.scratch/roadmap.md`. Grobe Vorstufe vor `/to-prd` — ein Sprint = später ein PRD = später ein Bündel Issues. Use when user wants to turn an idea document, PRD, product concept, or feature brainstorm into an implementation roadmap or sprint plan for AI coding agents — keywords: roadmap, sprint plan, idea to roadmap, PRD zerlegen, Implementierungsschritte planen, Featureplanung, Feature-Roadmap.
+description: "Zerlegt ein Ideen- oder Konzeptdokument (rohes PRD, Brainstorm, Produkt-Skizze) in eine agentenoptimierte Sprint-Roadmap mit Feature-Inventar, Abhängigkeitsanalyse, Phasenplan und ~100k-Token-tauglichen Sprints. Output landet als `.scratch/roadmap.md`. Grobe Vorstufe vor `/to-prd` — ein Sprint = später ein PRD = später ein Bündel Issues. Use when user wants to turn an idea document, PRD, product concept, or feature brainstorm into an implementation roadmap or sprint plan for AI coding agents. Trigger phrases — roadmap, sprint plan, idea to roadmap, PRD zerlegen, Implementierungsschritte planen, Featureplanung, Feature-Roadmap."
 ---
 
 # to-roadmap — Sprint-Roadmap aus Ideendokument
