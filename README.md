@@ -75,6 +75,12 @@ If you only want one of these, skip the dependencies you do not exercise.
 
 **The Fix.** A context-safe ratchet — discover ready issues, respect `blocked-by`, dispatch isolated workers and read-only reviewers, gate on format/analyze, persist rework feedback to disk. The orchestrator stays small; the work moves forward one click at a time, never backward.
 
+### `seo-audit`
+
+**The Problem.** SEO audits collapse into three failure modes: paid tools you do not want to depend on (Ahrefs, Semrush, Screaming Frog Pro), one-off shell hacks that nobody re-runs because they are not reproducible, and brand-voice drift that nobody catches until a redesign — by which time half the site contradicts the glossary in `CONTEXT.md`.
+
+**The Fix.** A local-first, free-tier-only audit skill that runs the same pipeline every time: inventory the repo (framework, pages, SEO assets, app-store listings, domain doc) → match the anti-vocabulary table from `CONTEXT.md` against the built HTML in `dist/` (with per-file and per-section suppression markers for kontrastive content) → synthesize findings by `severity × user_impact / fix_effort` with a deterministic tiebreaker → write a single Markdown report under `.scratch/<feature>/seo-audit-<date>.md` with Executive Summary, Findings nach Kategorie, Diff zum letzten Lauf, Empfehlungen. v1 is strictly offline; external probes (Lighthouse, pa11y, GSC, W3C, Schema, Observatory) come in slice 02, push (IndexNow, Bing, `llms.txt` generation) in slice 03.
+
 ### `to-roadmap`
 
 **The Problem.** A raw idea document or rough PRD is too big to feed straight into `/to-prd` — the agent either drowns in scope or quietly skips half the features. And once a roadmap exists, mid-flight changes (new sprint, split, drop, reorder) tend to fragment it instead of staying coherent. There is no upstream layer that owns the roadmap as a living artifact.
