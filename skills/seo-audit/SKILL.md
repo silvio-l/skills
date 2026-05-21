@@ -18,6 +18,7 @@ fix the findings — that is the user's call after they read the report.
 |---|---|
 | Inventory phase — framework / pages / SEO assets / app-store / domain doc | [inventory.md](inventory.md) |
 | Brand-consistency phase — glossary parser, scanner, suppression rules | [brand.md](brand.md) |
+| External-probes phase — seven adapters, parallel runner, live-smoke | [probes.md](probes.md) |
 | Synthesis phase — weights, score formula, dedup, tiebreaker | [synthesis.md](synthesis.md) |
 | Report phase — sections, template, diff mode | [report.md](report.md) |
 | Report template (Markdown) | [templates/report.md](templates/report.md) |
@@ -25,6 +26,7 @@ fix the findings — that is the user's call after they read the report.
 | Glossary parser | [scripts/glossary_parser.py](scripts/glossary_parser.py) |
 | HTML scanner | [scripts/brand_scan.py](scripts/brand_scan.py) |
 | Inventory scanner | [scripts/inventory.py](scripts/inventory.py) |
+| External-probes adapters | [scripts/probes/](scripts/probes/) |
 | Synthesis (pure logic) | [scripts/synthesis.py](scripts/synthesis.py) |
 
 Read the phase doc when you enter that phase. `SKILL.md` is the
@@ -72,7 +74,8 @@ stdout. Read it back to summarize for the user.
 | `--root <path>` | required | Repository root to audit. |
 | `--dist <path>` | `<root>/dist` | Directory of built HTML to scan. |
 | `--report-dir <path>` | `<root>/.scratch/seo-audit` | Output directory. |
-| `--quick` | off | Skip external probes — no-op in v1, meaningful in slice 02. |
+| `--quick` | off | Skip the heavy probes (Lighthouse, pa11y). |
+| `--url <url>` | none | Run external probes against this live URL. Repeatable. Requires network. |
 | `--push` | off | Enable push module — slice 03; warns and ignores in v1. |
 | `--compare-last` | off | Diff against the most recent prior report in `--report-dir`. |
 
@@ -91,16 +94,32 @@ A `seo-audit` run is **DONE** only when **all** of the following hold:
 6. The report file exists under `<report-dir>/seo-audit-<YYYY-MM-DD>.md`
    with the four canonical sections: *Executive Summary*, *Findings
    nach Kategorie*, *Diff zum letzten Lauf*, *Empfehlungen*.
-7. No external network call was made (v1 is offline; external probes
-   are slice 02).
+7. If `--url` is omitted, no external network call is made (the
+   brand-scan + inventory pipeline stays fully offline). If `--url`
+   is supplied, the probe layer (Slice 02) runs and its findings flow
+   through the same synthesis pipeline.
 
 ## Free-tier discipline
 
-This skill is **strictly local-first**. v1 makes zero network calls.
-Slice 02 will add adapters for Lighthouse, pa11y, W3C Nu, Schema
-validator, Mozilla Observatory, and GSC — all through `npx` or `curl`
-against public endpoints with documented free quotas. Slice 03 adds
-push (IndexNow, Bing Webmaster, `llms.txt` generation), opt-in only.
+This skill is **strictly local-first**. Without `--url`, the pipeline
+makes zero network calls. With `--url`, the seven probe adapters run
+through `npx` or `curl` against public endpoints with the quotas
+documented below.
+
+## Free-Tier — was kostet was?
+
+| Tool | Cost | Quota / day | What happens past quota |
+|---|---|---|---|
+| Lighthouse (`npx lighthouse`) | free, runs locally | n/a — bound only by local CPU | n/a |
+| pa11y (`npx pa11y`) | free, runs locally | n/a — local | n/a |
+| W3C Nu validator (`validator.w3.org/nu/`) | free, no API key | no published hard cap; "polite use" — the documented guidance is ≤ 1 request/sec ([W3C Nu docs](https://github.com/validator/validator/wiki/Service-%C2%BB-HTTP-interface)) | requests rejected with HTTP 429 until the rate drops |
+| Schema.org validator (`validator.schema.org`) | free, no published API contract | no published quota — polite-use convention | response throttled / shape may change without notice |
+| Mozilla HTTP Observatory (`http-observatory.security.mozilla.org/api/v1/`) | free, no key | no published hard cap; results cached server-side for 24h per host ([Observatory docs](https://github.com/mozilla/http-observatory/blob/master/httpobs/docs/api.md)) | rescans before the 24h cache window return cached results |
+| Google Search Console API (`mcp__gsc__*`) | free with a verified GSC property | 1 200 queries / minute, 30 000 queries / day per project ([GSC API quotas](https://developers.google.com/webmaster-tools/limits)) | HTTP 429 / quota-exceeded — wait until the next day |
+| Google PageSpeed Insights API | free with API key | 25 000 requests / day, 240 requests / 100 s / user ([PSI API quotas](https://developers.google.com/speed/docs/insights/v5/get-started#quota)) | HTTP 429 — adapter logs the error and contributes `[]` |
+
+Slice 03 adds push (IndexNow, Bing Webmaster, `llms.txt` generation),
+opt-in only.
 
 ## Limitations (v1)
 

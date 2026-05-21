@@ -1,0 +1,20 @@
+{
+  "_comment": "Shape source: a composition of the trimmed responses from mcp__gsc__get_performance_overview, mcp__gsc__check_indexing_issues, and mcp__gsc__get_search_by_page_query. The GSC adapter consumes this composite shape; the live MCP wiring is documented in probes.md.",
+  "performance": {
+    "site": "https://whispaste.de/",
+    "total_clicks": 1240,
+    "total_impressions": 88500,
+    "avg_ctr": 0.014,
+    "avg_position": 22.3
+  },
+  "indexing": {
+    "issues": [
+      {"url": "https://whispaste.de/old", "status": "Submitted URL not selected as canonical"},
+      {"url": "https://whispaste.de/404", "status": "Not found (404)"}
+    ]
+  },
+  "low_ctr_pages": [
+    {"page": "https://whispaste.de/", "query": "secure paste", "ctr": 0.002, "impressions": 12000, "position": 18.4},
+    {"page": "https://whispaste.de/about", "query": "whispaste", "ctr": 0.08, "impressions": 200, "position": 6.1}
+  ]
+}

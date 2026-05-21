@@ -31,8 +31,9 @@ import inventory as INV  # noqa: E402
 import glossary_parser as GP  # noqa: E402
 import brand_scan as BS  # noqa: E402
 import synthesis as SY  # noqa: E402
+from probes import probe as PROBE  # noqa: E402
 
-GENERATOR_VERSION = "v1.0.0"
+GENERATOR_VERSION = "v1.1.0"
 TEMPLATE_PATH = os.path.join(
     os.path.dirname(HERE), "templates", "report.md"
 )
@@ -143,9 +144,11 @@ def run(args: argparse.Namespace) -> int:
             f.setdefault("fix_effort", 1)
             findings.append(f)
 
-    # External probes deliberately skipped in v1 — --quick is a no-op
-    # today, becomes meaningful in slice 02.
-    _ = args.quick
+    # External probes — slice 02. Run only when at least one URL is
+    # supplied; the rest of the pipeline is offline-friendly.
+    if args.url:
+        probe_findings = PROBE.run(args.url, quick=args.quick) or []
+        findings.extend(probe_findings)
 
     synth = SY.synthesize(findings)
 
@@ -200,7 +203,10 @@ def parse_args(argv) -> argparse.Namespace:
                    help="Directory the report is written into "
                         "(default: <root>/.scratch/seo-audit).")
     p.add_argument("--quick", action="store_true",
-                   help="Skip external probes (no-op in v1).")
+                   help="Skip heavy external probes (Lighthouse, pa11y).")
+    p.add_argument("--url", action="append", default=[],
+                   help="Probe a live URL with the external adapters "
+                        "(repeatable). Slice 02. Requires network.")
     p.add_argument("--push", action="store_true",
                    help="Enable push module (slice 03; no-op in v1).")
     p.add_argument("--compare-last", action="store_true",

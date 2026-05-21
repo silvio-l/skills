@@ -1,0 +1,18 @@
+{
+  "_comment": "Minimal subset of `npx lighthouse <url> --output=json --quiet` output. Shape source: https://github.com/GoogleChrome/lighthouse/blob/main/docs/understanding-results.md and a real Lighthouse 12 run trimmed to ~30 lines.",
+  "requestedUrl": "https://whispaste.de/",
+  "finalUrl": "https://whispaste.de/",
+  "categories": {
+    "performance":     {"id": "performance",     "title": "Performance",     "score": 0.62},
+    "accessibility":   {"id": "accessibility",   "title": "Accessibility",   "score": 0.85},
+    "best-practices":  {"id": "best-practices",  "title": "Best Practices",  "score": 0.92},
+    "seo":             {"id": "seo",             "title": "SEO",             "score": 0.78}
+  },
+  "audits": {
+    "largest-contentful-paint": {"id": "largest-contentful-paint", "title": "Largest Contentful Paint", "score": 0.30, "scoreDisplayMode": "numeric", "displayValue": "4.2 s"},
+    "render-blocking-resources": {"id": "render-blocking-resources", "title": "Eliminate render-blocking resources", "score": 0.40, "scoreDisplayMode": "numeric", "displayValue": "Potential savings of 850 ms"},
+    "uses-responsive-images":   {"id": "uses-responsive-images",   "title": "Properly size images", "score": 1.0, "scoreDisplayMode": "binary"},
+    "meta-description":         {"id": "meta-description",         "title": "Document does not have a meta description", "score": 0,   "scoreDisplayMode": "binary"},
+    "color-contrast":           {"id": "color-contrast",           "title": "Background and foreground colors have a sufficient contrast ratio", "score": null, "scoreDisplayMode": "notApplicable"}
+  }
+}

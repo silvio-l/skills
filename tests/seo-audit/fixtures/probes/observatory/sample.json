@@ -1,0 +1,33 @@
+{
+  "_comment": "Shape source: https://http-observatory.security.mozilla.org/api/v1/analyze?host=<h> response (top-level scan summary) plus the result of /api/v1/getScanResults?scan=<id>. We merge the relevant bits into one fixture: `grade`, `score`, and a `tests` map of {name: {pass, score_description, score_modifier}}.",
+  "host": "whispaste.de",
+  "grade": "C",
+  "score": 35,
+  "tests": {
+    "content-security-policy": {
+      "pass": false,
+      "score_description": "Content Security Policy (CSP) header not implemented",
+      "score_modifier": -25
+    },
+    "strict-transport-security": {
+      "pass": true,
+      "score_description": "HSTS header set correctly",
+      "score_modifier": 0
+    },
+    "x-frame-options": {
+      "pass": false,
+      "score_description": "X-Frame-Options header not implemented",
+      "score_modifier": -20
+    },
+    "redirection": {
+      "pass": true,
+      "score_description": "Initial redirection from HTTP to HTTPS",
+      "score_modifier": 0
+    },
+    "referrer-policy": {
+      "pass": false,
+      "score_description": "Referrer-Policy header not implemented",
+      "score_modifier": -5
+    }
+  }
+}

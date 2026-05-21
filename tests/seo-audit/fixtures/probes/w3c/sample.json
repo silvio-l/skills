@@ -1,0 +1,36 @@
+{
+  "_comment": "Shape source: https://validator.w3.org/nu/?out=json — a `messages` array; each entry has type/lastLine/lastColumn/message/extract. Tool docs: https://validator.w3.org/docs/api.html",
+  "messages": [
+    {
+      "type": "error",
+      "lastLine": 12,
+      "firstLine": 12,
+      "lastColumn": 38,
+      "firstColumn": 1,
+      "message": "Element \"section\" is missing a required child element.",
+      "extract": "    <section></section>\n"
+    },
+    {
+      "type": "error",
+      "lastLine": 47,
+      "lastColumn": 80,
+      "message": "Duplicate ID \"main\".",
+      "extract": "<div id=\"main\"></div>"
+    },
+    {
+      "type": "info",
+      "subType": "warning",
+      "lastLine": 3,
+      "lastColumn": 70,
+      "message": "Consider adding a \"lang\" attribute to the \"html\" start tag.",
+      "extract": "<html>"
+    },
+    {
+      "type": "info",
+      "lastLine": 1,
+      "lastColumn": 15,
+      "message": "Trailing slash on void elements has no effect.",
+      "extract": "<meta charset=\"utf-8\" />"
+    }
+  ]
+}

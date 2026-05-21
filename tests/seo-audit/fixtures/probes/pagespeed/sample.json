@@ -1,0 +1,29 @@
+{
+  "_comment": "Shape source: PageSpeed Insights API v5 (https://developers.google.com/speed/docs/insights/v5/get-started) — embeds a Lighthouse report under `lighthouseResult` plus a top-level `loadingExperience` (CrUX field data). Trimmed to the smallest realistic subset.",
+  "id": "https://whispaste.de/",
+  "loadingExperience": {
+    "metrics": {
+      "LARGEST_CONTENTFUL_PAINT_MS": {
+        "percentile": 3800,
+        "category": "AVERAGE"
+      },
+      "CUMULATIVE_LAYOUT_SHIFT_SCORE": {
+        "percentile": 0.32,
+        "category": "SLOW"
+      },
+      "FIRST_INPUT_DELAY_MS": {
+        "percentile": 80,
+        "category": "FAST"
+      }
+    },
+    "overall_category": "AVERAGE"
+  },
+  "lighthouseResult": {
+    "categories": {
+      "performance": {"id": "performance", "title": "Performance", "score": 0.58}
+    },
+    "audits": {
+      "largest-contentful-paint": {"id": "largest-contentful-paint", "title": "Largest Contentful Paint", "score": 0.3, "scoreDisplayMode": "numeric", "displayValue": "3.8 s"}
+    }
+  }
+}
