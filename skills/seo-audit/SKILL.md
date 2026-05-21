@@ -1,8 +1,8 @@
 ---
 name: seo-audit
-description: "Local-first, free-tier-only SEO audit for any repo with a built website. Phase pipeline: inventory (framework, pages, SEO assets, app-store listings, domain doc) → brand-consistency scan (anti-vocabulary table from CONTEXT.md/CLAUDE.md matched against built HTML, with contrastive-marker and frontmatter-flag suppression) → synthesis (dedup, score by severity × user_impact / fix_effort, deterministic tiebreaker) → write Markdown report under .scratch/<feature>/seo-audit-<date>.md. v1 is offline — external probes (Lighthouse, pa11y, GSC, W3C, Schema, Observatory) land in slice 02, push (IndexNow, Bing, llms.txt) in slice 03. Use when the user says \"SEO audit\", \"check the brand voice on the site\", \"scan dist for anti-vocabulary\", \"is our site consistent with CONTEXT.md\", \"prep an SEO report\", or runs /seo-audit."
+description: "Local-first, free-tier-only SEO audit for any repo with a built website. Phase pipeline: inventory (framework, pages, SEO assets, app-store listings, domain doc) → brand-consistency scan (anti-vocabulary table from CONTEXT.md/CLAUDE.md matched against built HTML, with contrastive-marker and frontmatter-flag suppression) → external probes (Lighthouse, pa11y, GSC, W3C, Schema, Observatory, PageSpeed) when `--url` is passed → synthesis (dedup, score by severity × user_impact / fix_effort, deterministic tiebreaker) → write Markdown report under .scratch/<feature>/seo-audit-<date>.md. Optional opt-in push module (`--push`): IndexNow + Bing Webmaster URL submission + llms.txt generator, confirmable per operation, with `--dry-run`. Use when the user says \"SEO audit\", \"check the brand voice on the site\", \"scan dist for anti-vocabulary\", \"is our site consistent with CONTEXT.md\", \"prep an SEO report\", \"push URLs to IndexNow / Bing\", \"generate llms.txt\", or runs /seo-audit."
 metadata:
-  argument-hint: "[--root <path>] [--dist <path>] [--report-dir <path>] [--quick] [--compare-last]"
+  argument-hint: "[--root <path>] [--dist <path>] [--report-dir <path>] [--quick] [--url <url>] [--push] [--dry-run] [--compare-last]"
 ---
 
 # seo-audit — Local-First SEO Audit
@@ -19,6 +19,7 @@ fix the findings — that is the user's call after they read the report.
 | Inventory phase — framework / pages / SEO assets / app-store / domain doc | [inventory.md](inventory.md) |
 | Brand-consistency phase — glossary parser, scanner, suppression rules | [brand.md](brand.md) |
 | External-probes phase — seven adapters, parallel runner, live-smoke | [probes.md](probes.md) |
+| Push phase — IndexNow, Bing Webmaster, llms.txt; confirmation flow | [push.md](push.md) |
 | Synthesis phase — weights, score formula, dedup, tiebreaker | [synthesis.md](synthesis.md) |
 | Report phase — sections, template, diff mode | [report.md](report.md) |
 | Report template (Markdown) | [templates/report.md](templates/report.md) |
@@ -27,6 +28,7 @@ fix the findings — that is the user's call after they read the report.
 | HTML scanner | [scripts/brand_scan.py](scripts/brand_scan.py) |
 | Inventory scanner | [scripts/inventory.py](scripts/inventory.py) |
 | External-probes adapters | [scripts/probes/](scripts/probes/) |
+| Push adapters (IndexNow / Bing / llms.txt) | [scripts/push/](scripts/push/) |
 | Synthesis (pure logic) | [scripts/synthesis.py](scripts/synthesis.py) |
 
 Read the phase doc when you enter that phase. `SKILL.md` is the
@@ -76,7 +78,8 @@ stdout. Read it back to summarize for the user.
 | `--report-dir <path>` | `<root>/.scratch/seo-audit` | Output directory. |
 | `--quick` | off | Skip the heavy probes (Lighthouse, pa11y). |
 | `--url <url>` | none | Run external probes against this live URL. Repeatable. Requires network. |
-| `--push` | off | Enable push module — slice 03; warns and ignores in v1. |
+| `--push` | off | Enable push module (IndexNow, Bing Webmaster, llms.txt). Opt-in; the agent confirms each operation with the user before firing it. |
+| `--dry-run` | off | Only valid with `--push`: render the push plan to stdout without performing any submissions or writes. |
 | `--compare-last` | off | Diff against the most recent prior report in `--report-dir`. |
 
 ## Definition of Done (single source of truth)
@@ -98,6 +101,30 @@ A `seo-audit` run is **DONE** only when **all** of the following hold:
    brand-scan + inventory pipeline stays fully offline). If `--url`
    is supplied, the probe layer (Slice 02) runs and its findings flow
    through the same synthesis pipeline.
+8. If `--push` is passed, **no submission or file write happens until
+   the agent has asked the user, per operation, and received an
+   explicit confirmation.** The script never prompts; the agent does.
+   `--push --dry-run` is side-effect-free.
+
+## Push confirmation flow (binding for the agent)
+
+When the user passes `--push`, the dispatcher prints a structured plan
+to stdout. Before executing **any** operation, you (the agent) must:
+
+1. Read the plan back to the user in plain prose — name each module,
+   show what would be submitted, and surface every warning and
+   `first_setup_hint`.
+2. Ask **once per module**: "Should I run the IndexNow push to
+   `<host>`?" — wait for an explicit yes/no.
+3. Only call `push.execute_all(plans, clients=..., confirmations=...)`
+   with `confirmations[module] = True` for the modules the user
+   confirmed. Modules the user declined stay `False` and are skipped
+   silently.
+4. If a module's plan is `ready: False`, do not even ask — read the
+   `reason` / `first_setup_hint` to the user and move on.
+
+The script intentionally has no `input()` call. That keeps the
+confirmation in your conversational control where it belongs.
 
 ## Free-tier discipline
 
@@ -117,9 +144,12 @@ documented below.
 | Mozilla HTTP Observatory (`http-observatory.security.mozilla.org/api/v1/`) | free, no key | no published hard cap; results cached server-side for 24h per host ([Observatory docs](https://github.com/mozilla/http-observatory/blob/master/httpobs/docs/api.md)) | rescans before the 24h cache window return cached results |
 | Google Search Console API (`mcp__gsc__*`) | free with a verified GSC property | 1 200 queries / minute, 30 000 queries / day per project ([GSC API quotas](https://developers.google.com/webmaster-tools/limits)) | HTTP 429 / quota-exceeded — wait until the next day |
 | Google PageSpeed Insights API | free with API key | 25 000 requests / day, 240 requests / 100 s / user ([PSI API quotas](https://developers.google.com/speed/docs/insights/v5/get-started#quota)) | HTTP 429 — adapter logs the error and contributes `[]` |
+| IndexNow (`api.indexnow.org`) | free, no provider key — user generates and self-hosts the key file | no published per-day cap; one POST submits a batch of URLs ([IndexNow docs](https://www.indexnow.org/documentation)) | malformed requests rejected; missing key file → HTTP 4xx |
+| Bing Webmaster URL Submission API | free, `BING_WEBMASTER_API_KEY` from Webmaster Tools | 10 URLs / day default for unverified sites; 10 000 / day for verified ([Bing docs](https://learn.microsoft.com/en-us/bingwebmaster/getting-access)) | HTTP 4xx; the skill clips the batch via a local date-rolled counter (`BING_DAILY_LIMIT` env overrides) |
+| `llms.txt` / `llms-full.txt` (local file) | free; generated locally | n/a — purely local file write | n/a |
 
-Slice 03 adds push (IndexNow, Bing Webmaster, `llms.txt` generation),
-opt-in only.
+Push (IndexNow, Bing Webmaster, `llms.txt`) is opt-in via `--push` and
+confirmed per operation. See [push.md](push.md).
 
 ## Limitations (v1)
 
