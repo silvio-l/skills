@@ -34,6 +34,14 @@ import brand_scan as BS  # noqa: E402
 import synthesis as SY  # noqa: E402
 from probes import probe as PROBE  # noqa: E402
 from push import push as PUSH  # noqa: E402
+from setup import doctor as DOCTOR  # noqa: E402
+from setup import verify as VERIFY  # noqa: E402
+from setup import setup_indexnow as SETUP_INDEXNOW  # noqa: E402
+from setup import setup_pagespeed as SETUP_PAGESPEED  # noqa: E402
+from setup import setup_bing as SETUP_BING  # noqa: E402
+from setup import setup_gsc as SETUP_GSC  # noqa: E402
+
+SETUP_TOOLS = ("indexnow", "pagespeed", "bing", "gsc")
 
 GENERATOR_VERSION = "v1.1.0"
 TEMPLATE_PATH = os.path.join(
@@ -151,6 +159,70 @@ def _domain_doc_path(root: str, inv: dict) -> str | None:
     return full if os.path.isfile(full) else None
 
 
+def _public_host_from_urls(urls) -> str:
+    """Extract bare host from the first --url for IndexNow verify."""
+    if not urls:
+        return ""
+    from urllib.parse import urlparse
+    parsed = urlparse(urls[0])
+    return parsed.netloc
+
+
+def _run_setup_mode(args: argparse.Namespace, root: str, dist: str) -> int:
+    """Dispatch a single --setup wizard. Idempotent; no input()."""
+    inv = INV.inventory(root)
+    public_dir = _resolve_public_dir(root, dist)
+    tool = args.setup
+    platform = sys.platform
+    browser_opener = _real_browser_opener if platform == "darwin" else None
+
+    if tool == "indexnow":
+        plan = SETUP_INDEXNOW.plan(
+            os.environ,
+            public_dir=pathlib_path(public_dir) if public_dir else None,
+            force=args.force,
+        )
+        result = SETUP_INDEXNOW.execute(plan)
+        print(SETUP_INDEXNOW.render(plan, result))
+    elif tool == "pagespeed":
+        plan = SETUP_PAGESPEED.plan(os.environ)
+        result = SETUP_PAGESPEED.execute(
+            plan, platform=platform, browser_opener=browser_opener,
+        )
+        print(SETUP_PAGESPEED.render(plan, result))
+    elif tool == "bing":
+        plan = SETUP_BING.plan(os.environ)
+        result = SETUP_BING.execute(
+            plan, platform=platform, browser_opener=browser_opener,
+        )
+        print(SETUP_BING.render(plan, result))
+    elif tool == "gsc":
+        plan = SETUP_GSC.plan(os.environ)
+        result = SETUP_GSC.execute(
+            plan, platform=platform, browser_opener=browser_opener,
+        )
+        print(SETUP_GSC.render(plan, result))
+    else:  # pragma: no cover — argparse already rejects unknown values
+        print(f"error: unknown setup tool: {tool}", file=sys.stderr)
+        return 2
+    return 0
+
+
+def pathlib_path(p):
+    import pathlib
+    return pathlib.Path(p)
+
+
+def _real_browser_opener(url: str) -> None:  # pragma: no cover — live only
+    import subprocess
+    subprocess.run(["open", url], check=False)
+
+
+def _real_http_client(method, url, headers, body):  # pragma: no cover — live only
+    from push import _http
+    return _http.real_client(method, url, headers, body)
+
+
 def run(args: argparse.Namespace) -> int:
     root = os.path.abspath(args.root)
     if not os.path.isdir(root):
@@ -162,9 +234,55 @@ def run(args: argparse.Namespace) -> int:
               file=sys.stderr)
         return 2
 
+    if args.setup and (args.doctor or args.verify):
+        print(
+            "error: --setup is a single-tool wizard; "
+            "run --doctor / --verify separately.",
+            file=sys.stderr,
+        )
+        return 2
+
+    if args.force and not args.setup:
+        print("error: --force only applies to --setup indexnow.",
+              file=sys.stderr)
+        return 2
+
     dist = args.dist or os.path.join(root, "dist")
+
+    # ----- Setup wizard (single-tool, no audit flow) -----
+    if args.setup:
+        return _run_setup_mode(args, root, dist)
+
     report_dir = args.report_dir or os.path.join(root, ".scratch", "seo-audit")
     os.makedirs(report_dir, exist_ok=True)
+
+    # ----- Doctor mode -----
+    if args.doctor:
+        public_dir = _resolve_public_dir(root, dist)
+        report = DOCTOR.run(
+            env=os.environ,
+            root=pathlib_path(root),
+            public_dir=pathlib_path(public_dir) if public_dir else None,
+        )
+        print(DOCTOR.render(report))
+
+    # ----- Verify mode (may run together with --doctor) -----
+    if args.verify:
+        clients = {
+            "pagespeed": _real_http_client,
+            "bing": _real_http_client,
+            "indexnow": _real_http_client,
+            # gsc client stays unwired — the agent calls the MCP tool itself.
+        }
+        results = VERIFY.run(
+            env=os.environ,
+            public_host=_public_host_from_urls(args.url),
+            clients=clients,
+        )
+        print(VERIFY.render(results))
+
+    if args.doctor or args.verify:
+        return 0
 
     inv = INV.inventory(root)
     glossary = GP.load_glossary_from_repo(root)
@@ -271,6 +389,18 @@ def parse_args(argv) -> argparse.Namespace:
                         "without performing any submissions or writes.")
     p.add_argument("--compare-last", action="store_true",
                    help="Diff against the most recent prior report.")
+    p.add_argument("--doctor", action="store_true",
+                   help="Doctor mode — diagnose env / file / probe readiness.")
+    p.add_argument("--verify", action="store_true",
+                   help="Verify mode — one minimal probe call per "
+                        "configured tool.")
+    p.add_argument("--setup", choices=SETUP_TOOLS, default=None,
+                   metavar="TOOL",
+                   help=f"Setup wizard for a single tool "
+                        f"({'/'.join(SETUP_TOOLS)}).")
+    p.add_argument("--force", action="store_true",
+                   help="Force-regenerate setup artefacts (currently only "
+                        "honoured by `--setup indexnow`).")
     return p.parse_args(argv)
 
 

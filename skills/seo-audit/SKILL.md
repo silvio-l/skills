@@ -2,7 +2,7 @@
 name: seo-audit
 description: "Local-first, free-tier-only SEO audit for any repo with a built website. Phase pipeline: inventory (framework, pages, SEO assets, app-store listings, domain doc) → brand-consistency scan (anti-vocabulary table from CONTEXT.md/CLAUDE.md matched against built HTML, with contrastive-marker and frontmatter-flag suppression) → external probes (Lighthouse, pa11y, GSC, W3C, Schema, Observatory, PageSpeed) when `--url` is passed → synthesis (dedup, score by severity × user_impact / fix_effort, deterministic tiebreaker) → write Markdown report under .scratch/<feature>/seo-audit-<date>.md. Optional opt-in push module (`--push`): IndexNow + Bing Webmaster URL submission + llms.txt generator, confirmable per operation, with `--dry-run`. Use when the user says \"SEO audit\", \"check the brand voice on the site\", \"scan dist for anti-vocabulary\", \"is our site consistent with CONTEXT.md\", \"prep an SEO report\", \"push URLs to IndexNow / Bing\", \"generate llms.txt\", or runs /seo-audit."
 metadata:
-  argument-hint: "[--root <path>] [--dist <path>] [--report-dir <path>] [--quick] [--url <url>] [--push] [--dry-run] [--compare-last]"
+  argument-hint: "[--root <path>] [--dist <path>] [--report-dir <path>] [--quick] [--url <url>] [--push] [--dry-run] [--compare-last] [--doctor] [--setup <tool>] [--verify] [--force]"
 ---
 
 # seo-audit — Local-First SEO Audit
@@ -20,6 +20,7 @@ fix the findings — that is the user's call after they read the report.
 | Brand-consistency phase — glossary parser, scanner, suppression rules | [brand.md](brand.md) |
 | External-probes phase — seven adapters, parallel runner, live-smoke | [probes.md](probes.md) |
 | Push phase — IndexNow, Bing Webmaster, llms.txt; confirmation flow | [push.md](push.md) |
+| Setup-Onboarding phase — `--doctor` / `--setup <tool>` / `--verify` | [setup.md](setup.md) |
 | Synthesis phase — weights, score formula, dedup, tiebreaker | [synthesis.md](synthesis.md) |
 | Report phase — sections, template, diff mode | [report.md](report.md) |
 | Report template (Markdown) | [templates/report.md](templates/report.md) |
@@ -29,6 +30,7 @@ fix the findings — that is the user's call after they read the report.
 | Inventory scanner | [scripts/inventory.py](scripts/inventory.py) |
 | External-probes adapters | [scripts/probes/](scripts/probes/) |
 | Push adapters (IndexNow / Bing / llms.txt) | [scripts/push/](scripts/push/) |
+| Setup-Onboarding (doctor + wizards + verify) | [scripts/setup/](scripts/setup/) |
 | Synthesis (pure logic) | [scripts/synthesis.py](scripts/synthesis.py) |
 
 Read the phase doc when you enter that phase. `SKILL.md` is the
@@ -81,6 +83,10 @@ stdout. Read it back to summarize for the user.
 | `--push` | off | Enable push module (IndexNow, Bing Webmaster, llms.txt). Opt-in; the agent confirms each operation with the user before firing it. |
 | `--dry-run` | off | Only valid with `--push`: render the push plan to stdout without performing any submissions or writes. |
 | `--compare-last` | off | Diff against the most recent prior report in `--report-dir`. |
+| `--doctor` | off | Setup-Onboarding diagnostic — read-only env / file / probe inspection. Mutually compatible with `--verify`. See [setup.md](setup.md). |
+| `--setup <tool>` | none | Single-tool setup wizard. Valid tools: `indexnow`, `pagespeed`, `bing`, `gsc`. Not combinable with `--doctor` / `--verify`. See [setup.md](setup.md). |
+| `--verify` | off | One minimal probe call per configured tool, returning per-tool OK/4xx/5xx status. Mutually compatible with `--doctor`. See [setup.md](setup.md). |
+| `--force` | off | Force-regenerate setup artefacts (currently only honoured by `--setup indexnow`). |
 
 ## Definition of Done (single source of truth)
 
