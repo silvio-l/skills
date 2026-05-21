@@ -77,9 +77,9 @@ If you only want one of these, skip the dependencies you do not exercise.
 
 ### `to-roadmap`
 
-**The Problem.** A raw idea document or rough PRD is too big to feed straight into `/to-prd` — the agent either drowns in scope or quietly skips half the features. There is no intermediate slicing step that decomposes the whole product into agent-sized chunks before any PRD writing begins.
+**The Problem.** A raw idea document or rough PRD is too big to feed straight into `/to-prd` — the agent either drowns in scope or quietly skips half the features. And once a roadmap exists, mid-flight changes (new sprint, split, drop, reorder) tend to fragment it instead of staying coherent. There is no upstream layer that owns the roadmap as a living artifact.
 
-**The Fix.** A coarse upstream pass: read the idea document end-to-end, extract a feature inventory, map technical dependencies, define phases, then cut the work into ~100k-token sprints with explicit dependencies, MVP cut, and later-release ordering. Output lands as `.scratch/roadmap.md` — one sprint at a time later becomes one PRD via `/to-prd`.
+**The Fix.** Three operations on `.scratch/roadmap.md`: `create` decomposes the idea document into ~100k-token sprints with stable Sprint-IDs, dependencies, MVP cut, and later-release ordering; `update` patches the roadmap surgically from a free-text instruction with a diff-plan-then-confirm flow; `status` flips a sprint through `todo → in-progress → done`, called manually or automatically by `ratchet-up` at the start and end of a loop. One sprint at a time later becomes one PRD via `/to-prd`.
 
 ## Credit
 

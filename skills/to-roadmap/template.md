@@ -71,9 +71,21 @@ Liste die Phasen mit Einzeiler-Begründung. Standardvorschlag — passe ihn am k
 
 ## 5. Agentenoptimierte Sprint-Roadmap
 
+**Sprint-ID — stabil und maschinenlesbar.** Format: `sprint-<zweistellig>-<kebab-case-slug>`, z. B. `sprint-03-pflegeobjekt-anlegen`. Die Nummer entspricht der initialen Position; bei späteren Umsortierungen oder Einfügungen **ändert sich die ID nicht** — die H3-Überschrift „Sprint X" ist nur Lesehilfe, der Slug bleibt für alle Verlinkungen (Feature-Verzeichnis, ratchet-up, manuelle Verweise) der stabile Anker.
+
+**Status — Lebenszyklus eines Sprints:** `todo` → `in-progress` → `done`.
+
+- `todo` — Default beim Anlegen. Sprint ist geschnitten, noch nicht in `/to-prd` überführt.
+- `in-progress` — Mindestens ein Issue dieses Sprints wird gerade bearbeitet (gesetzt von `ratchet-up` oder manuell).
+- `done` — Alle Issues aus dem zugehörigen PRD sind durch `ratchet-up` als `done` markiert.
+
 Pro Sprint **exakt** dieser Block:
 
 ### Sprint <Nr>: <klarer Name>
+
+**Sprint-ID:** sprint-<NN>-<kebab-case-slug>
+
+**Status:** todo
 
 **Phase:** <Phasennummer + Name>
 
@@ -97,7 +109,7 @@ Pro Sprint **exakt** dieser Block:
 - <Bewusst ausgeschlossene Dinge, um den Sprint klein zu halten>
 
 **Abhängigkeiten:**
-- <Vorherige Sprints, z. B. „Sprint 2, Sprint 4">
+- <Vorherige Sprint-IDs, z. B. `sprint-02-…`, `sprint-04-…`>
 - <Offene Entscheidungen, die vorher fallen müssen>
 - <Technische Voraussetzungen>
 
@@ -119,22 +131,22 @@ Pro Sprint **exakt** dieser Block:
 
 ## 6. Empfohlene Reihenfolge
 
-Nummerierte Liste **aller** Sprints in der finalen Umsetzungsreihenfolge:
+Nummerierte Liste **aller** Sprints in der finalen Umsetzungsreihenfolge — referenziere Sprints über ihre **Sprint-ID**, nicht über die H3-Nummer:
 
-1. Sprint 1: <Name>
-2. Sprint 2: <Name>
+1. `sprint-01-<slug>` — <Name>
+2. `sprint-02-<slug>` — <Name>
 3. …
 
-Wenn Sprints parallelisierbar sind, markiere sie mit `‖` und derselben Nummer (z. B. `3a ‖ 3b`).
+Wenn Sprints parallelisierbar sind, markiere sie mit `‖` und derselben Nummer (z. B. `3a ‖ 3b`). Status steht **nicht** in dieser Liste — Single Source of Truth ist das `Status:`-Feld im jeweiligen Sprint-Block.
 
 ---
 
 ## 7. MVP-Schnitt
 
-Liste die Sprints, die zwingend für ein erstes nutzbares MVP nötig sind:
+Liste die Sprints, die zwingend für ein erstes nutzbares MVP nötig sind — referenziere wieder per **Sprint-ID**:
 
-- Sprint <Nr>: <Name>
-- Sprint <Nr>: <Name>
+- `sprint-<NN>-<slug>` — <Name>
+- `sprint-<NN>-<slug>` — <Name>
 - …
 
 Kurzbegründung, warum genau diese Auswahl den MVP-Vertrag aus Sektion 1 abdeckt.
@@ -146,13 +158,13 @@ Kurzbegründung, warum genau diese Auswahl den MVP-Vertrag aus Sektion 1 abdeckt
 Ordne alle nicht-MVP-Sprints in spätere Releases ein:
 
 ### Release 1.1 — <Thema>
-- Sprint <Nr>: <Name>
+- `sprint-<NN>-<slug>` — <Name>
 
 ### Release 1.2 — <Thema>
-- Sprint <Nr>: <Name>
+- `sprint-<NN>-<slug>` — <Name>
 
 ### Backlog (P2/P3, ohne Releasezuordnung)
-- Sprint <Nr>: <Name>
+- `sprint-<NN>-<slug>` — <Name>
 
 ---
 
@@ -160,7 +172,7 @@ Ordne alle nicht-MVP-Sprints in spätere Releases ein:
 
 Nur Fragen, deren fehlende Antwort zu **Fehlplanung oder größerem Rework** führen würde. Keine Wunschliste, keine „nice to know".
 
-1. <Frage> — _blockiert: Sprint X, Sprint Y_
+1. <Frage> — _blockiert: `sprint-NN-<slug>`, `sprint-MM-<slug>`_
 2. <Frage> — _blockiert: …_
 
 Wenn keine Rückfragen offen sind, schreibe: `Keine kritischen Rückfragen offen.`
