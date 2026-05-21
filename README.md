@@ -75,6 +75,12 @@ If you only want one of these, skip the dependencies you do not exercise.
 
 **The Fix.** A context-safe ratchet — discover ready issues, respect `blocked-by`, dispatch isolated workers and read-only reviewers, gate on format/analyze, persist rework feedback to disk. The orchestrator stays small; the work moves forward one click at a time, never backward.
 
+### `to-roadmap`
+
+**The Problem.** A raw idea document or rough PRD is too big to feed straight into `/to-prd` — the agent either drowns in scope or quietly skips half the features. There is no intermediate slicing step that decomposes the whole product into agent-sized chunks before any PRD writing begins.
+
+**The Fix.** A coarse upstream pass: read the idea document end-to-end, extract a feature inventory, map technical dependencies, define phases, then cut the work into ~100k-token sprints with explicit dependencies, MVP cut, and later-release ordering. Output lands as `.scratch/roadmap.md` — one sprint at a time later becomes one PRD via `/to-prd`.
+
 ## Credit
 
 These skills exist because [Matt Pocock](https://github.com/mattpocock) made his own [`mattpocock/skills`](https://github.com/mattpocock/skills) public and showed what a working skill ecosystem looks like. The structural choices here — directory layout, frontmatter conventions, the `npx skills@latest add` install path, the failure-mode/fix narrative pattern in this README — are his. If you find any of this useful, point upstream first.
