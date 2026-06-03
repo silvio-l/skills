@@ -21,3 +21,9 @@ __pycache__/
 
 # Claude Code local-only settings (per-project; never shared)
 .claude/settings.local.json
+
+# Skill secrets — API keys live in <skill>/.env and must NEVER be committed.
+# (e.g. skills/openai-image/.env). .env.example stays tracked as the schema.
+.env
+**/.env
+!**/.env.example

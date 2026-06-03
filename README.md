@@ -69,6 +69,12 @@ If you only want one of these, skip the dependencies you do not exercise.
 
 **The Fix.** A threshold: ≤10 findings → fix directly. >10 → produce a plan first, then dispatch parallel subagents per finding cluster. Each subagent works in isolation; the orchestrator never holds the full pile in one head.
 
+### `openai-image`
+
+**The Problem.** Generating an image from a prompt always means re-deriving the same boilerplate: which OpenAI model supports transparency, how the key is loaded, how to retry a flaky 429, how to decode the base64 to a file. Every project reinvents it, and the API key ends up copy-pasted into yet another script that risks getting committed.
+
+**The Fix.** One self-contained Node script. It picks the model automatically — `--transparent` ⇒ `gpt-image-1` (the only one with an alpha channel), everything else ⇒ the higher-quality `gpt-image-2` — resolves the API key from its own gitignored `.env` (or the shell env), retries transient 429/5xx/network errors with exponential backoff, and writes PNG(s) to disk. No project dependencies; usable from any directory. `--dry-run` validates the resolved config for free before spending a credit.
+
 ### `ratchet-up`
 
 **The Problem.** An agentic loop that grinds through issues sounds great until you realize each iteration drags the whole feature's state back into the orchestrator's context. Six issues in, you are hallucinating dependencies that do not exist.
