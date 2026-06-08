@@ -141,7 +141,7 @@ If it exists:
 ## §4 — Discover Issues (metadata only)
 
 ```bash
-grep -rl "^Status: ready-for-agent" "$feature_path/issues/" | sort
+grep -rlE "^(Status:|- \*\*Status:\*\*) ready-for-agent" "$feature_path/issues/" | sort
 ```
 
 For each candidate, read **only**:
@@ -454,7 +454,7 @@ The orchestrator retains only this summary in active context. **Do not** retain:
 After each cycle:
 
 ```bash
-grep -rl "^Status: ready-for-agent" "$feature_path/issues/" | sort
+grep -rlE "^(Status:|- \*\*Status:\*\*) ready-for-agent" "$feature_path/issues/" | sort
 ```
 
 Re-evaluate blockers. Append newly eligible issues to the queue if they are not already queued, not currently being processed, and not `needs-info` / `needs-human`. This is how dependency chains unblock within a single iteration.
@@ -480,9 +480,9 @@ Independent of rework_count, `malformed_retries` allows **one** retry per issue 
 After the loop, classify the result objectively:
 
 ```bash
-grep -r "^Status:" "$feature_path/issues/" | sort
-grep -rl "^Status: ready-for-agent" "$feature_path/issues/" || true
-grep -rL "^Status: done" "$feature_path/issues/" || true
+grep -rE "^(Status:|- \*\*Status:\*\*) " "$feature_path/issues/" | sort
+grep -rlE "^(Status:|- \*\*Status:\*\*) ready-for-agent" "$feature_path/issues/" || true
+grep -rLE "^(Status:|- \*\*Status:\*\*) done" "$feature_path/issues/" || true
 ```
 
 **A) All Done** — every issue file has `Status: done` and none have `ready-for-agent`, `needs-info`, or `needs-human` → proceed to §15.5, then §16, then §17.

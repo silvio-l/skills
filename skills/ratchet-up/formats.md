@@ -14,7 +14,12 @@ The skill accepts output from `/to-issues`, `/triage` (Agent Brief), and the str
 | **Acceptance criteria** | `## Acceptance Criteria`, `## Acceptance criteria`, or a `**Acceptance criteria:**` bold block **inside** `## Agent Brief` |
 | **Blocked by** | `## Blocked by` |
 
-Plus a top-level `Status:` line.
+Plus a top-level status line. Two forms are accepted (pick one per feature, consistent with the issue body's style):
+
+- **strict / greenfield:** `Status: ready-for-agent`
+- **Triage / Agent-Brief markdown:** `- **Status:** ready-for-agent`
+
+Every status grep in `algorithm.md` and `scripts/check-evidence.sh` matches both forms — the issue body decides the style, not the tooling.
 
 **Quality-gate greps** (run by §5 of `algorithm.md`):
 

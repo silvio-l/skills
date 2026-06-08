@@ -39,8 +39,11 @@ if (( ${#missing[@]} > 0 )); then
   exit 1
 fi
 
-# Status flip check — worker contract requires `Status: done` on DONE return.
-if ! grep -qE "^Status: done$" "$issue_path"; then
+# Status flip check — worker contract requires the status be flipped to `done`
+# on a DONE return. Accept both the strict form (`Status: done`) and the Triage /
+# Agent-Brief markdown form (`- **Status:** done`), per formats.md's synonym
+# contract — the issue body decides the style, not this script.
+if ! grep -qE "^(Status: done|- \*\*Status:\*\* done)[[:space:]]*$" "$issue_path"; then
   echo "evidence-incomplete: Status line not flipped to 'done'"
   exit 1
 fi
