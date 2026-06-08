@@ -49,6 +49,83 @@ TEMPLATE_PATH = os.path.join(
 )
 
 
+# --- dotenv auto-loader ----------------------------------------------------
+#
+# Lets users keep API keys in `<root>/admin.env` instead of remembering to
+# `source admin.env` before every audit. Keys already present in the live
+# environment always win — the loader never overrides the shell.
+
+DEFAULT_DOTENV_FILES = ("admin.env", ".env")
+
+
+def _parse_dotenv(text: str) -> dict[str, str]:
+    """Parse KEY=VALUE lines from dotenv-style text.
+
+    Ignores blank lines and full-line `#` comments, strips an optional
+    `export ` prefix and one layer of surrounding single/double quotes,
+    and splits on the first `=` only — so `=` and inline `#` inside a value
+    survive. Lines without `=` and lines with an empty key are skipped.
+    """
+    out: dict[str, str] = {}
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export "):].lstrip()
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if not key:
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+            value = value[1:-1]
+        out[key] = value
+    return out
+
+
+def _load_dotenv_files(root, extra_files=None, env=None):
+    """Load dotenv files into `env`, returning ``[(path, keys_added), ...]``.
+
+    Order of precedence: explicit `extra_files` (e.g. ``--env-file``) first,
+    then the fixed `DEFAULT_DOTENV_FILES` resolved under `root`. Each existing
+    file is parsed exactly once (duplicate paths are de-duplicated). A key is
+    only set when it is not already present in `env`, so live shell values and
+    earlier files both win over later ones. Missing or unreadable files are
+    skipped silently. `env` defaults to ``os.environ``.
+    """
+    if env is None:
+        env = os.environ
+    candidates = [os.path.abspath(p) for p in (extra_files or [])]
+    candidates += [
+        os.path.abspath(os.path.join(root, name))
+        for name in DEFAULT_DOTENV_FILES
+    ]
+
+    loaded = []
+    seen: set[str] = set()
+    for path in candidates:
+        if path in seen:
+            continue
+        seen.add(path)
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                pairs = _parse_dotenv(f.read())
+        except OSError:
+            continue
+        added = 0
+        for key, value in pairs.items():
+            if key not in env:
+                env[key] = value
+                added += 1
+        loaded.append((path, added))
+    return loaded
+
+
 def _load_template() -> str:
     with open(TEMPLATE_PATH, "r", encoding="utf-8") as f:
         return f.read()
@@ -229,6 +306,15 @@ def run(args: argparse.Namespace) -> int:
         print(f"error: --root does not exist: {root}", file=sys.stderr)
         return 2
 
+    # Auto-load API keys from <root>/admin.env (and any --env-file) before any
+    # mode reads os.environ. Out-of-band on stderr; never overrides the shell.
+    for path, added in _load_dotenv_files(root, extra_files=args.env_file):
+        print(
+            f"seo-audit: loaded {added} key(s) from "
+            f"{os.path.relpath(path, root)}",
+            file=sys.stderr,
+        )
+
     if args.dry_run and not args.push:
         print("error: --dry-run is only meaningful with --push.",
               file=sys.stderr)
@@ -371,6 +457,12 @@ def parse_args(argv) -> argparse.Namespace:
     )
     p.add_argument("--root", required=True,
                    help="Repository root to audit.")
+    p.add_argument("--env-file", dest="env_file", action="append", default=[],
+                   metavar="PATH",
+                   help="Extra dotenv file to load before the audit "
+                        "(repeatable). Loaded ahead of the auto-detected "
+                        "<root>/admin.env and <root>/.env; live shell values "
+                        "always win.")
     p.add_argument("--dist", default=None,
                    help="Built HTML directory (default: <root>/dist).")
     p.add_argument("--report-dir", default=None,

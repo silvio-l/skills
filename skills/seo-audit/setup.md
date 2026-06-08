@@ -11,6 +11,16 @@ free-tier-safe (no SaaS, no hosted dependencies, no real submissions).
 | `--setup <tool>`     | alone (not with --doctor / --verify) | writes key file (indexnow only), opens browser (darwin only) |
 | `--verify`           | with `--doctor` | one HTTP call per configured tool |
 
+### Providing API keys
+
+The keys below (`PAGESPEED_API_KEY`, `BING_WEBMASTER_API_KEY`, `INDEXNOW_KEY`, …)
+can come straight from the environment, or — to avoid re-`export`-ing them every
+run — from a dotenv file. On every invocation the dispatcher auto-loads
+`<root>/admin.env` and `<root>/.env` (in that order); pass `--env-file <path>`
+(repeatable) to add more, loaded ahead of the auto-detected ones. A key already
+set in the live shell always wins, and missing files are skipped silently. Keep
+real keys in `<root>/admin.env` (git-ignored) — never commit them.
+
 ## Mode 1 — `--doctor`
 
 Pure read-only diagnostic. Seven check areas, in fixed order:
