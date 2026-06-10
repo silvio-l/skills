@@ -26,9 +26,15 @@ python3 scripts/humanize.py --mode score --format text <file>
 
 Collect:
 - All tier-1 findings (always surfaced — must address).
-- Tier-2 cluster findings (surfaced when ≥3 in a 10-line window).
-- The tier-3 density hint (flag only — guides rhythm, not word swaps).
-- The five dimension scores (directness, rhythm, trust, authenticity, density).
+- The always-surfaced structural tells: `struct_anaphora` ("Kein X. Kein Y."
+  staccato) and `struct_adj_tricolon` ("— groß, klar, motivierend"). These
+  surface even in isolation — address each one.
+- Tier-2 cluster findings (`struct_neg_parallelism`, surfaced when ≥3 in a
+  10-line window).
+- The tier-3 density signals: em-dash density (drives the Density score —
+  if it is low, thin out the dashes) and the generic-tricolon hint.
+- The five dimension scores (directness, rhythm, trust, authenticity,
+  density). For `.ts` dictionaries, rhythm is neutral by design — ignore it.
 
 Do not start rewriting until you can answer: "Exactly which lines and
 patterns are the problem?"
@@ -102,11 +108,19 @@ most likely to survive in live-site copy:
 
 **DE** — transitional openers: "Zudem", "Darüber hinaus", "Im Hinblick
 auf"; hollow certainty: "Es ist wichtig zu beachten", "Es ist zu
-beachten"; Nominalstil where a verb form exists.
+beachten"; marketing superlatives: "kinderleicht", "im Handumdrehen",
+"mehr denn je"; Nominalstil where a verb form exists.
 
 **EN** — hollow verbs: "delve", "harness", "leverage", "revolutionize";
-hollow openers: "In today's …", "It is important to note that",
-"It is worth noting"; em-dash as a stylistic prop (U+2014).
+marketing superlatives: "effortless(ly)", "must-have"; hollow openers: "In
+today's …", "It is important to note that", "It is worth noting".
+
+**Structure (both languages)** — anaphora ("Kein X. Kein Y. Nur Z." /
+"No X. No Y."), the clause-final adjective triple ("— groß, klar,
+motivierend"), negative parallelism ("nicht nur … sondern auch"), and
+em-dash over-use. Break the staccato into varied sentences; demote one
+adjective or recast the triple; replace em-dashes with commas/parentheses
+or a full stop. Vary, don't mechanically substitute.
 
 ## Confirmation flow (binding)
 

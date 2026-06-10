@@ -211,9 +211,10 @@ def main(argv: list | None = None) -> int:
 
     if args.mode == "scan":
         # Apply tier gating so scan output mirrors the score gate: tier-1 always,
-        # tier-2 only in clusters, tier-3 (em-dash/structure) as a density hint.
-        with open(file_path, encoding="utf-8", errors="replace") as f:
-            _text = f.read()
+        # tier-2 only in clusters (plus always-surfaced high-confidence structure),
+        # tier-3 (em-dash) as a density hint. Word count uses prose only, so the
+        # tier-3 hint is not diluted by UI labels in fragment files.
+        _text = slop_scanner.extract_prose_text(file_path)
         _wc = max(len(_text.split()), 1)
         _gating = slop_scorer.apply_tier_gating(scan_result["findings"], word_count=_wc)
         scan_out = dict(scan_result)
@@ -226,14 +227,22 @@ def main(argv: list | None = None) -> int:
         return 0
 
     # --- Step 2: score (--mode score) ---
-    # Read text for scoring (rhythm / density use word count)
-    with open(file_path, encoding="utf-8", errors="replace") as f:
-        text = f.read()
+    # Score over PROSE only — short UI labels are excluded so a slop-dense
+    # paragraph is not diluted by nav strings (i18n .ts files in particular).
+    # Rhythm (sentence burstiness) and Density (findings per word) both use this.
+    text = slop_scanner.extract_prose_text(file_path)
 
     findings = scan_result["findings"]
     wc = max(len(text.split()), 1)
 
-    score_result = slop_scorer.score(text, findings, threshold=args.threshold)
+    # .ts files are i18n/data dictionaries: a bag of independent short strings,
+    # not flowing prose. Sentence burstiness is meaningless there, so hold the
+    # Rhythm dimension neutral instead of rewarding fake variance.
+    rhythm_neutral = slop_scanner._detect_file_strategy(file_path) == "ts"
+
+    score_result = slop_scorer.score(
+        text, findings, threshold=args.threshold, rhythm_neutral=rhythm_neutral
+    )
     gating = slop_scorer.apply_tier_gating(findings, word_count=wc)
 
     output = {

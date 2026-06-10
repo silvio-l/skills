@@ -7,7 +7,7 @@
     "surfaced": false,
     "pattern": "—",
     "suggested_replacement": "-",
-    "rationale": "Em-dash (U+2014) over-use is a FREQUENCY tell, not a per-occurrence one. 2026 detection research (Pangram; Wikipedia 'Signs of AI writing') is explicit that a single em-dash proves nothing — humans use them as a deliberate stylistic device — and that the signal only appears when LLMs sprinkle them formulaically throughout a text. The scanner therefore treats em-dash as a tier-3, density-only hint: individual occurrences are recorded (useful for a rewrite) but never surfaced as findings and never deducted linearly from the score; only an above-threshold density per 100 words raises the structural-tells hint. This avoids flagging legitimate, intentional human em-dash style."
+    "rationale": "Em-dash (U+2014) over-use is a FREQUENCY tell, not a per-occurrence one. 2026 detection research (Pangram; Wikipedia 'Signs of AI writing') is explicit that a single em-dash proves nothing — humans use them as a deliberate stylistic device — and that the signal only appears when LLMs sprinkle them formulaically throughout a text. Each occurrence is recorded (tier-3, never surfaced as an individual finding) but the SCORE now responds to em-dash DENSITY: once occurrences per 100 prose words cross a floor, the Density dimension is penalised proportionally. A handful of intentional em-dashes costs nothing; a text peppered with them is dragged down. This is the 'soft' frequency check the per-occurrence model could not express."
   },
   {
     "pattern_id": "struct_tricolon",
@@ -17,7 +17,7 @@
     "surfaced": false,
     "pattern": "TRICOLON",
     "suggested_replacement": "",
-    "rationale": "Tricolon (rule of three: 'A, B and C') is a soft stylistic tell of AI-generated prose; LLMs over-use three parallel items to signal completeness. BUT a rhetorical rule-of-three is not reliably distinguishable from an ordinary three-item enumeration ('Python, JavaScript and TypeScript'; 'I read the docs, checked the code and fixed the bug') using surface heuristics — any regex narrow enough to avoid those false positives also misses most genuine tricolons. It is therefore recorded as a tier-3, density-only weak hint and the scanner emits NO individual finding for it (surfaced=false); a future aggregate/density pass may report tricolon frequency without flagging single occurrences as errors."
+    "rationale": "Generic tricolon (rule of three: 'A, B and C') is a soft stylistic tell, but a rhetorical rule-of-three is not reliably distinguishable from an ordinary three-item enumeration ('Python, JavaScript and TypeScript') with surface heuristics. It is therefore NOT surfaced and emits no individual finding. The HIGH-confidence sub-variants of the rule of three ARE detected separately and surfaced: adjective tricola after a dash/colon and bare three-adjective segments (struct_adj_tricolon), and repeated sentence openers (struct_anaphora). Those two avoid the enumeration false-positive because a real list ('iPhone, iPad and Android') is neither a clause-final adjective triple nor an anaphora."
   },
   {
     "pattern_id": "struct_neg_parallelism",
@@ -26,6 +26,26 @@
     "lang": "neutral",
     "pattern": "NEG_PARALLELISM",
     "suggested_replacement": "",
-    "rationale": "Negative parallelism ('nicht nur … sondern auch …' / 'not just … but (also) …' / 'not only … but also …') is a rhetorical template heavily over-used in LLM output to signal breadth or contrast. Human writers use it occasionally; in AI text it appears as a reflex on nearly every second claim. Detecting it helps flag text that performs balance rather than achieving it."
+    "rationale": "Negative parallelism ('nicht nur … sondern auch …' / 'not just … but (also) …' / 'not only … but also …') is a rhetorical template heavily over-used in LLM output to signal breadth or contrast. Human writers use it occasionally; in AI text it appears as a reflex on nearly every second claim. Tier-2, surfaced only inside a tier-2 CLUSTER (≥3 tier-2 findings in a 10-line window) — a single contrast is legitimate rhetoric, a cluster is the tell."
+  },
+  {
+    "pattern_id": "struct_anaphora",
+    "type": "structure",
+    "tier": 2,
+    "lang": "neutral",
+    "surfaced": true,
+    "pattern": "ANAPHORA",
+    "suggested_replacement": "",
+    "rationale": "Anaphora — consecutive sentences/fragments that open with the same word — is one of the clearest modern AI MARKETING tells. The canonical form is the 'No X. No Y. Just Z.' / 'Kein X. Kein Y. Nur Z.' staccato (2026 sources: Wikipedia 'Signs of AI writing'; oliviacal AI-tells; contentconsultants 'Antithesen/Stakkato'). It is detected per prose segment: a run of ≥3 consecutive sentences sharing an opener, OR a run of ≥2 consecutive sentences opening with a NEGATION (kein*/nicht/no/not), fires one finding. Unlike generic tricolon this does NOT collide with ordinary enumerations: 'Python, JavaScript and TypeScript' is one sentence, not three with a shared opener. Tier-2 and ALWAYS surfaced (high confidence), bypassing the tier-2 cluster gate."
+  },
+  {
+    "pattern_id": "struct_adj_tricolon",
+    "type": "structure",
+    "tier": 2,
+    "lang": "neutral",
+    "surfaced": true,
+    "pattern": "ADJ_TRICOLON",
+    "suggested_replacement": "",
+    "rationale": "The clause-final three-adjective burst — 'groß, klar, motivierend', 'einfach, visuell, motivierend', 'fast, clean, reliable' — is a high-confidence rule-of-three variant. A 2026 German source (contentconsultants) names '3 kommagetrennte Adjektive nach Gedankenstrich' explicitly as a tell. Detected in two tight shapes: (1) a dash/colon followed by exactly three single-word items at the clause end, and (2) a whole short segment that is nothing but three comma-separated single-word items. Both shapes exclude real enumerations, which are normally embedded in a longer phrase ('verfügbar für iPhone, iPad und Android — …') rather than standing alone as a clause-final adjective triple. Tier-2 and ALWAYS surfaced, bypassing the tier-2 cluster gate."
   }
 ]

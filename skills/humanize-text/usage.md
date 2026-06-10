@@ -14,7 +14,7 @@ Options:
   --format json|text    output format (default: json)
   --lang de|en|auto     language (default: auto — heuristic detection)
   --lexicon-dir <dir>   override the lexicon directory
-  --threshold N         override score threshold (default 35/50)
+  --threshold N         override score threshold (default 37/50)
 ```
 
 ## Mode reference
@@ -73,7 +73,7 @@ gates:
     command: >
       python3 ~/.claude/skills/humanize-text/scripts/humanize.py
         --mode score
-        --threshold 35
+        --threshold 37
         <file>
     on_fail: needs-revision
 ```
@@ -89,57 +89,41 @@ done
 The per-file exit code (`0`/`1`) gates the ratchet loop: one failing file
 stops the loop so the agent addresses it before continuing.
 
-## Spot-check — live site samples (2026-06-10)
+## Spot-check — HellerIO landing copy (2026-06-10, post-rework)
 
-Two real files from the live sites were scanned as part of the AC6
-acceptance check for this skill slice. No changes were made to either
-file — this is a read-only record.
+The HellerIO i18n dictionaries were the calibration target for the 2026
+marketing-tell rework. Before the rework `de.ts` scored **50/50 PASS, 0
+surfaced** despite obvious AI structure; this is the read-only record after.
+No files were changed.
 
-### DE sample: `apps/privat/src/data/projekte.ts`
-
-```
-Language: de
-Findings: 11 (all punct_em_dash, tier-1)
-Overall:   34.1/50  →  NEEDS-REVISION
-Dimensions: directness 1.0 / rhythm 10.0 / trust 10.0 /
-            authenticity 4.5 / density 8.6
-```
-
-All 11 findings are em-dash (U+2014) occurrences inside JSDoc comment
-strings (e.g. `"Ein schlankes Dart/Flutter-Paket — kein Boilerplate"`).
-The em-dash scanner correctly flags them at tier-1. No word-slop matches
-were found. Proper nouns `loam`, `whispaste`, `hellerio`, `skills` are
-intact throughout — the scanner did not touch or suggest altering them.
-
-The `needs-revision` verdict is technically correct (11 tier-1 em-dash
-hits in a 94-line file) but low-priority for a TypeScript data file: the
-em-dashes live in summary strings displayed as prose on the website.
-A targeted rewrite would replace `—` with ` – ` (en-dash, less AI-like)
-or rephrase the summaries to remove the dash entirely.
-If the `.ts` file should be excluded from scoring, add
-`<!-- humanize:ignore-file -->` in a leading comment block.
-
-### EN sample: `apps/privat/src/pages/en/index.astro`
+### DE: `website/src/i18n/de.ts`
 
 ```
-Language: en
-Findings: 2 (both punct_em_dash, tier-1)
-Overall:   46.1/50  →  PASS
-Dimensions: directness 8.0 / rhythm 10.0 / trust 10.0 /
-            authenticity 9.0 / density 9.1
+Language:  de
+Overall:   36.0/50  →  NEEDS-REVISION
+Dimensions: directness 10.0 / rhythm 5.5 / trust 5.0 /
+            authenticity 7.5 / density 8.0
+Total findings: 26  |  Surfaced: 5
+  line  47  [t2]  'Kein Tracking. Kein Stress'                 (struct_anaphora)
+  line  60  [t2]  '— groß, klar, motivierend'                  (struct_adj_tricolon)
+  line 115  [t2]  'Kein Beleg-Scannen. Kein Bank-Anbinden. …'  (struct_anaphora)
+  line 121  [t2]  'Einfach, visuell, motivierend'              (struct_adj_tricolon)
+  line 128  [t2]  'Komplex, feature-überladen, buchhalterisch' (struct_adj_tricolon)
 ```
 
-Two em-dash findings in Astro frontmatter comment lines (lines 3 and 16).
-No word-slop. Score is well above the 35/50 threshold. Proper nouns in
-the file (`silvio-lindstedt.de`) intact. Scanner ran without errors.
+The five surfaced findings are exactly the structural tells a reader spots
+by eye. `rhythm` is held neutral (5.5) because a `.ts` dictionary is
+fragments, not flowing prose. `density` (8.0) absorbs the 21 em-dash
+occurrences via the density penalty without flagging any single dash. The
+`en.ts` counterpart scores the same way (35.9, the English equivalents of
+all five findings).
 
 ### Conclusion
 
-Scanner ran clean on both files (exit 0 for `--mode scan`, exit 0/1 for
-`--mode score` per threshold). No proper-noun damage. No fabricated content
-in findings or suggested replacements. The `--mode score` verdict for the
-`.ts` file is a reminder to consider `humanize:ignore-file` for pure-code
-data files where em-dashes in string literals are authorial style choices.
+The scanner now fires on modern landing-page copy that the old academic
+lexicon missed entirely, while clean flowing prose (e.g. the `index.astro`
+body) still passes. Proper nouns (`hellerio`) are untouched; no content is
+fabricated in findings or suggestions.
 
 ## Demarcation from seo-audit
 

@@ -28,6 +28,9 @@ Scoring formulas (deterministic, no LLM calls):
     Mapped: cv=0 → score 1 (uniform = boring); cv≥0.8 → score 10.
     score = clamp(1 + cv / 0.8 * 9, 1, 10).
     Single sentence (or no sentences): score = 5 (neutral).
+    rhythm_neutral=True (fragment files, e.g. i18n .ts): held at NEUTRAL_RHYTHM
+    (5.5) — concatenated independent UI strings have meaningless burstiness, so
+    they are neither rewarded with a free 10 nor punished.
 
   Trust       (1–10):
     Trust = deduction for hedging/filler phrases (tier-2 structure findings).
@@ -42,12 +45,22 @@ Scoring formulas (deterministic, no LLM calls):
     clamped to [1, 10].
 
   Density     (1–10):
-    Tier-1/tier-2 findings density per 100 words (tier-3 excluded).
-    raw = 10 - findings_per_100 * 0.5
+    Two components:
+      - tier-1/tier-2 findings density per 100 words: −0.5 per unit.
+      - em-dash DENSITY (soft frequency check): once em-dashes per 100 prose
+        words cross EM_DASH_DENSITY_FLOOR, −EM_DASH_PENALTY_SLOPE per unit,
+        capped at EM_DASH_PENALTY_CAP. A single em-dash costs nothing; a text
+        peppered with them is dragged down (2026 research: it is a frequency
+        tell, not a per-occurrence one).
+    raw = 10 - findings_per_100 * 0.5 - em_dash_penalty
     clamped to [1, 10].
 
+  Scoring runs over PROSE only — short UI labels (i18n nav strings) are excluded
+  by the caller (humanize.py via slop_scanner.extract_prose_text) so a slop-dense
+  paragraph is not diluted by dozens of one-word labels.
+
   Overall = sum of five dimensions (max 50).
-  Default threshold = 35 (pass if overall ≥ threshold).
+  Default threshold = 37 (pass if overall ≥ threshold).
 
 Tier-gating (apply_tier_gating):
 ─────────────────────────────────
@@ -72,10 +85,25 @@ from typing import Dict, List, Optional, Tuple
 # Constants
 # ---------------------------------------------------------------------------
 
-DEFAULT_THRESHOLD: float = 35.0   # pass if overall >= threshold (out of 50)
+DEFAULT_THRESHOLD: float = 37.0   # pass if overall >= threshold (out of 50)
 TIER2_CLUSTER_SIZE: int = 3        # ≥N tier-2 findings in a window = cluster
 TIER2_CLUSTER_WINDOW: int = 10     # line-window for tier-2 clustering
 TIER3_DENSITY_THRESHOLD: float = 3.0  # tier-3 per 100 words → hint
+
+# Em-dash density (soft frequency check). A handful of intentional em-dashes is
+# free; above the floor the Density dimension is penalised proportionally.
+EM_DASH_DENSITY_FLOOR: float = 1.0   # em-dashes per 100 prose words tolerated
+EM_DASH_PENALTY_SLOPE: float = 1.2   # points deducted per unit above the floor
+EM_DASH_PENALTY_CAP: float = 5.0     # max points em-dash density can remove
+
+# Rhythm value used when sentence burstiness is not measurable (fragment files).
+NEUTRAL_RHYTHM: float = 5.5
+
+# High-confidence structural tells that are ALWAYS surfaced, bypassing the
+# tier-2 cluster gate (the cluster gate is for the softer neg-parallelism only).
+ALWAYS_SURFACE_IDS: frozenset = frozenset(
+    ["struct_anaphora", "struct_adj_tricolon"]
+)
 
 # ---------------------------------------------------------------------------
 # Sentence splitting (stdlib, no external deps)
@@ -155,17 +183,35 @@ def _score_authenticity(findings: List[Dict]) -> float:
     return max(1.0, min(10.0, raw))
 
 
-def _score_density(findings: List[Dict], word_count: int) -> float:
-    """Density: tier-1/tier-2 findings per 100 words; each unit deducts 0.5.
+def _em_dash_penalty(findings: List[Dict], word_count: int) -> float:
+    """Soft frequency penalty for em-dash DENSITY (not per-occurrence).
 
-    Tier-3 tells (em-dash, tricolon) are excluded — they are weak density-only
-    hints with no linear score penalty (see _score_authenticity). Counting them
-    here would let deliberate human em-dash style tank the gate.
+    Counts em-dash occurrences (pattern_id punct_em_dash) per 100 prose words.
+    Below EM_DASH_DENSITY_FLOOR: no penalty (intentional em-dashes are free).
+    Above it: EM_DASH_PENALTY_SLOPE points per unit, capped at EM_DASH_PENALTY_CAP.
+    This is the 'soft' check 2026 research calls for — a single em-dash proves
+    nothing, but a text peppered with them is dragged down.
+    """
+    wc = max(word_count, 1)
+    em_count = sum(1 for f in findings if f.get("pattern_id") == "punct_em_dash")
+    per_100 = em_count / wc * 100.0
+    excess = max(0.0, per_100 - EM_DASH_DENSITY_FLOOR)
+    return min(EM_DASH_PENALTY_CAP, excess * EM_DASH_PENALTY_SLOPE)
+
+
+def _score_density(findings: List[Dict], word_count: int) -> float:
+    """Density: tier-1/tier-2 findings per 100 words, plus em-dash frequency.
+
+    Two components:
+      - Lexical/structural findings (tier-1 + tier-2) per 100 words, −0.5 each.
+      - Em-dash DENSITY penalty (soft frequency check, see _em_dash_penalty).
+    Generic tricolon (tier-3 struct) is still excluded; em-dash is the only
+    tier-3 signal that now moves the score, and only via density, never per hit.
     """
     wc = max(word_count, 1)
     scoring = [f for f in findings if f.get("tier") in (1, 2)]
     per_100 = len(scoring) / wc * 100.0
-    raw = 10.0 - per_100 * 0.5
+    raw = 10.0 - per_100 * 0.5 - _em_dash_penalty(findings, wc)
     return max(1.0, min(10.0, raw))
 
 
@@ -228,6 +274,13 @@ def apply_tier_gating(
 
         tier2_surfaced = [f for f, flag in zip(sorted_t2, in_cluster) if flag]
 
+    # High-confidence structural tells (anaphora, adjective tricolon) are ALWAYS
+    # surfaced regardless of clustering — the cluster gate is only for the softer
+    # negative-parallelism tier-2 signal.
+    always = [f for f in tier2 if f.get("pattern_id") in ALWAYS_SURFACE_IDS]
+    seen = {id(f) for f in tier2_surfaced}
+    tier2_surfaced.extend(f for f in always if id(f) not in seen)
+
     # Tier-3 density hint
     wc = max(word_count, 1)
     tier3_density = len(tier3) / wc * 100.0
@@ -257,6 +310,7 @@ def score(
     text: str,
     findings: List[Dict],
     threshold: float = DEFAULT_THRESHOLD,
+    rhythm_neutral: bool = False,
 ) -> Dict:
     """Compute a deterministic quality score for *text* given *findings*.
 
@@ -286,7 +340,11 @@ def score(
     wc = max(_word_count(text), 1)
 
     directness = _score_directness(findings)
-    rhythm = _score_rhythm(text)
+    # Fragment-derived text (i18n/data .ts: many independent short strings) yields
+    # an artificially high sentence-length variance — concatenated UI strings are
+    # not flowing prose, so their "burstiness" is meaningless. In that case rhythm
+    # is held NEUTRAL (neither rewarded nor punished) instead of handed a free 10.
+    rhythm = NEUTRAL_RHYTHM if rhythm_neutral else _score_rhythm(text)
     trust = _score_trust(findings)
     authenticity = _score_authenticity(findings)
     density = _score_density(findings, wc)

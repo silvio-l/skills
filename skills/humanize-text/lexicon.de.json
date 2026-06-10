@@ -8,6 +8,39 @@
     "rationale": "Übergangspartikel, die in KI-Texten überproportional häufig am Satzanfang erscheint; erzeugt sterilen, aufgesetzten Duktus."
   },
   {
+    "pattern_id": "de_kinderleicht",
+    "pattern": "kinderleicht",
+    "type": "word",
+    "tier": 1,
+    "inflect": true,
+    "suggested_replacement": "einfach",
+    "rationale": "Werbe-Superlativ für angebliche Mühelosigkeit; KI-Landingpages greifen ihn reflexhaft, statt den Vorgang konkret zu zeigen (vgl. 'mühelos', 'spielend leicht')."
+  },
+  {
+    "pattern_id": "de_im_handumdrehen",
+    "pattern": "im Handumdrehen",
+    "type": "phrase",
+    "tier": 1,
+    "suggested_replacement": "in Minuten",
+    "rationale": "Floskelhafte Schnelligkeits-Behauptung ohne konkrete Angabe; typischer Marketing-Füller in KI-Werbetexten."
+  },
+  {
+    "pattern_id": "de_mehr_denn_je",
+    "pattern": "mehr denn je",
+    "type": "phrase",
+    "tier": 1,
+    "suggested_replacement": "",
+    "rationale": "Dringlichkeits-Floskel ('Mehr denn je ist es entscheidend, dass …'), von 2026-Quellen (wortliga) als KI-Tell gelistet; behauptet Bedeutung statt sie zu zeigen."
+  },
+  {
+    "pattern_id": "de_nicht_mehr_wegzudenken",
+    "pattern": "nicht mehr wegzudenken",
+    "type": "phrase",
+    "tier": 1,
+    "suggested_replacement": "",
+    "rationale": "Leere Bedeutungsbehauptung ('X ist aus unserem Alltag nicht mehr wegzudenken'), von 2026-Quellen (wortliga) als KI-Floskel gelistet."
+  },
+  {
     "pattern_id": "de_darueber_hinaus",
     "pattern": "Darüber hinaus",
     "type": "phrase",

@@ -49,7 +49,7 @@ python3 "$S" --mode scan --lang en <file>
 to stdout, exits 0 always. Use for inspection and rewrite guidance.
 
 **score** — read-only. Runs scan, then applies the five-dimension scorer.
-Exits 0 when `overall ≥ threshold` (default 35/50), exits 1 otherwise. Use
+Exits 0 when `overall ≥ threshold` (default 37/50), exits 1 otherwise. Use
 as a `ratchet-up` or pre-commit gate. See [usage.md](usage.md).
 
 **rewrite** — LLM-assisted. The agent runs scan/score, reads the findings,
@@ -65,9 +65,12 @@ explicit OK. See [rewrite.md](rewrite.md).
 | `.astro` | HTML strategy on body **+** every string literal in the `---` frontmatter |
 | `.ts` | Every quoted string-literal **value** (i18n dictionaries, SEO maps, `summary` blocks…); identifiers, keys, and comments are ignored |
 
-All detectors — lexicon **and** structure (em-dash, negative parallelism) — run
-over the same extracted prose, so an em-dash in a `.ts` comment or an HTML tag is
-never flagged; only real copy is.
+All detectors — lexicon **and** structure (em-dash density, anaphora,
+adjective-tricolon, negative parallelism) — run over the same extracted prose,
+so an em-dash in a `.ts` comment or an HTML tag is never flagged; only real copy
+is. Scoring uses prose only: short UI labels are excluded so a slop-dense
+paragraph is not diluted by nav strings, and Rhythm is held neutral for
+fragment `.ts` files. See [patterns.md](patterns.md).
 
 ## Suppression markers
 

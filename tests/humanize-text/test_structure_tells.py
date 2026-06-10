@@ -309,19 +309,29 @@ class TestTricolonNotSurfaced(unittest.TestCase):
 
 
 class TestTricolonDataFileEntry(unittest.TestCase):
-    """AC3/Rework: the tricolon tell is still documented in the data file as a
-    tier-3 (weak, density-only) hint, even though it never surfaces a finding."""
+    """The GENERIC tricolon tell stays a tier-3 (weak, density-only) hint that
+    never surfaces a finding; the high-confidence ADJECTIVE-tricolon variant is a
+    separate tier-2 entry that IS surfaced."""
 
-    def test_tricolon_entry_is_tier_3(self):
-        """Rework: struct_tricolon entry exists and is tier 3 (weak hint)."""
+    def test_generic_tricolon_entry_is_tier_3(self):
+        """struct_tricolon (generic rule-of-three) exists and is tier 3."""
         with open(STRUCTURE_PATTERNS_PATH, encoding="utf-8") as f:
             entries = json.load(f)
-        tricolon = [e for e in entries if "tricolon" in e["pattern_id"]]
-        self.assertGreater(len(tricolon), 0,
-                           "struct_tricolon entry must remain documented")
-        for e in tricolon:
-            self.assertEqual(3, e["tier"],
-                             "tricolon must be tier 3 (weak density-only hint)")
+        by_id = {e["pattern_id"]: e for e in entries}
+        self.assertIn("struct_tricolon", by_id,
+                      "generic struct_tricolon entry must remain documented")
+        self.assertEqual(3, by_id["struct_tricolon"]["tier"],
+                         "generic tricolon must be tier 3 (weak density-only hint)")
+
+    def test_adj_tricolon_entry_is_tier_2(self):
+        """struct_adj_tricolon (clause-final adjective burst) is tier 2."""
+        with open(STRUCTURE_PATTERNS_PATH, encoding="utf-8") as f:
+            entries = json.load(f)
+        by_id = {e["pattern_id"]: e for e in entries}
+        self.assertIn("struct_adj_tricolon", by_id,
+                      "high-confidence struct_adj_tricolon entry must exist")
+        self.assertEqual(2, by_id["struct_adj_tricolon"]["tier"],
+                         "adjective tricolon must be tier 2 (surfaced)")
 
 
 # ---------------------------------------------------------------------------

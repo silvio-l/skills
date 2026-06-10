@@ -8,6 +8,30 @@
     "rationale": "Statistically overrepresented in LLM output; sounds performative rather than genuine. Human writers almost never start a sentence with 'delve into'."
   },
   {
+    "pattern_id": "en_effortless",
+    "pattern": "effortless",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "simple",
+    "rationale": "Marketing superlative for ease (the EN source of the German calque 'mühelos'); LLM landing-page copy reaches for it reflexively instead of showing the actual flow."
+  },
+  {
+    "pattern_id": "en_effortlessly",
+    "pattern": "effortlessly",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "easily",
+    "rationale": "Adverbial form of the 'effortless' marketing superlative ('works effortlessly'); listed separately because EN inflection is not auto-expanded (see patterns.md)."
+  },
+  {
+    "pattern_id": "en_must_have",
+    "pattern": "must-have",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "",
+    "rationale": "Hollow urgency descriptor ubiquitous in AI product copy; asserts necessity rather than demonstrating value."
+  },
+  {
     "pattern_id": "en_tapestry",
     "pattern": "tapestry",
     "type": "word",

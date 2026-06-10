@@ -470,6 +470,36 @@ def _build_segments(file_path: str, strategy: str) -> List[tuple]:
     return segments
 
 
+# Minimum word count for a segment to count as "prose" rather than a UI label.
+# Below this, a string is treated as a label ("EN", "App laden", "Premium") and
+# excluded from the scoring denominators (density / rhythm) so a slop-dense
+# paragraph is not diluted by dozens of one-word nav strings.
+_PROSE_MIN_WORDS: int = 5
+
+
+def extract_prose_text(file_path: str, strategy: Optional[str] = None) -> str:
+    """Return only the substantial prose of *file_path*, joined by newlines.
+
+    Uses the same strip strategy + suppression as scanning, then keeps only
+    segments with at least _PROSE_MIN_WORDS words. Short UI labels are dropped.
+    The result is what the scorer should use for Rhythm (sentence burstiness)
+    and Density (findings per word) so that fragment-heavy files (i18n .ts) are
+    scored on their real copy, not on their nav vocabulary.
+
+    Falls back to the full file text when no segment qualifies as prose (e.g. a
+    pure label dictionary), so the scorer always has something to work with.
+    """
+    if strategy is None:
+        strategy = _detect_file_strategy(file_path)
+    segments = _build_segments(file_path, strategy)
+    prose = [text.strip() for _ln, text in segments
+             if len(text.split()) >= _PROSE_MIN_WORDS]
+    if not prose:
+        with open(file_path, encoding="utf-8", errors="replace") as f:
+            return f.read()
+    return "\n".join(prose)
+
+
 def _match_lexicon_in_segments(
     segments: List[tuple],
     file_path: str,
@@ -514,14 +544,126 @@ def _scan_file_typed(
 # Em-dash regex — matches exactly U+2014 (each occurrence independently)
 _EM_DASH_RE = re.compile(r"—")
 
-# Tricolon / rule-of-three:
+# Generic tricolon / rule-of-three:
 # A genuine rhetorical tricolon ("A, B and C") cannot be reliably distinguished
 # from an ordinary three-item enumeration ("Python, JavaScript and TypeScript")
 # with surface heuristics — any regex narrow enough to avoid those false
 # positives also misses most genuine tricolons. We therefore do NOT surface an
-# individual finding for it; the tell is recorded in structure_patterns.json as
-# a tier-3, density-only weak hint (surfaced=false) for a future aggregate pass.
-# No regex/detection runs here by design.
+# individual finding for the GENERIC form. Instead, the two HIGH-confidence
+# sub-variants are detected below: adjective tricola (struct_adj_tricolon) and
+# anaphora (struct_anaphora). Both avoid the enumeration false-positive.
+
+# ---------------------------------------------------------------------------
+# Anaphora — repeated sentence openers ("Kein X. Kein Y. Nur Z." / "No … No …")
+# ---------------------------------------------------------------------------
+# Split a prose segment into sentence-ish chunks, then look for runs of
+# consecutive chunks that open with the same word. This is the staccato
+# marketing tell; it does NOT fire on ordinary enumerations because those live
+# in a single sentence, not across several with a shared first word.
+
+_SENT_SPLIT_RE = re.compile(r"[.!?]+(?:\s+|$)")
+
+# Negation openers that make a 2-run already suspicious (DE + EN).
+_NEGATION_OPENERS = frozenset(
+    ["kein", "keine", "keinen", "keinem", "keiner", "keines",
+     "nicht", "nie", "niemals", "no", "not", "never"]
+)
+
+# Stop-list of openers too generic to count as a deliberate anaphora even when
+# repeated (articles/conjunctions that recur by chance). Negations are NOT here.
+_ANAPHORA_OPENER_STOPLIST = frozenset(
+    ["der", "die", "das", "ein", "eine", "und", "oder", "the", "a", "an",
+     "and", "or", "to", "of", "in", "es", "it", "is", "ist"]
+)
+
+_OPENER_WORD_RE = re.compile(r"[^\W\d_][\w'’-]*", re.UNICODE)
+
+
+def _first_word(sentence: str) -> Optional[str]:
+    """Return the lowercased first alphabetic word of *sentence*, or None."""
+    m = _OPENER_WORD_RE.search(sentence)
+    return m.group(0).lower() if m else None
+
+
+def _detect_anaphora(text: str) -> List[tuple]:
+    """Return (match_excerpt, opener) tuples for anaphora runs in *text*.
+
+    A run is reported when:
+      - ≥3 consecutive sentences share the same opening word, OR
+      - ≥2 consecutive sentences open with the same NEGATION word
+        (kein*/nicht/no/not …) — the 'Kein X. Kein Y.' staccato.
+
+    Generic openers in _ANAPHORA_OPENER_STOPLIST are ignored (they recur by
+    chance). Ordinary enumerations never match: they are a single sentence.
+    """
+    parts = [p.strip() for p in _SENT_SPLIT_RE.split(text) if p.strip()]
+    if len(parts) < 2:
+        return []
+    openers = [_first_word(p) for p in parts]
+
+    results: List[tuple] = []
+    i = 0
+    n = len(parts)
+    while i < n:
+        op = openers[i]
+        if not op:
+            i += 1
+            continue
+        j = i + 1
+        while j < n and openers[j] == op:
+            j += 1
+        run_len = j - i
+        is_negation = op in _NEGATION_OPENERS
+        threshold = 2 if is_negation else 3
+        if run_len >= threshold and op not in _ANAPHORA_OPENER_STOPLIST:
+            excerpt = ". ".join(parts[i:j])
+            if len(excerpt) > 90:
+                excerpt = excerpt[:87] + "…"
+            results.append((excerpt, op))
+        i = j if j > i else i + 1
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Adjective tricolon — clause-final three-word burst ("groß, klar, motivierend")
+# ---------------------------------------------------------------------------
+# Two tight shapes, both excluding ordinary enumerations (which are embedded in
+# a longer phrase rather than standing alone as a clause-final adjective triple):
+#   (1) a dash/colon, then exactly three single-word items, then clause end.
+#   (2) a whole short segment that is nothing but three comma-separated words.
+
+_ADJ = r"[^\W\d_][\w'’-]*"  # a single letter-initial word (hyphens allowed)
+# Separator between the 2nd and 3rd item: a comma (optionally + und/and/&) OR a
+# bare und/and/&. Crucially it can NEVER be just whitespace — that would let
+# "verschlüsselt, mit Passwort" (two items, second one multi-word) masquerade as
+# a three-item triple. Item 1→2 is always a plain comma.
+_SEP3 = r"(?:,\s*(?:(?:und|and|&)\s+)?|(?:und|and|&)\s+)"
+
+# (1) "… — groß, klar, motivierend." / "…: einfach, visuell, motivierend"
+_ADJ_TRICOLON_DASH_RE = re.compile(
+    r"[—–:]\s*"
+    rf"({_ADJ})\s*,\s*({_ADJ})\s*{_SEP3}({_ADJ})"
+    r"\s*(?=[.!?…—–]|$)",
+    re.UNICODE,
+)
+
+# (2) whole segment == three bare comma/und-separated single words
+_ADJ_TRICOLON_WHOLE_RE = re.compile(
+    rf"^\s*({_ADJ})\s*,\s*({_ADJ})\s*{_SEP3}({_ADJ})\s*$",
+    re.UNICODE,
+)
+
+
+def _detect_adj_tricolon(text: str) -> List[str]:
+    """Return matched excerpts for clause-final / whole-segment adjective triples."""
+    results: List[str] = []
+    whole = _ADJ_TRICOLON_WHOLE_RE.match(text)
+    if whole:
+        results.append(whole.group(0).strip())
+        return results  # whole-segment match is exclusive
+    for m in _ADJ_TRICOLON_DASH_RE.finditer(text):
+        results.append(m.group(0).strip())
+    return results
 
 # Negative parallelism — a rhetorical template LLMs over-use to perform balance.
 # Sources (2026): Wikipedia "Signs of AI writing" lists "not just X but Y",
@@ -546,45 +688,55 @@ _NEG_PARALLEL_RE = re.compile(
 )
 
 
+def _spec_finding(spec: Dict, file_path: str, lineno: int, match: str,
+                  default_tier: int) -> Dict:
+    """Build a canonical 8-key finding from a structure-pattern *spec*."""
+    return {
+        "file_path": file_path,
+        "line_number": lineno,
+        "match": match,
+        "pattern_id": spec["pattern_id"],
+        "type": spec.get("type", "structure"),
+        "tier": int(spec.get("tier", default_tier)),
+        "suggested_replacement": spec.get("suggested_replacement", ""),
+        "rationale": spec.get("rationale", ""),
+    }
+
+
 def _structure_in_segments(
     segments: List[tuple],
     file_path: str,
     em_dash_spec: Dict,
     neg_par_spec: Dict,
+    anaphora_spec: Optional[Dict] = None,
+    adj_tricolon_spec: Optional[Dict] = None,
 ) -> List[Dict]:
-    """Run em-dash and negative-parallelism detection over prose *segments*.
+    """Run structural-tell detection over prose *segments*.
 
-    Tricolon / rule-of-three is intentionally NOT surfaced as an individual
-    finding (tier-3, density-only weak hint) — a genuine rhetorical tricolon
-    cannot be reliably told apart from an ordinary three-item enumeration with
-    surface heuristics. See structure_patterns.json (struct_tricolon).
+    Detectors:
+      - em-dash (tier-3, density-only — recorded, not surfaced individually)
+      - negative parallelism (tier-2, cluster-gated)
+      - anaphora (tier-2, always surfaced) — repeated sentence openers
+      - adjective tricolon (tier-2, always surfaced) — clause-final 3-word burst
+
+    Generic tricolon / rule-of-three is intentionally NOT detected here (it
+    cannot be told apart from an ordinary enumeration); only the two
+    high-confidence sub-variants above are surfaced. See structure_patterns.json.
     """
     findings: List[Dict] = []
     for lineno, text in segments:
         if em_dash_spec:
             for m in _EM_DASH_RE.finditer(text):
-                findings.append({
-                    "file_path": file_path,
-                    "line_number": lineno,
-                    "match": m.group(0),
-                    "pattern_id": em_dash_spec["pattern_id"],
-                    "type": em_dash_spec["type"],
-                    "tier": int(em_dash_spec.get("tier", 1)),
-                    "suggested_replacement": em_dash_spec.get("suggested_replacement", ""),
-                    "rationale": em_dash_spec.get("rationale", ""),
-                })
+                findings.append(_spec_finding(em_dash_spec, file_path, lineno, m.group(0), 3))
         if neg_par_spec:
             for m in _NEG_PARALLEL_RE.finditer(text):
-                findings.append({
-                    "file_path": file_path,
-                    "line_number": lineno,
-                    "match": m.group(0),
-                    "pattern_id": neg_par_spec["pattern_id"],
-                    "type": neg_par_spec["type"],
-                    "tier": int(neg_par_spec.get("tier", 2)),
-                    "suggested_replacement": neg_par_spec.get("suggested_replacement", ""),
-                    "rationale": neg_par_spec.get("rationale", ""),
-                })
+                findings.append(_spec_finding(neg_par_spec, file_path, lineno, m.group(0), 2))
+        if anaphora_spec:
+            for excerpt, _opener in _detect_anaphora(text):
+                findings.append(_spec_finding(anaphora_spec, file_path, lineno, excerpt, 2))
+        if adj_tricolon_spec:
+            for excerpt in _detect_adj_tricolon(text):
+                findings.append(_spec_finding(adj_tricolon_spec, file_path, lineno, excerpt, 2))
     return findings
 
 
@@ -629,13 +781,18 @@ def scan_file_with_structure(
     by_id: Dict[str, Dict] = {p["pattern_id"]: p for p in patterns}
     em_dash_spec = by_id.get("punct_em_dash", {})
     neg_par_spec = by_id.get("struct_neg_parallelism", {})
+    anaphora_spec = by_id.get("struct_anaphora", {})
+    adj_tricolon_spec = by_id.get("struct_adj_tricolon", {})
 
     # Standalone behaviour: every raw line is a segment (no strip strategy, no
     # suppression). The strategy-aware path lives in scan_file_with_language.
     with open(file_path, encoding="utf-8", errors="replace") as f:
         segments = list(enumerate(f.readlines(), start=1))
 
-    findings = _structure_in_segments(segments, file_path, em_dash_spec, neg_par_spec)
+    findings = _structure_in_segments(
+        segments, file_path, em_dash_spec, neg_par_spec,
+        anaphora_spec, adj_tricolon_spec,
+    )
     findings.sort(key=lambda f: (f["file_path"], f["line_number"], f["pattern_id"]))
     return findings
 
@@ -708,6 +865,8 @@ def scan_file_with_language(
             file_path,
             by_id.get("punct_em_dash", {}),
             by_id.get("struct_neg_parallelism", {}),
+            by_id.get("struct_anaphora", {}),
+            by_id.get("struct_adj_tricolon", {}),
         )
     else:
         struct_findings = []
