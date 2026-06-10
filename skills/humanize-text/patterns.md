@@ -150,11 +150,22 @@ are stop-listed so they never count by chance.
 The clause-final three-word burst — "— groß, klar, motivierend",
 "einfach, visuell, motivierend", "fast, clean, reliable". A 2026 German
 source (contentconsultants) names "3 kommagetrennte Adjektive nach
-Gedankenstrich" explicitly. Two tight shapes: (1) a dash/colon then exactly
-three single-word items at the clause end, (2) a whole short segment that is
+Gedankenstrich" explicitly. Two shapes: (1) a dash/colon then exactly three
+single-word items at the clause end, (2) a whole short segment that is
 nothing but three comma/und-separated single words. The separator between
 items 2 and 3 must be a comma or "und/and/&" — never bare whitespace — so
 "verschlüsselt, mit Passwort" (two items, one multi-word) is not a triple.
+
+A bare three-word list is inherently ambiguous: "groß, klar, motivierend"
+is a tell, but "Lebensmittel, Mobilität, Freizeit" / "groceries, transport,
+leisure" is a legitimate enumeration. **German** disambiguates by
+capitalisation (nouns are capitalised), so the detector requires the 2nd and
+3rd items to be lowercase — a capitalised list is treated as an enumeration
+and skipped (this applies to both shapes in DE). **English** has no such
+signal, so the whole-segment bare list is *not* detected for English at all;
+English relies on the stronger dash/colon shape. This is a deliberate
+precision-over-recall choice: it is better to miss an English bare triple
+than to flag every three-noun list.
 
 **Generic tricolon (`struct_tricolon`)** — tier-3, documented only. No regex
 runs; it never surfaces and never scores. A genuine rhetorical tricolon

@@ -654,14 +654,45 @@ _ADJ_TRICOLON_WHOLE_RE = re.compile(
 )
 
 
-def _detect_adj_tricolon(text: str) -> List[str]:
-    """Return matched excerpts for clause-final / whole-segment adjective triples."""
+def _items_lowercase(m: "re.Match") -> bool:
+    """True when the 2nd and 3rd captured items both start lowercase.
+
+    In German, nouns are capitalised and adjectives/adverbs are not, so a
+    lowercase 2nd+3rd item marks an adjective triple ('groß, klar, motivierend')
+    and a capitalised one marks a noun enumeration ('Lebensmittel, Mobilität,
+    Freizeit') that must NOT be flagged. The 1st item is ignored because it is
+    often capitalised merely by sitting at the start of a segment.
+    """
+    return m.group(2)[:1].islower() and m.group(3)[:1].islower()
+
+
+def _detect_adj_tricolon(text: str, lang: Optional[str] = None) -> List[str]:
+    """Return matched excerpts for clause-final / whole-segment adjective triples.
+
+    A bare three-word comma list is ambiguous: 'groß, klar, motivierend' is an
+    AI tell, but 'Lebensmittel, Mobilität, Freizeit' / 'groceries, transport,
+    leisure' is a legitimate enumeration. German disambiguates by capitalisation
+    (nouns are capitalised); English does not. So:
+
+      - whole-segment bare triples are only detected for German, and only when
+        the 2nd+3rd items are lowercase (= adjectives, not nouns);
+      - the dash/colon form runs for every language (a dash/colon before a triple
+        is a stronger signal), but in German it also requires lowercase items so
+        'Kategorien: Lebensmittel, Mobilität, Freizeit' is not flagged.
+
+    English thus relies on the dash/colon form and skips the most ambiguous bare
+    list — a deliberate precision-over-recall choice (see patterns.md).
+    """
+    is_de = lang == "de"
     results: List[str] = []
     whole = _ADJ_TRICOLON_WHOLE_RE.match(text)
     if whole:
-        results.append(whole.group(0).strip())
+        if is_de and _items_lowercase(whole):
+            results.append(whole.group(0).strip())
         return results  # whole-segment match is exclusive
     for m in _ADJ_TRICOLON_DASH_RE.finditer(text):
+        if is_de and not _items_lowercase(m):
+            continue  # German noun enumeration after a dash/colon → not a tell
         results.append(m.group(0).strip())
     return results
 
@@ -710,6 +741,7 @@ def _structure_in_segments(
     neg_par_spec: Dict,
     anaphora_spec: Optional[Dict] = None,
     adj_tricolon_spec: Optional[Dict] = None,
+    lang: Optional[str] = None,
 ) -> List[Dict]:
     """Run structural-tell detection over prose *segments*.
 
@@ -735,7 +767,7 @@ def _structure_in_segments(
             for excerpt, _opener in _detect_anaphora(text):
                 findings.append(_spec_finding(anaphora_spec, file_path, lineno, excerpt, 2))
         if adj_tricolon_spec:
-            for excerpt in _detect_adj_tricolon(text):
+            for excerpt in _detect_adj_tricolon(text, lang):
                 findings.append(_spec_finding(adj_tricolon_spec, file_path, lineno, excerpt, 2))
     return findings
 
@@ -867,6 +899,7 @@ def scan_file_with_language(
             by_id.get("struct_neg_parallelism", {}),
             by_id.get("struct_anaphora", {}),
             by_id.get("struct_adj_tricolon", {}),
+            lang=chosen_lang,
         )
     else:
         struct_findings = []

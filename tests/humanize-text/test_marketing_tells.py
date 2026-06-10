@@ -113,9 +113,34 @@ class TestAdjTricolon(_Tmp):
         f = self._scan("So fuehlt es sich an: einfach, visuell, motivierend.\n")
         self.assertEqual(1, len(self._ids(f, "struct_adj_tricolon")))
 
-    def test_whole_segment_triple(self):
-        """A bare three-word comma list as a whole string (i18n list item)."""
-        f = self._scan('const x = "Einfach, visuell, motivierend";\n', name="x.ts")
+    def test_whole_segment_triple_de(self):
+        """A bare three-ADJECTIVE comma list as a whole German string (lowercase 2/3)."""
+        f = self._scan('const x = "Einfach, visuell, motivierend";\n',
+                       name="x.ts", lang="de")
+        self.assertEqual(1, len(self._ids(f, "struct_adj_tricolon")))
+
+    def test_german_noun_enumeration_not_flagged(self):
+        """Regression: a capitalised German NOUN list is an enumeration, not a tell."""
+        f = self._scan('const x = "Lebensmittel, Mobilität, Freizeit";\n',
+                       name="x.ts", lang="de")
+        self.assertEqual([], self._ids(f, "struct_adj_tricolon"))
+
+    def test_german_noun_list_after_colon_not_flagged(self):
+        """Regression: 'Kategorien: Noun, Noun, Noun' must not be a tell."""
+        f = self._scan("Deine Kategorien: Lebensmittel, Mobilität, Freizeit.\n",
+                       lang="de")
+        self.assertEqual([], self._ids(f, "struct_adj_tricolon"))
+
+    def test_english_bare_list_not_flagged(self):
+        """English bare triples are skipped (no caps signal to tell noun from adj)."""
+        f = self._scan('const x = "Groceries, transport, leisure";\n',
+                       name="x.ts", lang="en")
+        self.assertEqual([], self._ids(f, "struct_adj_tricolon"))
+
+    def test_english_dash_triple_still_flagged(self):
+        """English relies on the dash/colon form, which still fires."""
+        f = self._scan("Your amount — big, clear, motivating. Every month.\n",
+                       lang="en")
         self.assertEqual(1, len(self._ids(f, "struct_adj_tricolon")))
 
     def test_real_enumeration_in_phrase_not_flagged(self):
