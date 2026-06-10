@@ -1,0 +1,30 @@
+[
+  {
+    "pattern_id": "punct_em_dash",
+    "type": "punctuation",
+    "tier": 1,
+    "lang": "neutral",
+    "pattern": "—",
+    "suggested_replacement": "-",
+    "rationale": "Em-dash (U+2014) is a strong AI tell: LLMs trained predominantly on English text import this typographic convention into German and other languages where it is not standard. Human writers in German use a spaced en-dash (–) or restructure the sentence; the bare em-dash marks machine origin."
+  },
+  {
+    "pattern_id": "struct_tricolon",
+    "type": "structure",
+    "tier": 3,
+    "lang": "neutral",
+    "surfaced": false,
+    "pattern": "TRICOLON",
+    "suggested_replacement": "",
+    "rationale": "Tricolon (rule of three: 'A, B and C') is a soft stylistic tell of AI-generated prose; LLMs over-use three parallel items to signal completeness. BUT a rhetorical rule-of-three is not reliably distinguishable from an ordinary three-item enumeration ('Python, JavaScript and TypeScript'; 'I read the docs, checked the code and fixed the bug') using surface heuristics — any regex narrow enough to avoid those false positives also misses most genuine tricolons. It is therefore recorded as a tier-3, density-only weak hint and the scanner emits NO individual finding for it (surfaced=false); a future aggregate/density pass may report tricolon frequency without flagging single occurrences as errors."
+  },
+  {
+    "pattern_id": "struct_neg_parallelism",
+    "type": "structure",
+    "tier": 2,
+    "lang": "neutral",
+    "pattern": "NEG_PARALLELISM",
+    "suggested_replacement": "",
+    "rationale": "Negative parallelism ('nicht nur … sondern auch …' / 'not just … but (also) …' / 'not only … but also …') is a rhetorical template heavily over-used in LLM output to signal breadth or contrast. Human writers use it occasionally; in AI text it appears as a reflex on nearly every second claim. Detecting it helps flag text that performs balance rather than achieving it."
+  }
+]

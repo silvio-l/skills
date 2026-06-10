@@ -13,7 +13,7 @@ Finding shape (canonical — all subsequent slices reuse this contract):
   line_number           int  — 1-based line number
   match                 str  — actual matched substring (case-preserved)
   pattern_id            str  — lexicon entry id
-  type                  str  — "word" | "phrase"
+  type                  str  — "word" | "phrase" | "punctuation" | "structure"
   tier                  int  — severity tier (1 = always replace)
   suggested_replacement str  — may be "" if lexicon omits it
   rationale             str  — human-readable explanation
@@ -40,6 +40,19 @@ Language detection (--lang auto):
   exceeds a threshold (0.002 per character), classify as "de"; otherwise "en".
   Clear DE texts (with umlauts or common DE stopwords) score well above the
   threshold; clear EN texts score zero or near-zero.
+
+Slice 03 additions (structure_patterns.json):
+  scan_file_with_structure(file_path, structure_dir=None) scans for
+  punctuation and sentence-structure tells that are language-neutral:
+  - Em-dash (U+2014)  → type: "punctuation", tier 1 (surfaced)
+  - Negative parallelism → type: "structure", tier 2 (surfaced)
+  - Tricolon/rule-of-three → tier 3, NOT surfaced. A rhetorical rule-of-three
+    cannot be reliably told apart from an ordinary three-item enumeration with
+    surface heuristics, so no individual finding is emitted; the tell is kept in
+    structure_patterns.json (surfaced=false) for a future density-based pass.
+  Patterns are loaded from structure_patterns.json alongside the lexica.
+  These findings merge into the same sorted list as word/phrase findings
+  inside the slice-02 envelope.
 
 Style modelled after seo-audit/scripts/brand_scan.py (word-boundary
 matching, sorted JSON output).
@@ -177,6 +190,126 @@ def scan_file(file_path: str, lexicon: List[Dict]) -> List[Dict]:
     return findings
 
 
+# ---------------------------------------------------------------------------
+# Structure / punctuation pattern loading and scanning (slice 03)
+# ---------------------------------------------------------------------------
+
+# Em-dash regex — matches exactly U+2014 (each occurrence independently)
+_EM_DASH_RE = re.compile(r"—")
+
+# Tricolon / rule-of-three:
+# A genuine rhetorical tricolon ("A, B and C") cannot be reliably distinguished
+# from an ordinary three-item enumeration ("Python, JavaScript and TypeScript")
+# with surface heuristics — any regex narrow enough to avoid those false
+# positives also misses most genuine tricolons. We therefore do NOT surface an
+# individual finding for it; the tell is recorded in structure_patterns.json as
+# a tier-3, density-only weak hint (surfaced=false) for a future aggregate pass.
+# No regex/detection runs here by design.
+
+# Negative parallelism:
+# DE: "nicht nur ... sondern (auch) ..."
+# EN: "not just ... but (also) ..." / "not only ... but (also) ..."
+_NEG_PARALLEL_RE = re.compile(
+    r"(?:"
+    r"nicht\s+nur\b.{1,80}?\bsondern\s+auch\b"      # DE
+    r"|"
+    r"not\s+just\b.{1,80}?\bbut\s+(?:also\s+)?\b"   # EN variant 1
+    r"|"
+    r"not\s+only\b.{1,80}?\bbut\s+(?:also\s+)?\b"   # EN variant 2
+    r")",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _load_structure_patterns(structure_dir: Optional[Path] = None) -> List[Dict]:
+    """Load structure_patterns.json from *structure_dir* (defaults to skill data dir)."""
+    if structure_dir is None:
+        structure_dir = Path(__file__).resolve().parent.parent
+    path = Path(structure_dir) / "structure_patterns.json"
+    if not path.is_file():
+        raise FileNotFoundError(f"structure_patterns.json not found: {path}")
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def scan_file_with_structure(
+    file_path: str,
+    structure_dir: Optional[str] = None,
+) -> List[Dict]:
+    """Scan *file_path* for structure/punctuation tells.
+
+    Loads structure_patterns.json from *structure_dir* (or the skill's own
+    data dir), applies em-dash and structure heuristics line-by-line, and
+    returns a sorted findings list using the canonical 8-key shape.
+
+    The result can be merged with word/phrase findings from scan_file().
+
+    Parameters
+    ----------
+    file_path:
+        Path to the file to scan.
+    structure_dir:
+        Directory containing structure_patterns.json.
+        Defaults to the skill's own data directory.
+
+    Returns
+    -------
+    List of finding dicts sorted by (file_path, line_number, pattern_id).
+    """
+    sp_dir = Path(structure_dir) if structure_dir else None
+    patterns = _load_structure_patterns(sp_dir)
+
+    # Build lookup by pattern_id
+    by_id: Dict[str, Dict] = {p["pattern_id"]: p for p in patterns}
+
+    em_dash_spec = by_id.get("punct_em_dash", {})
+    neg_par_spec = by_id.get("struct_neg_parallelism", {})
+
+    with open(file_path, encoding="utf-8", errors="replace") as f:
+        lines = f.readlines()
+
+    findings: List[Dict] = []
+
+    for lineno, raw in enumerate(lines, start=1):
+        line = raw.rstrip("\n")
+
+        # --- Em-dash (U+2014): one finding per occurrence ---
+        if em_dash_spec:
+            for m in _EM_DASH_RE.finditer(raw):
+                findings.append({
+                    "file_path": file_path,
+                    "line_number": lineno,
+                    "match": m.group(0),
+                    "pattern_id": em_dash_spec["pattern_id"],
+                    "type": em_dash_spec["type"],
+                    "tier": int(em_dash_spec.get("tier", 1)),
+                    "suggested_replacement": em_dash_spec.get("suggested_replacement", ""),
+                    "rationale": em_dash_spec.get("rationale", ""),
+                })
+
+        # --- Tricolon / rule-of-three ---
+        # Intentionally NOT surfaced as an individual finding (tier-3 weak hint).
+        # See structure_patterns.json struct_tricolon (surfaced=false) and the
+        # module-level note above for the rationale (false-positive avoidance).
+
+        # --- Negative parallelism ---
+        if neg_par_spec:
+            for m in _NEG_PARALLEL_RE.finditer(line):
+                findings.append({
+                    "file_path": file_path,
+                    "line_number": lineno,
+                    "match": m.group(0),
+                    "pattern_id": neg_par_spec["pattern_id"],
+                    "type": neg_par_spec["type"],
+                    "tier": int(neg_par_spec.get("tier", 2)),
+                    "suggested_replacement": neg_par_spec.get("suggested_replacement", ""),
+                    "rationale": neg_par_spec.get("rationale", ""),
+                })
+
+    findings.sort(key=lambda f: (f["file_path"], f["line_number"], f["pattern_id"]))
+    return findings
+
+
 def scan_file_with_language(
     file_path: str,
     lang: str,
@@ -219,8 +352,24 @@ def scan_file_with_language(
     with open(lexicon_path, encoding="utf-8") as f:
         lexicon = json.load(f)
 
-    findings = scan_file(file_path, lexicon)
-    return {"language": chosen_lang, "findings": findings}
+    word_findings = scan_file(file_path, lexicon)
+
+    # Merge structure/punctuation findings (slice 03) if structure_patterns.json exists
+    structure_patterns_path = lexicon_dir / "structure_patterns.json"
+    if structure_patterns_path.is_file():
+        struct_findings = scan_file_with_structure(
+            file_path=file_path,
+            structure_dir=str(lexicon_dir),
+        )
+    else:
+        struct_findings = []
+
+    all_findings = word_findings + struct_findings
+    all_findings.sort(
+        key=lambda f: (f["file_path"], f["line_number"], f["pattern_id"])
+    )
+
+    return {"language": chosen_lang, "findings": all_findings}
 
 
 # ---------------------------------------------------------------------------
