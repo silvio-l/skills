@@ -54,6 +54,23 @@ Slice 03 additions (structure_patterns.json):
   These findings merge into the same sorted list as word/phrase findings
   inside the slice-02 envelope.
 
+Slice 04 additions (filetype strip strategies + suppression markers):
+  File type is detected by extension and the appropriate strip strategy applied:
+  - .md and unknown extensions: scanned as-is (current behaviour, plain text).
+  - .html and .astro: <script> and <style> block contents are blanked to empty
+    lines (line-count preserved), then HTML tags are stripped per line.
+  - .ts and .astro: the string values of `de` and `en` keys inside a `summary`
+    object literal are extracted and scanned as text; all other code is ignored.
+    For .astro both strategies are applied (HTML body + summary extraction).
+  Suppression markers (humanize's OWN syntax, distinct from seo-audit's):
+  - Per-file: <!-- humanize:ignore-file --> anywhere in the file → whole file
+    is skipped.
+  - Section: <!-- humanize:ignore --> ... <!-- /humanize:ignore --> → lines
+    inside the block are not scanned. A missing closing marker suppresses to
+    end of file.
+  These markers deliberately use the prefix "humanize:" and differ from
+  seo-audit's "seo-audit:" prefix (<!-- seo-audit:contrastive --> etc.).
+
 Style modelled after seo-audit/scripts/brand_scan.py (word-boundary
 matching, sorted JSON output).
 """
@@ -66,6 +83,182 @@ import re
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional
+
+
+# ---------------------------------------------------------------------------
+# Slice 04: Suppression markers
+# ---------------------------------------------------------------------------
+# These markers are deliberately distinct from seo-audit's markers:
+#   seo-audit uses: <!-- seo-audit:contrastive --> / <!-- /seo-audit:contrastive -->
+#   humanize uses:  <!-- humanize:ignore -->        / <!-- /humanize:ignore -->
+#   humanize per-file: <!-- humanize:ignore-file -->
+
+_HUMANIZE_OPEN_RE = re.compile(
+    r"<!--\s*humanize:ignore\s*-->",
+    re.IGNORECASE,
+)
+_HUMANIZE_CLOSE_RE = re.compile(
+    r"<!--\s*/humanize:ignore\s*-->",
+    re.IGNORECASE,
+)
+_HUMANIZE_FILE_IGNORE_RE = re.compile(
+    r"<!--\s*humanize:ignore-file\s*-->",
+    re.IGNORECASE,
+)
+
+# ---------------------------------------------------------------------------
+# Slice 04: HTML/Astro strip helpers (mirroring seo-audit/scripts/brand_scan.py)
+# ---------------------------------------------------------------------------
+
+_SCRIPT_STYLE_RE = re.compile(
+    r"<(script|style)\b[^>]*>.*?</\1>",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _strip_script_style_preserving_lines(text: str) -> str:
+    """Replace <script>/<style> block contents with blank lines.
+
+    Newlines inside the stripped block are kept so subsequent line
+    numbers stay aligned with the source file.
+    """
+    def repl(m: re.Match) -> str:
+        body = m.group(0)
+        return "\n" * body.count("\n")
+    return _SCRIPT_STYLE_RE.sub(repl, text)
+
+
+def _strip_tags(line: str) -> str:
+    """Lossy per-line tag stripping for matching. Keeps text positions."""
+    return re.sub(r"<[^>]+>", " ", line)
+
+
+# ---------------------------------------------------------------------------
+# Slice 04: TypeScript/Astro summary field extraction
+# ---------------------------------------------------------------------------
+# Conservative regex: finds  summary: {  ... de: '<value>' ... en: '<value>' ...  }
+# Limits: does not handle nested braces inside summary, multi-line string
+# continuations via template literals, or dynamic values. See module docstring.
+
+_SUMMARY_BLOCK_RE = re.compile(
+    r"\bsummary\s*:\s*\{([^}]*)\}",
+    re.DOTALL,
+)
+_SUMMARY_FIELD_RE = re.compile(
+    r"""\b(de|en)\s*:\s*(?:'([^']*)'|"([^"]*)")""",
+)
+
+
+def _extract_summary_lines(source: str) -> List[tuple]:
+    """Extract (line_number, text) tuples for summary { de, en } string values.
+
+    Scans *source* for `summary: { de: '...', en: '...' }` blocks and returns
+    the line number (1-based, pointing to the line in *source* where the field
+    literal begins) and the string value for each de/en field found.
+
+    Limits (documented): only handles single- and double-quoted string literals;
+    does not handle template literals, computed keys, or nested braces inside
+    the summary object.
+    """
+    results = []
+    lines = source.splitlines(keepends=True)
+
+    for block_m in _SUMMARY_BLOCK_RE.finditer(source):
+        block_content = block_m.group(1)
+        block_start_pos = block_m.start(1)  # absolute offset of block body start
+
+        for field_m in _SUMMARY_FIELD_RE.finditer(block_content):
+            # Determine the string value (single- or double-quoted)
+            value = field_m.group(2) if field_m.group(2) is not None else field_m.group(3)
+            if not value:
+                continue
+            # Absolute offset of the field match within source
+            abs_offset = block_start_pos + field_m.start()
+            # Convert to 1-based line number
+            line_number = source[:abs_offset].count("\n") + 1
+            results.append((line_number, value))
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Slice 04: filetype detection
+# ---------------------------------------------------------------------------
+
+def _detect_file_strategy(file_path: str) -> str:
+    """Return the strip strategy for *file_path* based on its extension.
+
+    Returns one of: 'plain', 'html', 'ts', 'astro'.
+    """
+    ext = Path(file_path).suffix.lower()
+    if ext in (".html", ".htm"):
+        return "html"
+    if ext == ".astro":
+        return "astro"
+    if ext == ".ts":
+        return "ts"
+    # .md and everything else treated as plain text
+    return "plain"
+
+
+# ---------------------------------------------------------------------------
+# Slice 04: suppression-aware line-level scanner
+# ---------------------------------------------------------------------------
+
+def _has_file_ignore_marker(text: str) -> bool:
+    """Return True if *text* contains a per-file humanize:ignore-file marker."""
+    return bool(_HUMANIZE_FILE_IGNORE_RE.search(text))
+
+
+def _scan_lines_with_suppression(
+    lines: List[str],
+    file_path: str,
+    compiled: List[Dict],
+) -> List[Dict]:
+    """Scan *lines* with suppression markers applied.
+
+    Lines between <!-- humanize:ignore --> and <!-- /humanize:ignore --> are
+    skipped. A missing closing marker suppresses to end of file.
+    The marker lines themselves are also skipped (no findings on them).
+
+    Parameters
+    ----------
+    lines:
+        List of raw line strings (result of splitlines or readlines).
+    file_path:
+        Path to report in findings.
+    compiled:
+        Pre-compiled lexicon entries from _compile_lexicon().
+
+    Returns
+    -------
+    Unsorted list of findings (caller must sort).
+    """
+    findings: List[Dict] = []
+    suppressed = False
+
+    for lineno, raw in enumerate(lines, start=1):
+        # Toggle suppression — check BEFORE scanning this line so marker
+        # lines themselves never produce findings.
+        if _HUMANIZE_OPEN_RE.search(raw):
+            suppressed = True
+        if suppressed:
+            if _HUMANIZE_CLOSE_RE.search(raw):
+                suppressed = False
+            continue
+
+        for spec in compiled:
+            for m in spec["regex"].finditer(raw):
+                findings.append({
+                    "file_path": file_path,
+                    "line_number": lineno,
+                    "match": m.group(0),
+                    "pattern_id": spec["pattern_id"],
+                    "type": spec["type"],
+                    "tier": spec["tier"],
+                    "suggested_replacement": spec["suggested_replacement"],
+                    "rationale": spec["rationale"],
+                })
+    return findings
 
 
 # ---------------------------------------------------------------------------
@@ -161,32 +354,127 @@ def scan_file(file_path: str, lexicon: List[Dict]) -> List[Dict]:
     -------
     List of finding dicts sorted by (file_path, line_number, pattern_id).
     Each finding has exactly the eight canonical keys.
+
+    Note: suppression markers (<!-- humanize:ignore --> etc.) are honoured.
+    For filetype-aware scanning (.html/.astro/.ts) use scan_file_with_language().
     """
     compiled = _compile_lexicon(lexicon)
     if not compiled:
         return []
 
     with open(file_path, encoding="utf-8", errors="replace") as f:
-        lines = f.readlines()
+        text = f.read()
 
-    findings: List[Dict] = []
+    # Per-file suppression: skip entire file
+    if _has_file_ignore_marker(text):
+        return []
 
-    for lineno, raw in enumerate(lines, start=1):
-        for spec in compiled:
-            for m in spec["regex"].finditer(raw):
-                findings.append({
-                    "file_path": file_path,
-                    "line_number": lineno,
-                    "match": m.group(0),
-                    "pattern_id": spec["pattern_id"],
-                    "type": spec["type"],
-                    "tier": spec["tier"],
-                    "suggested_replacement": spec["suggested_replacement"],
-                    "rationale": spec["rationale"],
-                })
+    lines = text.splitlines(keepends=True)
+    findings = _scan_lines_with_suppression(lines, file_path, compiled)
 
     # Deterministic sort: (file_path, line_number, pattern_id)
     findings.sort(key=lambda f: (f["file_path"], f["line_number"], f["pattern_id"]))
+    return findings
+
+
+def _scan_file_typed(
+    file_path: str,
+    compiled: List[Dict],
+    strategy: str,
+) -> List[Dict]:
+    """Scan *file_path* using the strip strategy determined by *strategy*.
+
+    Strategies:
+      'plain'  — plain text / markdown (suppression markers only)
+      'html'   — blank <script>/<style> blocks, strip tags per line
+      'ts'     — extract summary { de, en } string values only
+      'astro'  — apply HTML strategy on body + extract summary fields
+
+    Parameters
+    ----------
+    file_path:
+        Path to the file to scan.
+    compiled:
+        Pre-compiled lexicon entries.
+    strategy:
+        One of 'plain', 'html', 'ts', 'astro'.
+
+    Returns
+    -------
+    Unsorted findings list.
+    """
+    with open(file_path, encoding="utf-8", errors="replace") as f:
+        text = f.read()
+
+    # Per-file suppression: skip entire file
+    if _has_file_ignore_marker(text):
+        return []
+
+    findings: List[Dict] = []
+
+    if strategy == "plain":
+        lines = text.splitlines(keepends=True)
+        findings = _scan_lines_with_suppression(lines, file_path, compiled)
+
+    elif strategy in ("html", "astro"):
+        # Step 1: blank <script>/<style> contents (preserves line count)
+        cleaned = _strip_script_style_preserving_lines(text)
+        # Step 2: split into lines and apply suppression + tag stripping
+        raw_lines = cleaned.splitlines(keepends=True)
+        suppressed = False
+        for lineno, raw in enumerate(raw_lines, start=1):
+            if _HUMANIZE_OPEN_RE.search(raw):
+                suppressed = True
+            if suppressed:
+                if _HUMANIZE_CLOSE_RE.search(raw):
+                    suppressed = False
+                continue
+            # Strip HTML tags for matching
+            line = _strip_tags(raw)
+            for spec in compiled:
+                for m in spec["regex"].finditer(line):
+                    findings.append({
+                        "file_path": file_path,
+                        "line_number": lineno,
+                        "match": m.group(0),
+                        "pattern_id": spec["pattern_id"],
+                        "type": spec["type"],
+                        "tier": spec["tier"],
+                        "suggested_replacement": spec["suggested_replacement"],
+                        "rationale": spec["rationale"],
+                    })
+        # For .astro: also extract summary { de, en } fields
+        if strategy == "astro":
+            for lineno, value in _extract_summary_lines(text):
+                for spec in compiled:
+                    for m in spec["regex"].finditer(value):
+                        findings.append({
+                            "file_path": file_path,
+                            "line_number": lineno,
+                            "match": m.group(0),
+                            "pattern_id": spec["pattern_id"],
+                            "type": spec["type"],
+                            "tier": spec["tier"],
+                            "suggested_replacement": spec["suggested_replacement"],
+                            "rationale": spec["rationale"],
+                        })
+
+    elif strategy == "ts":
+        # Only scan summary { de, en } string values
+        for lineno, value in _extract_summary_lines(text):
+            for spec in compiled:
+                for m in spec["regex"].finditer(value):
+                    findings.append({
+                        "file_path": file_path,
+                        "line_number": lineno,
+                        "match": m.group(0),
+                        "pattern_id": spec["pattern_id"],
+                        "type": spec["type"],
+                        "tier": spec["tier"],
+                        "suggested_replacement": spec["suggested_replacement"],
+                        "rationale": spec["rationale"],
+                    })
+
     return findings
 
 
@@ -317,6 +605,13 @@ def scan_file_with_language(
 ) -> Dict:
     """Scan *file_path*, auto-detect or force *lang*, return envelope dict.
 
+    Filetype detection (slice 04): the file extension determines the strip
+    strategy applied before matching:
+      .md / unknown  → plain text (suppression markers honoured)
+      .html / .htm   → <script>/<style> blanked, tags stripped per line
+      .astro         → HTML strategy + summary { de, en } extraction
+      .ts            → summary { de, en } string values extracted only
+
     Parameters
     ----------
     file_path:
@@ -352,7 +647,9 @@ def scan_file_with_language(
     with open(lexicon_path, encoding="utf-8") as f:
         lexicon = json.load(f)
 
-    word_findings = scan_file(file_path, lexicon)
+    compiled = _compile_lexicon(lexicon)
+    strategy = _detect_file_strategy(file_path)
+    word_findings = _scan_file_typed(file_path, compiled, strategy)
 
     # Merge structure/punctuation findings (slice 03) if structure_patterns.json exists
     structure_patterns_path = lexicon_dir / "structure_patterns.json"
