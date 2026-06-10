@@ -1,0 +1,42 @@
+[
+  {
+    "pattern_id": "de_zudem",
+    "pattern": "Zudem",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "Außerdem",
+    "rationale": "Übergangspartikel, die in KI-Texten überproportional häufig am Satzanfang erscheint; erzeugt sterilen, aufgesetzten Duktus."
+  },
+  {
+    "pattern_id": "de_darueber_hinaus",
+    "pattern": "Darüber hinaus",
+    "type": "phrase",
+    "tier": 1,
+    "suggested_replacement": "Außerdem",
+    "rationale": "Formale Übergangsphrase, die im deutschen KI-Output als Standardfloskel auftritt und den Text distanziert und unpersönlich klingen lässt."
+  },
+  {
+    "pattern_id": "de_wichtig_zu_beachten",
+    "pattern": "Es ist wichtig zu beachten",
+    "type": "phrase",
+    "tier": 1,
+    "suggested_replacement": "Beachte",
+    "rationale": "Klassische KI-Einleitungsfloskel, die Wichtigkeit signalisiert, ohne etwas zu sagen; lässt den Leser das Entscheidende selbst einschätzen."
+  },
+  {
+    "pattern_id": "de_im_hinblick_auf",
+    "pattern": "Im Hinblick auf",
+    "type": "phrase",
+    "tier": 1,
+    "suggested_replacement": "Für",
+    "rationale": "Behördendeutscher Nominalstil-Trigger, den KI-Modelle aus formalen Trainingstexten übernehmen; wirkt steif und unnatürlich."
+  },
+  {
+    "pattern_id": "de_heutigen_welt",
+    "pattern": "In der heutigen Welt",
+    "type": "phrase",
+    "tier": 1,
+    "suggested_replacement": "Heute",
+    "rationale": "Typische KI-Einstiegsfloskel für Relevanz-Signalisierung; klingt im Deutschen besonders hohl, weil die Wendung selten von echten Autoren gewählt wird."
+  }
+]

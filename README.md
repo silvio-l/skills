@@ -81,6 +81,12 @@ If you only want one of these, skip the dependencies you do not exercise.
 
 **The Fix.** A context-safe ratchet — discover ready issues, respect `blocked-by`, dispatch isolated workers and read-only reviewers, gate on format/analyze, persist rework feedback to disk. The orchestrator stays small; the work moves forward one click at a time, never backward.
 
+### `humanize-text`
+
+**The Problem.** AI-generated text in German bleeds through the same handful of transition words and hollow opener phrases — „Zudem", „Darüber hinaus", „Es ist wichtig zu beachten", „Im Hinblick auf", „In der heutigen Welt" — regardless of the topic. They signal machine origin, flatten the author's voice, and accumulate quietly across a codebase until the site reads like a press release.
+
+**The Fix.** A deterministic DE tier-1 slop scanner. It reads any text or markdown file against a curated lexicon (`lexicon.de.json`), matches every entry with word-boundary and case-insensitive anchors, and returns a sorted JSON array of findings — one per match, each carrying `file_path`, `line_number`, `match`, `pattern_id`, `type`, `tier`, `suggested_replacement`, and `rationale`. This is the walking skeleton: five curated German tier-1 entries, deterministic `(file_path, line_number, pattern_id)` sort, stdlib-only / offline. Scoring, EN lexicon, HTML support, and rewrite suggestions come in later slices.
+
 ### `seo-audit`
 
 **The Problem.** SEO audits collapse into three failure modes: paid tools you do not want to depend on (Ahrefs, Semrush, Screaming Frog Pro), one-off shell hacks that nobody re-runs because they are not reproducible, and brand-voice drift that nobody catches until a redesign — by which time half the site contradicts the glossary in `CONTEXT.md`.
