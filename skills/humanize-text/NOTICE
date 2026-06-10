@@ -1,0 +1,23 @@
+humanize-text — Attribution
+===========================
+
+The tier-1 word lists in lexicon.de.json and lexicon.en.json, and the
+general approach of curating language-specific AI-slop vocabulary into
+a scannable lexicon, draw on two MIT-licensed community resources:
+
+1. blader/humanizer
+   https://github.com/blader/humanizer
+   License: MIT
+
+2. conorbronsdon/avoid-ai-writing
+   https://github.com/conorbronsdon/avoid-ai-writing
+   License: MIT
+
+The specific lexicon entries, pattern IDs, tier assignments, suggested
+replacements, and rationale strings in this skill are original work
+shaped by those references — the underlying word lists and the community
+effort to document AI writing tells belong to their respective authors.
+
+The scanner engine (slop_scanner.py), scorer (slop_scorer.py), entry
+script (humanize.py), and all supporting docs are original work by
+Silvio Lindstedt, MIT licensed as part of the silvio-l/skills repository.

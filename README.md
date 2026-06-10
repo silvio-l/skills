@@ -83,9 +83,9 @@ If you only want one of these, skip the dependencies you do not exercise.
 
 ### `humanize-text`
 
-**The Problem.** AI-generated text in German bleeds through the same handful of transition words and hollow opener phrases — „Zudem", „Darüber hinaus", „Es ist wichtig zu beachten", „Im Hinblick auf", „In der heutigen Welt" — regardless of the topic. They signal machine origin, flatten the author's voice, and accumulate quietly across a codebase until the site reads like a press release.
+**The Problem.** AI-generated text in German and English bleeds through the same hollow openers, inflation particles, and filler verbs — „Zudem", „Darüber hinaus", „Es ist wichtig zu beachten", "delve", "leverage", "seamlessly" — regardless of topic. They signal machine origin, flatten the author's voice, and accumulate quietly across a codebase until the site reads like a press release.
 
-**The Fix.** A deterministic DE tier-1 slop scanner. It reads any text or markdown file against a curated lexicon (`lexicon.de.json`), matches every entry with word-boundary and case-insensitive anchors, and returns a sorted JSON array of findings — one per match, each carrying `file_path`, `line_number`, `match`, `pattern_id`, `type`, `tier`, `suggested_replacement`, and `rationale`. This is the walking skeleton: five curated German tier-1 entries, deterministic `(file_path, line_number, pattern_id)` sort, stdlib-only / offline. Scoring, EN lexicon, HTML support, and rewrite suggestions come in later slices.
+**The Fix.** A bilingual (DE/EN), offline, deterministic slop pipeline with three modes. `--mode scan` matches every file against curated tier-1/tier-2/tier-3 lexica (word-boundary, case-insensitive), auto-detects language, handles `.md`, `.html`, `.astro`, and `.ts` filetypes with appropriate strip strategies, and returns sorted findings with replacement suggestions. `--mode score` runs the five-dimension scorer (directness, rhythm, trust, authenticity, density; 50 pts max) and exits 1 when below threshold — wiring it into `ratchet-up` gates is one-liner work. `--mode rewrite` is an agent-side protocol: the script findings drive a targeted LLM rewrite pass that protects proper nouns (loam, whispaste, hellerio) and technical terms, invents nothing, and waits for explicit user confirmation before changing any file.
 
 ### `seo-audit`
 
