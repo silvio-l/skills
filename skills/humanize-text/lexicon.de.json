@@ -38,5 +38,150 @@
     "tier": 1,
     "suggested_replacement": "Heute",
     "rationale": "Typische KI-Einstiegsfloskel für Relevanz-Signalisierung; klingt im Deutschen besonders hohl, weil die Wendung selten von echten Autoren gewählt wird."
+  },
+  {
+    "pattern_id": "de_nahtlos",
+    "pattern": "nahtlos",
+    "type": "word",
+    "tier": 1,
+    "inflect": true,
+    "suggested_replacement": "reibungslos",
+    "rationale": "Marketing-Adjektiv (Lehnübersetzung von 'seamless'), das KI-Modelle reflexhaft an jede Integration und jeden Ablauf hängen; meist hohle Beschwörung statt konkreter Aussage."
+  },
+  {
+    "pattern_id": "de_muehelos",
+    "pattern": "mühelos",
+    "type": "word",
+    "tier": 1,
+    "inflect": true,
+    "suggested_replacement": "leicht",
+    "rationale": "Werbe-Superlativ für angebliche Einfachheit (Calque von 'effortlessly'); KI-Texte überzeichnen damit den Nutzwert, statt den Vorgang konkret zu zeigen."
+  },
+  {
+    "pattern_id": "de_spielend_leicht",
+    "pattern": "spielend leicht",
+    "type": "phrase",
+    "tier": 1,
+    "suggested_replacement": "einfach",
+    "rationale": "Abgegriffene Werbefloskel für Bedienkomfort; in KI-Output Standard-Verstärker, der eine Aussage emotional auflädt, ohne sie zu belegen."
+  },
+  {
+    "pattern_id": "de_ganzheitlich",
+    "pattern": "ganzheitlich",
+    "type": "word",
+    "tier": 1,
+    "inflect": true,
+    "suggested_replacement": "umfassend",
+    "rationale": "Pseudo-bedeutungsschweres Adjektiv (Übersetzung von 'holistic'), das KI gern vor 'Ansatz' oder 'Lösung' setzt; klingt anspruchsvoll, sagt aber fast nie etwas Prüfbares."
+  },
+  {
+    "pattern_id": "de_bahnbrechend",
+    "pattern": "bahnbrechend",
+    "type": "word",
+    "tier": 1,
+    "inflect": true,
+    "suggested_replacement": "bedeutend",
+    "rationale": "Hyperbolisches Adjektiv (Pendant zu 'groundbreaking'), das KI inflationär für jede Neuerung verwendet; ermüdet den Leser, weil die Bedeutung selten gedeckt ist."
+  },
+  {
+    "pattern_id": "de_wegweisend",
+    "pattern": "wegweisend",
+    "type": "word",
+    "tier": 1,
+    "inflect": true,
+    "suggested_replacement": "neu",
+    "rationale": "Aufwertendes Adjektiv aus dem KI-Werberepertoire; signalisiert Bedeutung per Behauptung statt per Beleg und wirkt dadurch werblich-leer."
+  },
+  {
+    "pattern_id": "de_revolutionaer",
+    "pattern": "revolutionär",
+    "type": "word",
+    "tier": 1,
+    "inflect": true,
+    "suggested_replacement": "neuartig",
+    "rationale": "Maximal-Superlativ, den KI-Modelle reflexhaft für graduelle Verbesserungen einsetzen; entwertet sich durch Übergebrauch und untergräbt die Glaubwürdigkeit."
+  },
+  {
+    "pattern_id": "de_unverzichtbar",
+    "pattern": "unverzichtbar",
+    "type": "word",
+    "tier": 1,
+    "inflect": true,
+    "suggested_replacement": "wichtig",
+    "rationale": "Dringlichkeits-Adjektiv (Pendant zu 'essential'/'indispensable'), das KI fast jedem Werkzeug zuschreibt; stumpft ab, wenn alles 'unverzichtbar' ist."
+  },
+  {
+    "pattern_id": "de_facettenreich",
+    "pattern": "facettenreich",
+    "type": "word",
+    "tier": 1,
+    "inflect": true,
+    "suggested_replacement": "vielfältig",
+    "rationale": "Geziert-bildungssprachliches Adjektiv, das KI als Komplexitäts-Geste vor abstrakte Nomen stellt; reine Dekoration statt konkreter Beschreibung."
+  },
+  {
+    "pattern_id": "de_tiefgreifend",
+    "pattern": "tiefgreifend",
+    "type": "word",
+    "tier": 1,
+    "inflect": true,
+    "suggested_replacement": "groß",
+    "rationale": "Verstärker (Calque von 'profound'), den KI vor 'Veränderung', 'Auswirkung' o. Ä. setzt, um Gewicht zu suggerieren; meist nicht durch Inhalt gedeckt."
+  },
+  {
+    "pattern_id": "de_letztendlich",
+    "pattern": "Letztendlich",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "Am Ende",
+    "rationale": "Abschluss-Floskel (Pendant zu 'ultimately'), die KI als rhetorisches Resümee-Signal einstreut, ohne dass eine echte Schlussfolgerung folgt."
+  },
+  {
+    "pattern_id": "de_zusammenfassend",
+    "pattern": "Zusammenfassend lässt sich sagen",
+    "type": "phrase",
+    "tier": 1,
+    "suggested_replacement": "Kurz gesagt",
+    "rationale": "Stereotype KI-Schluss-Einleitung; kündigt eine Zusammenfassung an, statt sie einfach zu liefern, und bläht den Absatz auf."
+  },
+  {
+    "pattern_id": "de_darauf_hingewiesen",
+    "pattern": "Es sei darauf hingewiesen",
+    "type": "phrase",
+    "tier": 1,
+    "suggested_replacement": "Beachte",
+    "rationale": "Passivisch-behördliche Hinweisfloskel, die KI aus formalen Quellen übernimmt; verzögert die eigentliche Information und klingt unpersönlich."
+  },
+  {
+    "pattern_id": "de_entscheidender_bedeutung",
+    "pattern": "von entscheidender Bedeutung",
+    "type": "phrase",
+    "tier": 1,
+    "suggested_replacement": "wichtig",
+    "rationale": "Nominalstil-Aufblähung von 'wichtig' (Pendant zu 'of crucial importance'); KI-typische Wichtigkeits-Beschwörung ohne Mehrwert."
+  },
+  {
+    "pattern_id": "de_entscheidende_rolle",
+    "pattern": "spielt eine entscheidende Rolle",
+    "type": "phrase",
+    "tier": 1,
+    "suggested_replacement": "ist wichtig für",
+    "rationale": "Abgegriffene KI-Metapher (Calque von 'plays a crucial role'); leere Bedeutungs-Geste, die fast immer durch eine konkrete Aussage ersetzt werden kann."
+  },
+  {
+    "pattern_id": "de_ebnet_den_weg",
+    "pattern": "ebnet den Weg",
+    "type": "phrase",
+    "tier": 1,
+    "suggested_replacement": "ermöglicht",
+    "rationale": "Tote Metapher (Pendant zu 'paves the way'), die KI als Fortschritts-Floskel einsetzt; durch Übergebrauch hat das Bild jede Wirkung verloren."
+  },
+  {
+    "pattern_id": "de_eintauchen",
+    "pattern": "eintauchen",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "ansehen",
+    "rationale": "Lehnübersetzung von 'delve into'; in Sach- und Marketingtexten fast immer die KI-Geste 'wir tauchen ein in das Thema' statt eines schlichten 'wir sehen uns … an'."
   }
 ]

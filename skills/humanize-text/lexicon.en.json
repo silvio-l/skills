@@ -78,5 +78,245 @@
     "tier": 1,
     "suggested_replacement": "area",
     "rationale": "Quasi-poetic noun that AI models use to dress up mundane domains ('the realm of AI'); 'area' or 'field' is almost always cleaner."
+  },
+  {
+    "pattern_id": "en_moreover",
+    "pattern": "moreover",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "also",
+    "rationale": "Formal transition word that LLMs string between paragraphs to fake logical flow; human prose rarely needs 'moreover' to connect ideas."
+  },
+  {
+    "pattern_id": "en_furthermore",
+    "pattern": "furthermore",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "also",
+    "rationale": "Stiff connective overused by AI to signal continuation; reads as filler scaffolding rather than a genuine logical link."
+  },
+  {
+    "pattern_id": "en_additionally",
+    "pattern": "additionally",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "also",
+    "rationale": "Sentence-opening transition that LLMs reach for by default; 'also' or simply restructuring the sentence is lighter and more natural."
+  },
+  {
+    "pattern_id": "en_seamless",
+    "pattern": "seamless",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "smooth",
+    "rationale": "Marketing adjective AI attaches to every integration and workflow; hollow promise that rarely describes anything concrete."
+  },
+  {
+    "pattern_id": "en_seamlessly",
+    "pattern": "seamlessly",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "smoothly",
+    "rationale": "Adverbial twin of 'seamless'; AI uses it to assert effortless operation without showing how, padding the sentence with empty reassurance."
+  },
+  {
+    "pattern_id": "en_underscore",
+    "pattern": "underscore",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "show",
+    "rationale": "Quasi-academic verb ('underscores the importance of') that LLMs favour to sound analytical; 'shows' or 'highlights' is plainer and clearer."
+  },
+  {
+    "pattern_id": "en_pivotal",
+    "pattern": "pivotal",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "key",
+    "rationale": "Importance-inflating adjective in the same family as 'crucial' and 'vital'; AI applies it indiscriminately until it carries no weight."
+  },
+  {
+    "pattern_id": "en_testament",
+    "pattern": "testament",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "proof",
+    "rationale": "Cliché in the construction 'a testament to'; AI uses it as a stock way to claim significance instead of demonstrating it."
+  },
+  {
+    "pattern_id": "en_intricate",
+    "pattern": "intricate",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "complex",
+    "rationale": "Ornamental adjective AI uses to dress up 'complex'; signals sophistication without adding information."
+  },
+  {
+    "pattern_id": "en_myriad",
+    "pattern": "myriad",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "many",
+    "rationale": "Literary quantifier overused in LLM prose ('a myriad of options'); 'many' is plainer and avoids the faux-elevated register."
+  },
+  {
+    "pattern_id": "en_plethora",
+    "pattern": "plethora",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "many",
+    "rationale": "Showy synonym for 'a lot of' that AI reaches for to sound erudite; almost always reads as padding."
+  },
+  {
+    "pattern_id": "en_embark",
+    "pattern": "embark",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "start",
+    "rationale": "Grandiose verb ('embark on a journey') that LLMs use to inflate ordinary beginnings; 'start' or 'begin' is direct and unpretentious."
+  },
+  {
+    "pattern_id": "en_elevate",
+    "pattern": "elevate",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "improve",
+    "rationale": "Marketing verb AI applies to experiences, brands and workflows ('elevate your game'); vague uplift-speak in place of concrete improvement."
+  },
+  {
+    "pattern_id": "en_unlock",
+    "pattern": "unlock",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "enable",
+    "rationale": "Promotional metaphor ('unlock the potential') that AI uses to imply hidden value; 'enable' or 'allow' states the same thing without the hype."
+  },
+  {
+    "pattern_id": "en_harness",
+    "pattern": "harness",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "use",
+    "rationale": "Power-fantasy verb ('harness the power of') heavily favoured by LLMs; 'use' or 'apply' carries the meaning without the dramatics."
+  },
+  {
+    "pattern_id": "en_boast",
+    "pattern": "boast",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "have",
+    "rationale": "Brochure verb ('the device boasts a 4K display') that AI imports from product copy; 'has' or 'includes' is neutral and honest."
+  },
+  {
+    "pattern_id": "en_showcase",
+    "pattern": "showcase",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "show",
+    "rationale": "Promotional verb LLMs use instead of plain 'show' or 'demonstrate'; adds a marketing sheen without changing the meaning."
+  },
+  {
+    "pattern_id": "en_facilitate",
+    "pattern": "facilitate",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "help",
+    "rationale": "Bureaucratic verb AI prefers over 'help' or 'make easier'; lengthens the sentence and distances the reader for no gain."
+  },
+  {
+    "pattern_id": "en_utilize",
+    "pattern": "utilize",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "use",
+    "rationale": "Needlessly formal swap for 'use' that LLMs default to; adds syllables and stiffness without adding meaning."
+  },
+  {
+    "pattern_id": "en_comprehensive",
+    "pattern": "comprehensive",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "complete",
+    "rationale": "Catch-all completeness adjective ('a comprehensive guide') AI attaches to almost any noun; usually an unearned claim of thoroughness."
+  },
+  {
+    "pattern_id": "en_cutting_edge",
+    "pattern": "cutting-edge",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "advanced",
+    "rationale": "Stale novelty cliché ('cutting-edge technology') that LLMs reach for to signal modernity; the phrase has been drained of meaning by overuse."
+  },
+  {
+    "pattern_id": "en_game_changer",
+    "pattern": "game-changer",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "big improvement",
+    "rationale": "Hype cliché AI uses to assert impact; almost always overstates the case and triggers reader scepticism rather than interest."
+  },
+  {
+    "pattern_id": "en_vibrant",
+    "pattern": "vibrant",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "lively",
+    "rationale": "Decorative adjective ('a vibrant community', 'a vibrant ecosystem') AI sprinkles for colour; conveys mood without conveying fact."
+  },
+  {
+    "pattern_id": "en_ever_evolving",
+    "pattern": "ever-evolving",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "changing",
+    "rationale": "Stock modifier ('the ever-evolving landscape') that LLMs pair with abstract nouns; a tired way to say something simply changes over time."
+  },
+  {
+    "pattern_id": "en_in_todays_world",
+    "pattern": "in today's world",
+    "type": "phrase",
+    "tier": 1,
+    "suggested_replacement": "today",
+    "rationale": "Throat-clearing opener AI uses to establish relevance; says nothing and can almost always be cut to a single word or removed entirely."
+  },
+  {
+    "pattern_id": "en_important_to_note",
+    "pattern": "it is important to note",
+    "type": "phrase",
+    "tier": 1,
+    "suggested_replacement": "Note that",
+    "rationale": "Stock hedging preamble that signals importance without delivering it; pads the sentence and delays the actual point."
+  },
+  {
+    "pattern_id": "en_when_it_comes_to",
+    "pattern": "when it comes to",
+    "type": "phrase",
+    "tier": 1,
+    "suggested_replacement": "for",
+    "rationale": "Filler framing phrase AI uses to introduce a topic; 'for', 'with', or rephrasing removes the wind-up and gets to the subject."
+  },
+  {
+    "pattern_id": "en_end_of_the_day",
+    "pattern": "at the end of the day",
+    "type": "phrase",
+    "tier": 1,
+    "suggested_replacement": "in the end",
+    "rationale": "Conversational cliché LLMs use as a faux-conclusive flourish; adds length and a tired register without adding substance."
+  },
+  {
+    "pattern_id": "en_in_the_realm_of",
+    "pattern": "in the realm of",
+    "type": "phrase",
+    "tier": 1,
+    "suggested_replacement": "in",
+    "rationale": "Grandiose framing ('in the realm of machine learning') AI uses to dress up a plain domain reference; 'in' carries the same meaning."
+  },
+  {
+    "pattern_id": "en_vital_role",
+    "pattern": "plays a vital role",
+    "type": "phrase",
+    "tier": 1,
+    "suggested_replacement": "is key to",
+    "rationale": "Hollow significance template ('X plays a vital role in Y') that AI repeats reflexively; replace with a concrete statement of what X actually does."
   }
 ]

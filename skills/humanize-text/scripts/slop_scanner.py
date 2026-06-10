@@ -281,8 +281,19 @@ def _compile_lexicon(lexicon: List[Dict]) -> List[Dict]:
         # "it's worth noting" is enclosed by \b…\b correctly because the
         # leading \b matches at the boundary before 'i' and the trailing \b
         # matches after 'g' in 'noting'.
+        #
+        # Optional inflection (entry key "inflect": true): the trailing \b is
+        # replaced by \w*\b so additive suffixes are captured. This is meant
+        # for German adjectives/participles whose declension endings are purely
+        # additive (nahtlos → nahtlose/nahtlosen/nahtloser …). It is NOT enabled
+        # by default and deliberately not used for English, where common forms
+        # drop a stem letter (leverage → leveraging) and \w* would miss them
+        # anyway while over-matching unrelated words. inflect is ignored for
+        # multi-word phrases (it only makes sense on a single token).
+        inflect = bool(entry.get("inflect", False)) and " " not in raw_pattern
+        suffix = r"\w*\b" if inflect else r"\b"
         regex = re.compile(
-            r"\b" + re.escape(raw_pattern) + r"\b",
+            r"\b" + re.escape(raw_pattern) + suffix,
             re.IGNORECASE,
         )
         compiled.append({

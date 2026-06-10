@@ -37,68 +37,71 @@ The Authenticity dimension absorbs tier-3 hits at weight 1.0 (higher than
 tier-1 and tier-2 at 0.5 each), because tier-3 patterns reflect a
 pervasive structural signature rather than isolated vocabulary leaks.
 
-## DE patterns
+## Where each tier lives
 
-### Tier-1 (always replace)
+This matters for reading the JSON: **the two lexicon files
+(`lexicon.de.json`, `lexicon.en.json`) contain tier-1 entries only** —
+high-confidence word/phrase slop that is almost always worth replacing.
+Tier-2 and tier-3 are **not** lexical; they live in
+`structure_patterns.json` (negative parallelism = tier-2, tricolon =
+tier-3) because they are rhetorical structures, not vocabulary. So the
+DE/EN sections below describe lexical tier-1 only.
 
-These are hollow transitional openers and certainty phrases that appear
-across AI-generated German text regardless of topic. Each has an
-`suggested_replacement` in `lexicon.de.json`.
+## DE patterns (`lexicon.de.json`, all tier-1)
 
-Examples of what the lexicon covers (exact entries are authoritative):
+Each entry carries a German `suggested_replacement` and `rationale`. The
+JSON is authoritative; the groupings below are just orientation.
 
-- Transitional openers: "Zudem", "Darüber hinaus", "Im Hinblick auf",
-  "In Bezug auf", "Im Rahmen von", "Vor dem Hintergrund"
-- Hollow certainty: "Es ist wichtig zu beachten", "Es ist zu beachten",
-  "Selbstverständlich"
-- Inflation particles that add zero meaning in context
+- **Transitional openers / connectives:** "Zudem", "Darüber hinaus",
+  "Im Hinblick auf", "Letztendlich".
+- **Hollow certainty / hedging preambles:** "Es ist wichtig zu beachten",
+  "Es sei darauf hingewiesen", "von entscheidender Bedeutung",
+  "Zusammenfassend lässt sich sagen".
+- **Marketing superlatives (calques):** "nahtlos" (seamless), "mühelos"
+  (effortlessly), "ganzheitlich" (holistic), "bahnbrechend"
+  (groundbreaking), "wegweisend", "revolutionär", "unverzichtbar",
+  "facettenreich", "tiefgreifend".
+- **Dead metaphors / empty role claims:** "spielt eine entscheidende
+  Rolle", "ebnet den Weg", "eintauchen" (delve into).
+- **Relevance throat-clearing:** "In der heutigen Welt".
 
-**Nominalstil** — German AI text systematically prefers noun-heavy
-constructions ("die Durchführung von Tests" instead of "Tests durchführen").
-The lexicon targets the most common nominalisations where the verb form is
-unambiguously better. Nominalstil that is domain-appropriate (legal,
-technical specs) is not flagged.
+### Inflection (`"inflect": true`)
 
-### Tier-2 (cluster surfaced)
+German adjectives and participles almost always appear **declined**
+("nahtlose Integration", "ganzheitlichen Ansatz"), so an exact `\b…\b`
+match on the lemma would miss most real occurrences. Entries whose endings
+are purely **additive** opt in with `"inflect": true`; the scanner then
+compiles the trailing boundary as `\w*\b`, matching the stem plus any
+declension suffix (-e, -en, -er, -es, -em). It is enabled only for the
+adjective/participle entries above, never for phrases, and never for
+English (where common forms drop a stem letter — "leverage" →
+"leveraging" — so `\w*` would both miss them and over-match). See
+`tests/humanize-text/test_inflection.py`.
 
-Structural hedging phrases that sound plausible individually but signal
-machine origin when they cluster. Examples:
+**Nominalstil** — German AI text leans on noun-heavy constructions ("die
+Durchführung von Tests" instead of "Tests durchführen"). This is a known
+tell but is *not* in the lexicon: it cannot be matched by a word list
+without flagging domain-appropriate technical/legal prose. Left to the
+rewrite pass, not the scanner.
 
-- "Es gilt zu berücksichtigen"
-- "Im Allgemeinen"
-- "grundsätzlich" (when used as an opener, not as a qualifier)
+## EN patterns (`lexicon.en.json`, all tier-1)
 
-### Tier-3 (density hint)
+Hollow verbs, descriptors and openers that the `blader/humanizer` and
+`conorbronsdon/avoid-ai-writing` communities identified as the clearest EN
+AI markers. The JSON is authoritative; groupings are orientation:
 
-Short filler words and particles that are grammatically correct but
-over-represented in AI output: "letztendlich", "insgesamt", "entsprechend"
-used as discourse markers. Individual occurrences are acceptable; a high
-density per 100 words triggers the hint.
-
-## EN patterns
-
-### Tier-1 (always replace)
-
-Hollow verbs and openers that the `blader/humanizer` and
-`conorbronsdon/avoid-ai-writing` communities identified as the clearest
-EN AI markers:
-
-- Hollow verbs: "delve", "delve into", "harness", "leverage", "utilize",
-  "revolutionize", "transform", "supercharge", "empower"
-- Hollow openers: "In today's world", "In today's fast-paced world",
-  "It is important to note that", "It is worth noting", "It goes without
-  saying", "Needless to say"
-- Hollow descriptors: "cutting-edge", "state-of-the-art", "game-changer",
-  "seamlessly", "robust" (used generically)
-
-### Tier-2 (cluster surfaced)
-
-Hedging phrases that cluster in AI-generated EN explanatory text:
-
-- "It is crucial to understand"
-- "This is a testament to"
-- "plays a pivotal role"
-- "in the realm of"
+- **Hollow verbs:** "delve", "leverage", "utilize", "harness",
+  "facilitate", "foster", "underscore", "showcase", "boast", "embark",
+  "elevate", "unlock".
+- **Inflated descriptors:** "groundbreaking", "robust", "crucial",
+  "pivotal", "intricate", "comprehensive", "seamless"/"seamlessly",
+  "cutting-edge", "game-changer", "vibrant", "ever-evolving".
+- **Showy quantifiers / nouns:** "myriad", "plethora", "tapestry",
+  "landscape", "realm", "testament".
+- **Stock connectives:** "moreover", "furthermore", "additionally".
+- **Hollow openers / framing phrases:** "in today's world", "it's worth
+  noting", "it is important to note", "when it comes to", "at the end of
+  the day", "in the realm of", "plays a vital role".
 
 ### Structure/punctuation patterns (`structure_patterns.json`)
 
