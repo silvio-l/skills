@@ -62,8 +62,12 @@ explicit OK. See [rewrite.md](rewrite.md).
 |---|---|
 | `.md`, `.txt`, unknown | Full plain text (suppression markers honoured) |
 | `.html`, `.htm` | `<script>`/`<style>` contents blanked; HTML tags stripped per line |
-| `.astro` | HTML strategy on body **+** `summary { de, en }` string values extracted |
-| `.ts` | `summary { de, en }` string values extracted only |
+| `.astro` | HTML strategy on body **+** every string literal in the `---` frontmatter |
+| `.ts` | Every quoted string-literal **value** (i18n dictionaries, SEO maps, `summary` blocks…); identifiers, keys, and comments are ignored |
+
+All detectors — lexicon **and** structure (em-dash, negative parallelism) — run
+over the same extracted prose, so an em-dash in a `.ts` comment or an HTML tag is
+never flagged; only real copy is.
 
 ## Suppression markers
 

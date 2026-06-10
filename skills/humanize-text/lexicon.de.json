@@ -183,5 +183,93 @@
     "tier": 1,
     "suggested_replacement": "ansehen",
     "rationale": "Lehnübersetzung von 'delve into'; in Sach- und Marketingtexten fast immer die KI-Geste 'wir tauchen ein in das Thema' statt eines schlichten 'wir sehen uns … an'."
+  },
+  {
+    "pattern_id": "de_bemerkenswert",
+    "pattern": "Es ist bemerkenswert, dass",
+    "type": "phrase",
+    "tier": 1,
+    "suggested_replacement": "Bemerkenswert ist:",
+    "rationale": "KI-Floskel, die Bedeutung nur behauptet; verzögert die eigentliche Aussage und wirkt aufgesetzt."
+  },
+  {
+    "pattern_id": "de_erwaehnenswert",
+    "pattern": "Es ist erwähnenswert, dass",
+    "type": "phrase",
+    "tier": 1,
+    "suggested_replacement": "Erwähnenswert:",
+    "rationale": "Hohle Wichtigkeits-Markierung aus dem KI-Repertoire; sagt selbst nichts und kündigt nur an."
+  },
+  {
+    "pattern_id": "de_nicht_leugnen",
+    "pattern": "Es lässt sich nicht leugnen, dass",
+    "type": "phrase",
+    "tier": 1,
+    "suggested_replacement": "Klar ist:",
+    "rationale": "Pseudo-rhetorische Bekräftigung, die KI als Füllsel voranstellt; bläht den Satz auf, ohne ihn zu stützen."
+  },
+  {
+    "pattern_id": "de_versteht_sich",
+    "pattern": "Es versteht sich von selbst, dass",
+    "type": "phrase",
+    "tier": 1,
+    "suggested_replacement": "Natürlich",
+    "rationale": "Floskel für scheinbare Selbstverständlichkeit; in KI-Texten Standard-Auftakt ohne inhaltlichen Mehrwert."
+  },
+  {
+    "pattern_id": "de_grossen_ganzen",
+    "pattern": "Im Großen und Ganzen",
+    "type": "phrase",
+    "tier": 1,
+    "suggested_replacement": "Insgesamt",
+    "rationale": "Abgegriffene Resümee-Wendung, die KI inflationär als weiche Verallgemeinerung einsetzt."
+  },
+  {
+    "pattern_id": "de_abschliessend",
+    "pattern": "Abschließend lässt sich sagen",
+    "type": "phrase",
+    "tier": 1,
+    "suggested_replacement": "Kurz gesagt",
+    "rationale": "Stereotype KI-Schlussfloskel; kündigt ein Fazit an, statt es direkt zu liefern."
+  },
+  {
+    "pattern_id": "de_tauchen_wir_ein",
+    "pattern": "Tauchen wir ein",
+    "type": "phrase",
+    "tier": 1,
+    "suggested_replacement": "Sehen wir uns an",
+    "rationale": "Lehnübersetzung von 'let's delve in'; theatralischer KI-Einstieg statt eines schlichten Übergangs."
+  },
+  {
+    "pattern_id": "de_fuehrt_zu_erkenntnis",
+    "pattern": "Dies führt zu der Erkenntnis, dass",
+    "type": "phrase",
+    "tier": 1,
+    "suggested_replacement": "Daraus folgt:",
+    "rationale": "Umständliche KI-Überleitung, die einen Schluss feierlich ankündigt, statt ihn zu nennen."
+  },
+  {
+    "pattern_id": "de_muss_bedacht",
+    "pattern": "Es muss bedacht werden, dass",
+    "type": "phrase",
+    "tier": 1,
+    "suggested_replacement": "Bedenke:",
+    "rationale": "Passivische Hinweisfloskel; KI-typisch unpersönlich und die Aussage verzögernd."
+  },
+  {
+    "pattern_id": "de_in_anbetracht",
+    "pattern": "In Anbetracht dessen, dass",
+    "type": "phrase",
+    "tier": 1,
+    "suggested_replacement": "Weil",
+    "rationale": "Behördlich-nominaler Konnektor, den KI aus formalen Texten übernimmt; 'weil' ist direkter."
+  },
+  {
+    "pattern_id": "de_unter_beruecksichtigung",
+    "pattern": "Unter Berücksichtigung von",
+    "type": "phrase",
+    "tier": 1,
+    "suggested_replacement": "Angesichts",
+    "rationale": "Nominalstil-Auftakt, der in KI-Output als steife Standardwendung erscheint."
   }
 ]

@@ -59,19 +59,42 @@ import slop_scorer   # noqa: E402
 # ---------------------------------------------------------------------------
 
 def _render_scan_text(scan_result: dict) -> str:
-    """Render scan result as human-readable text."""
+    """Render scan result as human-readable text.
+
+    Surfaced findings (tier-1 + tier-2 clusters) are listed individually.
+    Tier-3 weak/density tells (em-dash overuse, tricolon) are NOT nagged
+    per occurrence — a single em-dash is not slop — only summarised, with a
+    nudge when their density is high.
+    """
     lang = scan_result.get("language", "?")
     findings = scan_result.get("findings", [])
-    lines = [f"Language: {lang}", f"Findings: {len(findings)}"]
-    if findings:
+    surfaced = scan_result.get("surfaced", findings)
+    tier3_hint = scan_result.get("tier3_density_hint", False)
+    n_t3 = sum(1 for f in findings if f.get("tier") == 3)
+
+    lines = [
+        f"Language: {lang}",
+        f"Findings: {len(findings)} total  |  "
+        f"{len(surfaced)} surfaced (tier-1 + tier-2 clusters)",
+    ]
+    if surfaced:
         lines.append("")
-        for f in findings:
+        for f in surfaced:
             lines.append(
-                f"  line {f['line_number']:>4}  [{f['tier']}]  "
+                f"  line {f['line_number']:>4}  [t{f['tier']}]  "
                 f"{f['match']!r}  ({f['pattern_id']})"
             )
             if f.get("suggested_replacement"):
                 lines.append(f"              → {f['suggested_replacement']}")
+    else:
+        lines.append("")
+        lines.append("  No surfaced lexical/structural slop.")
+    if n_t3:
+        note = f"  Weak tells (not scored): {n_t3} em-dash/structure occurrence(s)."
+        if tier3_hint:
+            note += " Density is high — consider varying punctuation/rhythm."
+        lines.append("")
+        lines.append(note)
     return "\n".join(lines)
 
 
@@ -187,10 +210,19 @@ def main(argv: list | None = None) -> int:
         return 2
 
     if args.mode == "scan":
+        # Apply tier gating so scan output mirrors the score gate: tier-1 always,
+        # tier-2 only in clusters, tier-3 (em-dash/structure) as a density hint.
+        with open(file_path, encoding="utf-8", errors="replace") as f:
+            _text = f.read()
+        _wc = max(len(_text.split()), 1)
+        _gating = slop_scorer.apply_tier_gating(scan_result["findings"], word_count=_wc)
+        scan_out = dict(scan_result)
+        scan_out["surfaced"] = _gating["surfaced_findings"]
+        scan_out["tier3_density_hint"] = _gating["tier3_density_hint"]
         if args.format == "json":
-            print(json.dumps(scan_result, ensure_ascii=False, indent=2, sort_keys=False))
+            print(json.dumps(scan_out, ensure_ascii=False, indent=2, sort_keys=False))
         else:
-            print(_render_scan_text(scan_result))
+            print(_render_scan_text(scan_out))
         return 0
 
     # --- Step 2: score (--mode score) ---

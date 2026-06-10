@@ -35,14 +35,14 @@ Scoring formulas (deterministic, no LLM calls):
     clamped to [1, 10].
 
   Authenticity (1–10):
-    Deduction for all findings weighted by tier: tier-1 at 0.5, tier-2 at 0.5,
-    tier-3+ at 1.0. This ensures that no tier penalises authenticity more than
-    the primary tier-1 directness signal.
-    Concretely: raw = 10 - (count_tier1 * 0.5 + count_tier2 * 0.5 + count_other * 1.0)
+    Deduction for tier-1 and tier-2 findings, each weighted at 0.5. Tier-3
+    tells (em-dash density, tricolon) are weak density-only signals and carry
+    NO linear penalty — they only drive tier3_density_hint.
+    Concretely: raw = 10 - (count_tier1 * 0.5 + count_tier2 * 0.5)
     clamped to [1, 10].
 
   Density     (1–10):
-    Findings density per 100 words.
+    Tier-1/tier-2 findings density per 100 words (tier-3 excluded).
     raw = 10 - findings_per_100 * 0.5
     clamped to [1, 10].
 
@@ -137,23 +137,34 @@ def _score_trust(findings: List[Dict]) -> float:
 
 
 def _score_authenticity(findings: List[Dict]) -> float:
-    """Authenticity: tier-1 at 0.5 + tier-2 at 0.5 + tier-3+ at 1.0.
+    """Authenticity: tier-1 at 0.5 + tier-2 at 0.5. Tier-3 does NOT deduct.
 
     Tier-1 and tier-2 are primary style issues already captured by
-    Directness and Trust; weight them at 0.5 so no single tier
-    dominates the Authenticity dimension.
+    Directness and Trust; weight them at 0.5 so no single tier dominates
+    the Authenticity dimension.
+
+    Tier-3 tells (em-dash density, tricolon) are deliberately weak,
+    density-only signals — 2026 research shows a single em-dash proves
+    nothing and humans use them intentionally. They therefore carry NO
+    linear score penalty; their only effect is the tier3_density_hint
+    raised by apply_tier_gating when density crosses the threshold.
     """
     count_t1 = sum(1 for f in findings if f.get("tier") == 1)
     count_t2 = sum(1 for f in findings if f.get("tier") == 2)
-    count_other = sum(1 for f in findings if f.get("tier") not in (1, 2))
-    raw = 10.0 - (count_t1 * 0.5 + count_t2 * 0.5 + count_other * 1.0)
+    raw = 10.0 - (count_t1 * 0.5 + count_t2 * 0.5)
     return max(1.0, min(10.0, raw))
 
 
 def _score_density(findings: List[Dict], word_count: int) -> float:
-    """Density: findings per 100 words; each unit deducts 0.5 points."""
+    """Density: tier-1/tier-2 findings per 100 words; each unit deducts 0.5.
+
+    Tier-3 tells (em-dash, tricolon) are excluded — they are weak density-only
+    hints with no linear score penalty (see _score_authenticity). Counting them
+    here would let deliberate human em-dash style tank the gate.
+    """
     wc = max(word_count, 1)
-    per_100 = len(findings) / wc * 100.0
+    scoring = [f for f in findings if f.get("tier") in (1, 2)]
+    per_100 = len(scoring) / wc * 100.0
     raw = 10.0 - per_100 * 0.5
     return max(1.0, min(10.0, raw))
 

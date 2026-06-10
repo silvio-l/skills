@@ -59,9 +59,12 @@ Slice 04 additions (filetype strip strategies + suppression markers):
   - .md and unknown extensions: scanned as-is (current behaviour, plain text).
   - .html and .astro: <script> and <style> block contents are blanked to empty
     lines (line-count preserved), then HTML tags are stripped per line.
-  - .ts and .astro: the string values of `de` and `en` keys inside a `summary`
-    object literal are extracted and scanned as text; all other code is ignored.
-    For .astro both strategies are applied (HTML body + summary extraction).
+  - .ts: every quoted string-literal VALUE is extracted and scanned (i18n
+    dictionaries, SEO maps, summary blocks…); identifiers, object keys, and
+    comments are ignored. .astro applies the HTML body strategy plus string-
+    literal extraction over the leading `---` frontmatter fence.
+  All detectors (lexicon + structure) run over the same extracted prose
+  segments, so em-dashes inside comments, code, or HTML tags are never flagged.
   Suppression markers (humanize's OWN syntax, distinct from seo-audit's):
   - Per-file: <!-- humanize:ignore-file --> anywhere in the file → whole file
     is skipped.
@@ -134,50 +137,74 @@ def _strip_tags(line: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Slice 04: TypeScript/Astro summary field extraction
+# TypeScript/Astro string-literal extraction
 # ---------------------------------------------------------------------------
-# Conservative regex: finds  summary: {  ... de: '<value>' ... en: '<value>' ...  }
-# Limits: does not handle nested braces inside summary, multi-line string
-# continuations via template literals, or dynamic values. See module docstring.
+# Prose in TS-based projects lives in string *values* — i18n dictionaries
+# (`export const de = { hero: { title: '…' } }`), SEO maps, content collections,
+# and `summary: { de, en }` blocks alike. We therefore extract every quoted
+# string literal value and scan it as text, which is a strict superset of the
+# earlier summary-only strategy: summary values are string literals too, while
+# identifiers, object keys, and bare code tokens (not quoted) are never matched.
+#
+# Matches single-quoted, double-quoted, and backtick (template) literals. The
+# inner text is scanned verbatim; `${…}` interpolations inside template
+# literals are left in place (rare in prose dictionaries). Object keys like
+# `summary:` are identifiers, not quoted, so they never match. Import paths and
+# type-literal strings can match in principle but almost never contain slop
+# vocabulary, so the false-positive cost is negligible.
+#
+# Limits (documented): a stray apostrophe inside a // or /* */ comment could be
+# mis-read as a string delimiter. For clean prose dictionaries (the target use
+# case) this does not occur; JSDoc headers are matched as block comments and
+# their content is not treated specially. See module docstring.
 
-_SUMMARY_BLOCK_RE = re.compile(
-    r"\bsummary\s*:\s*\{([^}]*)\}",
+_STRING_LITERAL_RE = re.compile(
+    r"'(?:[^'\\]|\\.)*'"
+    r'|"(?:[^"\\]|\\.)*"'
+    r"|`(?:[^`\\]|\\.)*`",
     re.DOTALL,
 )
-_SUMMARY_FIELD_RE = re.compile(
-    r"""\b(de|en)\s*:\s*(?:'([^']*)'|"([^"]*)")""",
-)
+
+# Astro frontmatter: the leading `---` … `---` fence at the very top of the file.
+_ASTRO_FRONTMATTER_RE = re.compile(r"\A\s*---\n(.*?)\n---", re.DOTALL)
 
 
-def _extract_summary_lines(source: str) -> List[tuple]:
-    """Extract (line_number, text) tuples for summary { de, en } string values.
+def _extract_string_literals(source: str) -> List[tuple]:
+    """Extract (line_number, value) tuples for every quoted string literal.
 
-    Scans *source* for `summary: { de: '...', en: '...' }` blocks and returns
-    the line number (1-based, pointing to the line in *source* where the field
-    literal begins) and the string value for each de/en field found.
+    Scans *source* for single-, double-, and backtick-quoted string literals
+    and returns the 1-based line number where each literal begins together with
+    its inner text (quotes stripped). Empty/whitespace-only strings are skipped.
 
-    Limits (documented): only handles single- and double-quoted string literals;
-    does not handle template literals, computed keys, or nested braces inside
-    the summary object.
+    This replaces the earlier summary-only extractor: it is a strict superset
+    that also captures i18n dictionary values, SEO strings, and content fields,
+    which is what real TS-based sites actually store prose in.
     """
     results = []
-    lines = source.splitlines(keepends=True)
-
-    for block_m in _SUMMARY_BLOCK_RE.finditer(source):
-        block_content = block_m.group(1)
-        block_start_pos = block_m.start(1)  # absolute offset of block body start
-
-        for field_m in _SUMMARY_FIELD_RE.finditer(block_content):
-            # Determine the string value (single- or double-quoted)
-            value = field_m.group(2) if field_m.group(2) is not None else field_m.group(3)
-            if not value:
-                continue
-            # Absolute offset of the field match within source
-            abs_offset = block_start_pos + field_m.start()
-            # Convert to 1-based line number
-            line_number = source[:abs_offset].count("\n") + 1
-            results.append((line_number, value))
+    for m in _STRING_LITERAL_RE.finditer(source):
+        value = m.group(0)[1:-1]  # strip the surrounding quote characters
+        if not value.strip():
+            continue
+        line_number = source[: m.start()].count("\n") + 1
+        results.append((line_number, value))
     return results
+
+
+def _extract_astro_frontmatter_literals(source: str) -> List[tuple]:
+    """Extract string literals from a .astro file's leading `---` frontmatter.
+
+    Only the frontmatter (TS-like code fence) is scanned for string literals;
+    the HTML body is handled separately by the tag-stripping strategy, so HTML
+    attribute values are not mis-scanned as prose.
+    """
+    m = _ASTRO_FRONTMATTER_RE.match(source)
+    if not m:
+        return []
+    fm = m.group(1)
+    # Offset of the frontmatter body within source, for correct line numbers.
+    base_offset = m.start(1)
+    base_line = source[:base_offset].count("\n")
+    return [(base_line + ln, value) for (ln, value) in _extract_string_literals(fm)]
 
 
 # ---------------------------------------------------------------------------
@@ -388,105 +415,96 @@ def scan_file(file_path: str, lexicon: List[Dict]) -> List[Dict]:
     return findings
 
 
-def _scan_file_typed(
-    file_path: str,
-    compiled: List[Dict],
-    strategy: str,
-) -> List[Dict]:
-    """Scan *file_path* using the strip strategy determined by *strategy*.
+def _build_segments(file_path: str, strategy: str) -> List[tuple]:
+    """Return (line_number, prose_text) segments honouring strategy + suppression.
+
+    This is the single source of truth for "what counts as scannable prose" in a
+    file. Both the lexicon matcher and the structure (em-dash / negative
+    parallelism) matcher run over these segments, so comments, code tokens, HTML
+    tags, and suppressed regions are excluded consistently for every detector.
 
     Strategies:
-      'plain'  — plain text / markdown (suppression markers only)
-      'html'   — blank <script>/<style> blocks, strip tags per line
-      'ts'     — extract summary { de, en } string values only
-      'astro'  — apply HTML strategy on body + extract summary fields
+      'plain'  — every line is prose (suppression markers honoured)
+      'html'   — <script>/<style> blanked, tags stripped, suppression honoured
+      'ts'     — only quoted string-literal values (comments/code excluded)
+      'astro'  — HTML body segments + frontmatter string literals
 
-    Parameters
-    ----------
-    file_path:
-        Path to the file to scan.
-    compiled:
-        Pre-compiled lexicon entries.
-    strategy:
-        One of 'plain', 'html', 'ts', 'astro'.
-
-    Returns
-    -------
-    Unsorted findings list.
+    Returns an empty list when a per-file ignore marker is present.
     """
     with open(file_path, encoding="utf-8", errors="replace") as f:
         text = f.read()
 
-    # Per-file suppression: skip entire file
     if _has_file_ignore_marker(text):
         return []
 
-    findings: List[Dict] = []
+    segments: List[tuple] = []
 
     if strategy == "plain":
-        lines = text.splitlines(keepends=True)
-        findings = _scan_lines_with_suppression(lines, file_path, compiled)
-
-    elif strategy in ("html", "astro"):
-        # Step 1: blank <script>/<style> contents (preserves line count)
-        cleaned = _strip_script_style_preserving_lines(text)
-        # Step 2: split into lines and apply suppression + tag stripping
-        raw_lines = cleaned.splitlines(keepends=True)
         suppressed = False
-        for lineno, raw in enumerate(raw_lines, start=1):
+        for lineno, raw in enumerate(text.splitlines(keepends=True), start=1):
             if _HUMANIZE_OPEN_RE.search(raw):
                 suppressed = True
             if suppressed:
                 if _HUMANIZE_CLOSE_RE.search(raw):
                     suppressed = False
                 continue
-            # Strip HTML tags for matching
-            line = _strip_tags(raw)
-            for spec in compiled:
-                for m in spec["regex"].finditer(line):
-                    findings.append({
-                        "file_path": file_path,
-                        "line_number": lineno,
-                        "match": m.group(0),
-                        "pattern_id": spec["pattern_id"],
-                        "type": spec["type"],
-                        "tier": spec["tier"],
-                        "suggested_replacement": spec["suggested_replacement"],
-                        "rationale": spec["rationale"],
-                    })
-        # For .astro: also extract summary { de, en } fields
+            segments.append((lineno, raw))
+
+    elif strategy in ("html", "astro"):
+        cleaned = _strip_script_style_preserving_lines(text)
+        suppressed = False
+        for lineno, raw in enumerate(cleaned.splitlines(keepends=True), start=1):
+            if _HUMANIZE_OPEN_RE.search(raw):
+                suppressed = True
+            if suppressed:
+                if _HUMANIZE_CLOSE_RE.search(raw):
+                    suppressed = False
+                continue
+            segments.append((lineno, _strip_tags(raw)))
         if strategy == "astro":
-            for lineno, value in _extract_summary_lines(text):
-                for spec in compiled:
-                    for m in spec["regex"].finditer(value):
-                        findings.append({
-                            "file_path": file_path,
-                            "line_number": lineno,
-                            "match": m.group(0),
-                            "pattern_id": spec["pattern_id"],
-                            "type": spec["type"],
-                            "tier": spec["tier"],
-                            "suggested_replacement": spec["suggested_replacement"],
-                            "rationale": spec["rationale"],
-                        })
+            segments.extend(_extract_astro_frontmatter_literals(text))
 
     elif strategy == "ts":
-        # Only scan summary { de, en } string values
-        for lineno, value in _extract_summary_lines(text):
-            for spec in compiled:
-                for m in spec["regex"].finditer(value):
-                    findings.append({
-                        "file_path": file_path,
-                        "line_number": lineno,
-                        "match": m.group(0),
-                        "pattern_id": spec["pattern_id"],
-                        "type": spec["type"],
-                        "tier": spec["tier"],
-                        "suggested_replacement": spec["suggested_replacement"],
-                        "rationale": spec["rationale"],
-                    })
+        segments.extend(_extract_string_literals(text))
 
+    return segments
+
+
+def _match_lexicon_in_segments(
+    segments: List[tuple],
+    file_path: str,
+    compiled: List[Dict],
+) -> List[Dict]:
+    """Match every compiled lexicon entry against each prose segment."""
+    findings: List[Dict] = []
+    for lineno, text in segments:
+        for spec in compiled:
+            for m in spec["regex"].finditer(text):
+                findings.append({
+                    "file_path": file_path,
+                    "line_number": lineno,
+                    "match": m.group(0),
+                    "pattern_id": spec["pattern_id"],
+                    "type": spec["type"],
+                    "tier": spec["tier"],
+                    "suggested_replacement": spec["suggested_replacement"],
+                    "rationale": spec["rationale"],
+                })
     return findings
+
+
+def _scan_file_typed(
+    file_path: str,
+    compiled: List[Dict],
+    strategy: str,
+) -> List[Dict]:
+    """Scan *file_path* for lexicon matches using the given strip *strategy*.
+
+    Thin wrapper over _build_segments + _match_lexicon_in_segments. Returns an
+    unsorted findings list (caller sorts).
+    """
+    segments = _build_segments(file_path, strategy)
+    return _match_lexicon_in_segments(segments, file_path, compiled)
 
 
 # ---------------------------------------------------------------------------
@@ -505,19 +523,69 @@ _EM_DASH_RE = re.compile(r"—")
 # a tier-3, density-only weak hint (surfaced=false) for a future aggregate pass.
 # No regex/detection runs here by design.
 
-# Negative parallelism:
-# DE: "nicht nur ... sondern (auch) ..."
-# EN: "not just ... but (also) ..." / "not only ... but (also) ..."
+# Negative parallelism — a rhetorical template LLMs over-use to perform balance.
+# Sources (2026): Wikipedia "Signs of AI writing" lists "not just X but Y",
+# "it's not X, it's Y", and "not a X, but a Y" as hallmark constructions.
+# DE: "nicht nur ... sondern (auch) ...", "es geht nicht (nur) um ... sondern um ..."
+# EN: "not just/only ... but ...", "it's not X, it's Y", "not a X, but a Y"
 _NEG_PARALLEL_RE = re.compile(
     r"(?:"
-    r"nicht\s+nur\b.{1,80}?\bsondern\s+auch\b"      # DE
+    r"nicht\s+nur\b.{1,80}?\bsondern\s+(?:auch\b)?"           # DE "nicht nur … sondern auch"
     r"|"
-    r"not\s+just\b.{1,80}?\bbut\s+(?:also\s+)?\b"   # EN variant 1
+    r"es\s+geht\s+nicht\s+(?:nur\s+)?um\b.{1,80}?\bsondern\s+um\b"  # DE "es geht nicht um … sondern um"
     r"|"
-    r"not\s+only\b.{1,80}?\bbut\s+(?:also\s+)?\b"   # EN variant 2
+    r"not\s+just\b.{1,80}?\bbut\s+(?:also\s+)?\b"             # EN "not just … but (also)"
+    r"|"
+    r"not\s+only\b.{1,80}?\bbut\s+(?:also\s+)?\b"             # EN "not only … but (also)"
+    r"|"
+    r"it['’]?s\s+not\s+(?:just|only|merely|simply|about)\b.{1,80}?\bit['’]?s\b"  # EN "it's not just X, it's Y"
+    r"|"
+    r"\bnot\s+(?:a|an|the)\b.{1,50}?,\s*but\s+(?:a|an|the)\b"  # EN "not a X, but a Y"
     r")",
     re.IGNORECASE | re.DOTALL,
 )
+
+
+def _structure_in_segments(
+    segments: List[tuple],
+    file_path: str,
+    em_dash_spec: Dict,
+    neg_par_spec: Dict,
+) -> List[Dict]:
+    """Run em-dash and negative-parallelism detection over prose *segments*.
+
+    Tricolon / rule-of-three is intentionally NOT surfaced as an individual
+    finding (tier-3, density-only weak hint) — a genuine rhetorical tricolon
+    cannot be reliably told apart from an ordinary three-item enumeration with
+    surface heuristics. See structure_patterns.json (struct_tricolon).
+    """
+    findings: List[Dict] = []
+    for lineno, text in segments:
+        if em_dash_spec:
+            for m in _EM_DASH_RE.finditer(text):
+                findings.append({
+                    "file_path": file_path,
+                    "line_number": lineno,
+                    "match": m.group(0),
+                    "pattern_id": em_dash_spec["pattern_id"],
+                    "type": em_dash_spec["type"],
+                    "tier": int(em_dash_spec.get("tier", 1)),
+                    "suggested_replacement": em_dash_spec.get("suggested_replacement", ""),
+                    "rationale": em_dash_spec.get("rationale", ""),
+                })
+        if neg_par_spec:
+            for m in _NEG_PARALLEL_RE.finditer(text):
+                findings.append({
+                    "file_path": file_path,
+                    "line_number": lineno,
+                    "match": m.group(0),
+                    "pattern_id": neg_par_spec["pattern_id"],
+                    "type": neg_par_spec["type"],
+                    "tier": int(neg_par_spec.get("tier", 2)),
+                    "suggested_replacement": neg_par_spec.get("suggested_replacement", ""),
+                    "rationale": neg_par_spec.get("rationale", ""),
+                })
+    return findings
 
 
 def _load_structure_patterns(structure_dir: Optional[Path] = None) -> List[Dict]:
@@ -558,53 +626,16 @@ def scan_file_with_structure(
     sp_dir = Path(structure_dir) if structure_dir else None
     patterns = _load_structure_patterns(sp_dir)
 
-    # Build lookup by pattern_id
     by_id: Dict[str, Dict] = {p["pattern_id"]: p for p in patterns}
-
     em_dash_spec = by_id.get("punct_em_dash", {})
     neg_par_spec = by_id.get("struct_neg_parallelism", {})
 
+    # Standalone behaviour: every raw line is a segment (no strip strategy, no
+    # suppression). The strategy-aware path lives in scan_file_with_language.
     with open(file_path, encoding="utf-8", errors="replace") as f:
-        lines = f.readlines()
+        segments = list(enumerate(f.readlines(), start=1))
 
-    findings: List[Dict] = []
-
-    for lineno, raw in enumerate(lines, start=1):
-        line = raw.rstrip("\n")
-
-        # --- Em-dash (U+2014): one finding per occurrence ---
-        if em_dash_spec:
-            for m in _EM_DASH_RE.finditer(raw):
-                findings.append({
-                    "file_path": file_path,
-                    "line_number": lineno,
-                    "match": m.group(0),
-                    "pattern_id": em_dash_spec["pattern_id"],
-                    "type": em_dash_spec["type"],
-                    "tier": int(em_dash_spec.get("tier", 1)),
-                    "suggested_replacement": em_dash_spec.get("suggested_replacement", ""),
-                    "rationale": em_dash_spec.get("rationale", ""),
-                })
-
-        # --- Tricolon / rule-of-three ---
-        # Intentionally NOT surfaced as an individual finding (tier-3 weak hint).
-        # See structure_patterns.json struct_tricolon (surfaced=false) and the
-        # module-level note above for the rationale (false-positive avoidance).
-
-        # --- Negative parallelism ---
-        if neg_par_spec:
-            for m in _NEG_PARALLEL_RE.finditer(line):
-                findings.append({
-                    "file_path": file_path,
-                    "line_number": lineno,
-                    "match": m.group(0),
-                    "pattern_id": neg_par_spec["pattern_id"],
-                    "type": neg_par_spec["type"],
-                    "tier": int(neg_par_spec.get("tier", 2)),
-                    "suggested_replacement": neg_par_spec.get("suggested_replacement", ""),
-                    "rationale": neg_par_spec.get("rationale", ""),
-                })
-
+    findings = _structure_in_segments(segments, file_path, em_dash_spec, neg_par_spec)
     findings.sort(key=lambda f: (f["file_path"], f["line_number"], f["pattern_id"]))
     return findings
 
@@ -660,14 +691,23 @@ def scan_file_with_language(
 
     compiled = _compile_lexicon(lexicon)
     strategy = _detect_file_strategy(file_path)
-    word_findings = _scan_file_typed(file_path, compiled, strategy)
 
-    # Merge structure/punctuation findings (slice 03) if structure_patterns.json exists
+    # Build prose segments once; every detector runs over the SAME segments so
+    # strip strategy + suppression apply uniformly (no em-dash hits in comments,
+    # code, or HTML tags).
+    segments = _build_segments(file_path, strategy)
+    word_findings = _match_lexicon_in_segments(segments, file_path, compiled)
+
+    # Merge structure/punctuation findings if structure_patterns.json exists
     structure_patterns_path = lexicon_dir / "structure_patterns.json"
     if structure_patterns_path.is_file():
-        struct_findings = scan_file_with_structure(
-            file_path=file_path,
-            structure_dir=str(lexicon_dir),
+        patterns = _load_structure_patterns(lexicon_dir)
+        by_id = {p["pattern_id"]: p for p in patterns}
+        struct_findings = _structure_in_segments(
+            segments,
+            file_path,
+            by_id.get("punct_em_dash", {}),
+            by_id.get("struct_neg_parallelism", {}),
         )
     else:
         struct_findings = []

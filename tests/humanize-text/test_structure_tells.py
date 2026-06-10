@@ -180,14 +180,20 @@ class TestEmDashDetection(unittest.TestCase):
             self.assertEqual(_CANONICAL_KEYS, set(f.keys()),
                              f"Wrong keys: {set(f.keys())}")
 
-    def test_em_dash_tier_is_1(self):
-        """AC1: em-dash finding has tier == 1."""
+    def test_em_dash_tier_is_3(self):
+        """Em-dash is a weak, density-only tell: tier 3 (not surfaced/scored).
+
+        2026 research treats em-dash over-use as a frequency signal, not a
+        per-occurrence one. The primitive still records each occurrence (useful
+        for a rewrite), but at tier 3 so gating never surfaces it and the scorer
+        never deducts for it linearly.
+        """
         text = "KI schreibt — weil es trainiert wurde.\n"
         findings = self._scan_with_structure(text)
         punct = [f for f in findings if f["type"] == "punctuation"]
         self.assertGreater(len(punct), 0)
         for f in punct:
-            self.assertEqual(1, f["tier"])
+            self.assertEqual(3, f["tier"])
 
     def test_em_dash_rationale_non_empty(self):
         """AC4: em-dash finding has a non-empty rationale."""

@@ -107,17 +107,22 @@ AI markers. The JSON is authoritative; groupings are orientation:
 
 These are language-neutral and loaded from `structure_patterns.json`:
 
-**Em-dash (U+2014)** — tier-1, always surfaced. The em-dash as a
-stylistic separator ("tool — it helps") is a strong AI tell. The
-scanner flags every occurrence. Suggested replacement: a plain hyphen
-or a recast sentence. Note: em-dashes inside JSDoc/code comments in
-`.ts` files will also be flagged; use `<!-- humanize:ignore -->` blocks
-or the `humanize:ignore-file` marker to exclude code-only files from
-scan if desired.
+**Em-dash (U+2014)** — tier-3, density hint only. Em-dash over-use is a
+*frequency* tell, not a per-occurrence one: 2026 detection research
+(Pangram; Wikipedia "Signs of AI writing") is explicit that a single
+em-dash proves nothing and that humans use them as a deliberate device.
+The scanner records each occurrence (handy for a rewrite) but **never
+surfaces it as a finding and never deducts it from the score** — only an
+above-threshold density per 100 words raises the structural-tells hint.
+Because detection is now strategy-aware, em-dashes inside `.ts`/JSDoc
+comments, code, and HTML tags are not counted at all — only real prose.
 
-**Negative parallelism** ("nicht nur … sondern auch" / "not just … but
-also") — tier-2. One instance is valid rhetoric; a cluster indicates
-overuse. Surfaced when it appears in a tier-2 cluster window.
+**Negative parallelism** — tier-2. A rhetorical template LLMs over-use to
+perform balance. Detected frames (DE + EN): "nicht nur … sondern auch",
+"es geht nicht (nur) um … sondern um", "not just/only … but (also)",
+"it's not X, it's Y", "not a X, but a Y". One instance is valid rhetoric;
+a cluster indicates overuse. Surfaced when it appears in a tier-2 cluster
+window.
 
 **Tricolon / rule-of-three** — tier-3, density hint only. A genuine
 rhetorical tricolon cannot be reliably distinguished from an ordinary

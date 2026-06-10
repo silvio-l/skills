@@ -318,5 +318,149 @@
     "tier": 1,
     "suggested_replacement": "is key to",
     "rationale": "Hollow significance template ('X plays a vital role in Y') that AI repeats reflexively; replace with a concrete statement of what X actually does."
+  },
+  {
+    "pattern_id": "en_meticulous",
+    "pattern": "meticulous",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "careful",
+    "rationale": "Praise adjective AI sprinkles to signal diligence ('meticulous attention to detail'); rarely earned, usually filler."
+  },
+  {
+    "pattern_id": "en_commendable",
+    "pattern": "commendable",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "good",
+    "rationale": "Evaluative AI cliché that hands out vague approval; says little beyond 'good' while sounding formal."
+  },
+  {
+    "pattern_id": "en_multifaceted",
+    "pattern": "multifaceted",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "complex",
+    "rationale": "High-confidence AI tell for gesturing at complexity; almost always decoration rather than description."
+  },
+  {
+    "pattern_id": "en_transformative",
+    "pattern": "transformative",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "major",
+    "rationale": "Hype adjective LLMs attach to ordinary changes; overstates impact and dulls through repetition."
+  },
+  {
+    "pattern_id": "en_revolutionize",
+    "pattern": "revolutionize",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "change",
+    "rationale": "Marketing verb AI uses to inflate incremental work; 'change' or 'improve' is honest and clearer."
+  },
+  {
+    "pattern_id": "en_streamline",
+    "pattern": "streamline",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "simplify",
+    "rationale": "Business-speak verb LLMs favour for 'simplify' or 'speed up'; vague process-polish language."
+  },
+  {
+    "pattern_id": "en_interplay",
+    "pattern": "interplay",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "interaction",
+    "rationale": "Quasi-academic noun AI uses to sound analytical ('the interplay between X and Y'); 'interaction' is plainer."
+  },
+  {
+    "pattern_id": "en_garner",
+    "pattern": "garner",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "get",
+    "rationale": "Stilted verb ('garner attention') LLMs prefer over 'get' or 'attract'; adds formality, not meaning."
+  },
+  {
+    "pattern_id": "en_holistic",
+    "pattern": "holistic",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "complete",
+    "rationale": "Buzzword AI puts before 'approach'/'view' to imply depth; usually an unearned claim of completeness."
+  },
+  {
+    "pattern_id": "en_empower",
+    "pattern": "empower",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "enable",
+    "rationale": "Motivational-speak verb overused in AI marketing copy; 'enable' or 'let' states the same thing plainly."
+  },
+  {
+    "pattern_id": "en_supercharge",
+    "pattern": "supercharge",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "speed up",
+    "rationale": "Hype verb ('supercharge your workflow') heavily favoured by LLMs; promises more than it delivers."
+  },
+  {
+    "pattern_id": "en_enduring",
+    "pattern": "enduring",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "lasting",
+    "rationale": "Significance-padding adjective AI uses to lend weight ('an enduring legacy'); 'lasting' is simpler."
+  },
+  {
+    "pattern_id": "en_important_to_consider",
+    "pattern": "it is important to consider",
+    "type": "phrase",
+    "tier": 1,
+    "suggested_replacement": "Consider",
+    "rationale": "Hedging preamble that signals importance without delivering it; pads the sentence and delays the point."
+  },
+  {
+    "pattern_id": "en_could_be_argued",
+    "pattern": "it could be argued that",
+    "type": "phrase",
+    "tier": 1,
+    "suggested_replacement": "Arguably,",
+    "rationale": "Weasel framing AI uses to float a claim without owning it; replace with the claim or 'arguably'."
+  },
+  {
+    "pattern_id": "en_while_it_is_true",
+    "pattern": "while it is true that",
+    "type": "phrase",
+    "tier": 1,
+    "suggested_replacement": "Although",
+    "rationale": "Formulaic concessive opener LLMs reach for; 'although' or 'though' carries the same contrast more lightly."
+  },
+  {
+    "pattern_id": "en_in_conclusion",
+    "pattern": "in conclusion",
+    "type": "phrase",
+    "tier": 1,
+    "suggested_replacement": "So,",
+    "rationale": "Stock essay closer AI appends reflexively; a strong ending rarely needs to announce itself."
+  },
+  {
+    "pattern_id": "en_goes_without_saying",
+    "pattern": "it goes without saying that",
+    "type": "phrase",
+    "tier": 1,
+    "suggested_replacement": "Obviously,",
+    "rationale": "Filler concession that says the thing is obvious, then says it anyway; pure padding."
+  },
+  {
+    "pattern_id": "en_needless_to_say",
+    "pattern": "needless to say",
+    "type": "phrase",
+    "tier": 1,
+    "suggested_replacement": "Clearly,",
+    "rationale": "Throwaway AI connective that adds length and a tired register without adding information."
   }
 ]

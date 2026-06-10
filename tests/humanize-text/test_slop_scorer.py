@@ -162,6 +162,20 @@ class TestScoreMonotonicity(unittest.TestCase):
         self.assertGreaterEqual(r_t2["overall"], r_t1["overall"],
                                 "Tier-2 findings must not penalise more than tier-1")
 
+    def test_tier3_does_not_lower_score(self):
+        """Tier-3 (em-dash density / tricolon) is a weak hint: NO linear penalty.
+
+        A clean text with scattered em-dashes (modelled as tier-3 findings) must
+        score the same as the same text with none — only the density hint may
+        differ. This is the production-critical fix: deliberate human em-dash
+        style must not tank the gate.
+        """
+        text = self._BASE_TEXT
+        r0 = slop_scorer.score(text, [])
+        r_t3 = slop_scorer.score(text, [_make_finding(3, i + 1) for i in range(8)])
+        self.assertEqual(r0["overall"], r_t3["overall"],
+                         "tier-3 findings must not change the overall score")
+
 
 # ---------------------------------------------------------------------------
 # AC2: burstiness — sentence-length variance affects Rhythm dimension
