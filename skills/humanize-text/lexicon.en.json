@@ -1,0 +1,82 @@
+[
+  {
+    "pattern_id": "en_delve",
+    "pattern": "delve",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "explore",
+    "rationale": "Statistically overrepresented in LLM output; sounds performative rather than genuine. Human writers almost never start a sentence with 'delve into'."
+  },
+  {
+    "pattern_id": "en_tapestry",
+    "pattern": "tapestry",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "mix",
+    "rationale": "AI cliché used to gesture at complexity; almost always hollow decoration rather than meaningful description."
+  },
+  {
+    "pattern_id": "en_leverage",
+    "pattern": "leverage",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "use",
+    "rationale": "Corporate buzzword that LLMs import from business-speak; 'use' is almost always clearer and more direct."
+  },
+  {
+    "pattern_id": "en_worth_noting",
+    "pattern": "it's worth noting",
+    "type": "phrase",
+    "tier": 1,
+    "suggested_replacement": "Note that",
+    "rationale": "Filler hedge that delays the actual information; common AI padding phrase signalling something important without actually saying it."
+  },
+  {
+    "pattern_id": "en_groundbreaking",
+    "pattern": "groundbreaking",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "significant",
+    "rationale": "Hyperbolic adjective used by LLMs to add apparent importance; rarely justified and quickly fatigues the reader."
+  },
+  {
+    "pattern_id": "en_landscape",
+    "pattern": "landscape",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "field",
+    "rationale": "Metaphor overused in AI-written surveys ('the AI landscape', 'the competitive landscape'); loses all imagery through repetition."
+  },
+  {
+    "pattern_id": "en_robust",
+    "pattern": "robust",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "reliable",
+    "rationale": "Tech-speak adjective that LLMs apply to almost everything; vague enough to mean nothing while sounding technical."
+  },
+  {
+    "pattern_id": "en_crucial",
+    "pattern": "crucial",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "essential",
+    "rationale": "Urgency adjective that AI models insert reflexively to inflate importance; desensitises the reader when every step is 'crucial'."
+  },
+  {
+    "pattern_id": "en_foster",
+    "pattern": "foster",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "build",
+    "rationale": "Management-speak verb that LLMs favour for abstract nouns ('foster collaboration', 'foster growth'); 'build' or 'encourage' is usually more direct."
+  },
+  {
+    "pattern_id": "en_realm",
+    "pattern": "realm",
+    "type": "word",
+    "tier": 1,
+    "suggested_replacement": "area",
+    "rationale": "Quasi-poetic noun that AI models use to dress up mundane domains ('the realm of AI'); 'area' or 'field' is almost always cleaner."
+  }
+]
