@@ -65,10 +65,23 @@ Scans all subfolders of `<project>`. AppleScript pulls `plaintext` (HTML strippe
 - Default output: grouped by status, `<date>  <title-50>  <preview>` rows.
 - `--status` filters to one subfolder.
 - `--limit` caps after sort (most-recent-first within each status).
+- `--json` adds the stable note `id` to each row (use it as `<title>` for any later `get`/`update`/`move`/`delete` to bypass title truncation entirely).
+
+### Addressing a note (title vs. id)
+
+Every read/write subcommand that takes a `<title>` resolves it through one tolerant matcher (`_helper.py match-title`, fed by an `id\tname` index of the project). The `<title>` argument may be:
+
+- the **exact** note name;
+- a **truncated** name as printed by `notes` / `search` — Apple Notes derives a note's title from its first body line and truncates it to ~64 chars + `…`, so a note whose author dumped everything into the first line shows up truncated. Matching strips the trailing ellipsis (`…`, `‥`, or ASCII `...`, plus any trailing whitespace incl. NBSP) and matches on the prefix;
+- a **differently-cut prefix** (e.g. a 40-char slice copied from a column-limited listing);
+- the **full first line** (longer than the stored truncated name) — matched when the stored name is visibly truncated and forms a prefix of the query;
+- a raw **`x-coredata://…` note id** — matched exactly against the id column.
+
+When the query ties across two notes at the best match tier, the command aborts with `ambiguous title …` and lists the candidates; pass the **id** (from `notes --json` / `search --json`, field `id`) as `<title>` to disambiguate. The id is the stable, collision-proof handle and is the recommended way for agents to address a note across multiple operations. Once located, the note is addressed internally by id (`note id …`), so there is no title round-trip and no "race condition" re-query.
 
 ### `get <project> <title> [--format text|html|raw]`
 
-`locate_note` finds which subfolder holds the note (first match wins). Then `body of note` (raw HTML) is fetched.
+Resolves `<title>` (see *Addressing a note* above), then fetches `body of note` (raw HTML) by id.
 
 - `text` (default): replace inline base64 `<img>` with `[image:N]` placeholders, decode block tags to newlines, unescape HTML entities, normalize whitespace.
 - `html`: keep HTML, only base64 stripped to placeholders.
@@ -82,7 +95,7 @@ Same locate-then-fetch. Inline base64 images decoded into `<DIR>/<project-title-
 
 ### `search <query> [--project NAME] [--preview N] [--json]`
 
-Server-side AppleScript filter: `whose name contains q or plaintext contains q`. Iterates every project + every status subfolder. Default output: `<date>  <project-12>  <status-10>  <title-40>  <preview>`, sorted most-recent first.
+Server-side AppleScript filter: `whose name contains q or plaintext contains q`. Iterates every project + every status subfolder. Default output: `<date>  <project-12>  <status-10>  <title-40>  <preview>`, sorted most-recent first. `--json` adds the stable note `id` per row.
 
 ### `create <project> <title> [--status S] [--body-file F]`
 
@@ -138,7 +151,7 @@ Body content is not scored. The Normalo-templates seed plain free-form text, so 
 - **Locale-independent dates**: month/day are extracted as integers (`(month of d) as integer` returns 1–12 regardless of system locale) and zero-padded by the skill.
 - **No apostrophes in single-quoted heredocs inside `$(…)`**: Bash 3.2's parser breaks on `AppleScript's text item delimiters` inside `out="$(osa … <<'TAG' …)"`. The skill uses `text item delimiters of AppleScript` instead.
 - **Reserved word avoidance**: variable names `st`, `from`, `to` collide with AppleScript keywords in some contexts. The skill uses `theStatus`, `fromStatus`, `toStatus`, and avoids one-letter names other than `t` (note title) and `b` (body).
-- **`whose` filtering** is case-sensitive on titles. Get the exact title from `notes` output before calling `get` / `move` / `delete`.
+- **Title matching is tolerant** (see *Addressing a note*): truncated/ellipsis/prefix titles and raw note ids all resolve. Exact and case-sensitive matches rank first; case-insensitive and prefix matches are fallbacks. When two notes tie, the command aborts as ambiguous — pass the note `id` to disambiguate.
 - **Argv passing**: every AppleScript runs via `osascript - "$@" <<APPLESCRIPT … APPLESCRIPT`. Args go through argv — no shell-level string interpolation, safe for Unicode and special characters.
 
 ## Adding a new status

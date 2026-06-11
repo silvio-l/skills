@@ -223,5 +223,112 @@ class CliDispatcher(unittest.TestCase):
         self.assertIn("unknown subcommand", r.stderr)
 
 
+class MatchTitle(unittest.TestCase):
+    """Tolerant note resolution — the core of the title-truncation fix.
+
+    Apple Notes derives `name` from the first body line and truncates it to
+    ~64 chars + "…". A caller addressing a note may pass the truncated name,
+    the full first line, a differently-cut prefix, "..." instead of "…", or a
+    raw x-coredata id. All must resolve to the same note.
+    """
+
+    # A realistic truncated index: one note whose entire content sat in the
+    # title, so Apple Notes returns a 64-char first line + ellipsis.
+    TRUNC = "BUG: Beim Login dreht sich der Ladekreis endlos und nichts pas…"
+    FULL = ("BUG: Beim Login dreht sich der Ladekreis endlos und nichts "
+            "passiert danach muss ich die App neu starten")
+
+    def rows(self, *names):
+        # (status, id, name) — ids are synthetic but shaped like the real ones.
+        return [("inbox", f"x-coredata://X/ICNote/p{i}", n)
+                for i, n in enumerate(names, start=1)]
+
+    def test_exact_name_matches(self):
+        kind, payload = H.match_title("FEAT: Dark mode", self.rows("FEAT: Dark mode"))
+        self.assertEqual(kind, "OK")
+        self.assertEqual(payload[2], "FEAT: Dark mode")
+
+    def test_full_line_resolves_to_truncated_name(self):
+        # Caller reconstructs the full first line; stored name is truncated.
+        kind, payload = H.match_title(self.FULL, self.rows(self.TRUNC))
+        self.assertEqual(kind, "OK")
+        self.assertEqual(payload[2], self.TRUNC)
+
+    def test_short_cut_resolves_to_longer_name(self):
+        # Caller copied a 40-char cut from a column-truncated listing.
+        kind, payload = H.match_title("BUG: Beim Login dreht sich der Ladekreis", self.rows(self.TRUNC))
+        self.assertEqual(kind, "OK")
+        self.assertEqual(payload[2], self.TRUNC)
+
+    def test_ascii_dots_match_unicode_ellipsis(self):
+        kind, payload = H.match_title(
+            "BUG: Beim Login dreht sich der Ladekreis endlos und nichts pas...",
+            self.rows(self.TRUNC),
+        )
+        self.assertEqual(kind, "OK")
+
+    def test_id_matches_exactly(self):
+        rows = self.rows("FEAT: A", "BUG: B")
+        target = rows[1][1]
+        kind, payload = H.match_title(target, rows)
+        self.assertEqual(kind, "OK")
+        self.assertEqual(payload[2], "BUG: B")
+
+    def test_unknown_id_is_none(self):
+        kind, _ = H.match_title("x-coredata://X/ICNote/p999", self.rows("A"))
+        self.assertEqual(kind, "NONE")
+
+    def test_no_match_is_none(self):
+        kind, _ = H.match_title("totally unrelated", self.rows("FEAT: A", "BUG: B"))
+        self.assertEqual(kind, "NONE")
+
+    def test_case_insensitive_fallback(self):
+        kind, payload = H.match_title("feat: dark mode", self.rows("FEAT: Dark mode"))
+        self.assertEqual(kind, "OK")
+        self.assertEqual(payload[2], "FEAT: Dark mode")
+
+    def test_short_untruncated_name_does_not_swallow_longer_query(self):
+        # A note literally titled "BUG" must NOT match "BUG: login broken":
+        # the prefix-from-name tiers only fire for visibly truncated names.
+        kind, _ = H.match_title("BUG: login broken", self.rows("BUG"))
+        self.assertEqual(kind, "NONE")
+
+    def test_ambiguous_when_two_notes_tie_at_best_tier(self):
+        kind, payload = H.match_title(
+            "BUG: Login",
+            self.rows("BUG: Login flaky on iPhone", "BUG: Login flaky on iPad"),
+        )
+        self.assertEqual(kind, "AMBIG")
+        self.assertEqual(len(payload), 2)
+
+    def test_exact_beats_prefix_when_both_present(self):
+        # An exact match must win over a tier-2 prefix sibling — no ambiguity.
+        kind, payload = H.match_title(
+            "BUG: Login",
+            self.rows("BUG: Login", "BUG: Login flaky later"),
+        )
+        self.assertEqual(kind, "OK")
+        self.assertEqual(payload[2], "BUG: Login")
+
+    def test_cli_match_title_ok(self):
+        idx = "inbox\tx-coredata://X/ICNote/p1\tFEAT: Dark mode\n"
+        r = subprocess.run(
+            [sys.executable, str(SCRIPTS_DIR / "_helper.py"), "match-title", "FEAT: Dark mode"],
+            input=idx, capture_output=True, text=True,
+            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+        )
+        self.assertEqual(r.returncode, 0)
+        self.assertEqual(r.stdout.strip(), "OK\tinbox\tx-coredata://X/ICNote/p1\tFEAT: Dark mode")
+
+    def test_cli_match_title_none(self):
+        r = subprocess.run(
+            [sys.executable, str(SCRIPTS_DIR / "_helper.py"), "match-title", "nope"],
+            input="inbox\tx-coredata://X/ICNote/p1\tFEAT: Dark mode\n",
+            capture_output=True, text=True,
+            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+        )
+        self.assertEqual(r.stdout.strip(), "NONE")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -46,7 +46,7 @@ S=~/.claude/skills/apple-notes/scripts/apple-notes
 | `projects [--json]` | Lists app subfolders of the company folder with note counts. |
 | `resolve [REPO]` | Maps a repo name (default: current git toplevel) to a project. Cached at `~/.config/claude/apple-notes/mapping.json`. |
 | `notes <project> [--status S] [--limit N] [--preview N] [--json]` | Lists notes; default groups by status. |
-| `get <project> <title> [--format text\|html\|raw]` | Reads a note; auto-locates across all status folders. Default `text` strips base64 → `[image:N]`. |
+| `get <project> <title> [--format text\|html\|raw]` | Reads a note; auto-locates across all status folders. `<title>` may be the exact name, a truncated/ellipsis title as listed, a prefix, or a raw note `id`. Default `text` strips base64 → `[image:N]`. |
 | `images <project> <title> [--out DIR]` | Extracts inline base64 images to `/tmp/apple-notes-images/<slug>/` and prints JSON `[{path,bytes,mime}]`. |
 | `search <query> [--project NAME] [--json]` | Full-text across all projects + statuses. |
 | `create <project> <title> [--status S] [--body-file F]` | Body on stdin or `--body-file`. Default status: `inbox`. |
@@ -95,10 +95,18 @@ Change with `apple-notes config set <key> <value>`. Pre-existing configs are gen
 
 Claude Code's host terminal must have **Automation → Notes** enabled in `System Settings → Privacy & Security`. First invocation triggers the prompt; if denied earlier, toggle it back.
 
+## Long titles & truncation
+
+Apple Notes has no separate title field — a note's title **is** its first body line, truncated to ~64 chars + `…` once it gets long. So when a collaborator dumps the whole report into the first line (no line break), the listed title is a truncated ellipsis form while the full text lives in the body.
+
+This is handled transparently: `get`/`update`/`append`/`move`/`delete` resolve a `<title>` that is exact, **truncated**, a prefix, ASCII-`...`, or a raw **note `id`**. For bulletproof addressing across several operations, take the `id` from `notes --json` / `search --json` and pass it as `<title>`. If two notes collide on a prefix, the command aborts as `ambiguous` and asks for the id.
+
+To *prevent* the problem at the source, the seeded `Anleitung`/templates ask collaborators to keep the first line a short title and put detail in the lines below.
+
 ## Limitations
 
 - **Inline base64 only**: only images that Apple Notes stored inline are extractable. Video, audio, PDFs, and richly-linked attachments are flagged in the note body (often as `￼`) but not retrievable via AppleScript.
-- **Duplicate titles within a status folder**: AppleScript returns the first match; rename in Apple Notes for disambiguation.
+- **Duplicate / prefix-colliding titles**: when a title query ties across notes, the command aborts as ambiguous — disambiguate with the note `id` (from `--json`) or rename in Apple Notes.
 - **Status set is configurable** but enforced by `init` + `move`. Adding a new status: edit `config.json` `statuses` array and re-run `init`.
 
 See [REFERENCE.md](REFERENCE.md) for AppleScript caveats, exit codes, and full subcommand contracts.

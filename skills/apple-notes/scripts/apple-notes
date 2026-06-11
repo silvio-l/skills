@@ -177,6 +177,11 @@ So bringst du Bugs und Feedback ein
    FB:    wenn du Feedback weitergeben willst
    (TECH: ist nur für Silvio gedacht)
 
+   Wichtig: Halte die erste Zeile (den Titel) kurz — am besten
+   ein knapper Satz. Schreibe alle Details darunter in den Text,
+   nicht alles in die Titelzeile. Sonst kürzt Apple Notes den
+   Titel mit „…" ab und wir müssen länger suchen.
+
 3. Im Ordner „docs" findest du fertige Vorlagen — eine je
    Titel-Typ. So nutzt du sie (funktioniert auf iPhone, iPad,
    Mac und auf iCloud.com unter Windows):
@@ -469,7 +474,7 @@ on run argv
             set p to plaintext of n
             if (count of p) > 400 then set p to (text 1 thru 400 of p)
             set p to my squash(p)
-            set output to output & sName & tab & (name of n) & tab & my isoDate(modDate) & tab & p & linefeed
+            set output to output & sName & tab & (id of n) & tab & (name of n) & tab & my isoDate(modDate) & tab & p & linefeed
           end repeat
         end try
       end if
@@ -522,10 +527,10 @@ preview=$preview
 for line in sys.stdin:
     line=line.rstrip('\n')
     if not line: continue
-    parts=line.split('\t', 3)
-    if len(parts)<4: continue
-    st, title, date, body = parts
-    rows.append({'status':st,'title':title,'modified':date,'preview':body[:preview]})
+    parts=line.split('\t', 4)
+    if len(parts)<5: continue
+    st, nid, title, date, body = parts
+    rows.append({'status':st,'id':nid,'title':title,'modified':date,'preview':body[:preview]})
 
 rows.sort(key=lambda r:(r['status'], r['modified']), reverse=True)
 limit=$limit
@@ -543,16 +548,19 @@ else:
 "
 }
 
-# ─── locate a single note by title across all subfolders of <project> ──
-# Outputs: <status-folder-name>\n  (empty if not found, ERR: on error)
-locate_note() {
-  local project="$1" title="$2"
-  osa "$ACCOUNT" "$COMPANY" "$project" "$title" <<'APPLESCRIPT'
+# ─── note_index <project> ─────────────────────────────────────────────────
+# Dumps every note in the project as "<status>\t<id>\t<name>" rows. The id is
+# the stable x-coredata handle; the name is squashed (no tabs/newlines) and may
+# be a truncated first line ending in an ellipsis — that is fine, find_note
+# below tolerates it. ERR: prefix on failure.
+note_index() {
+  local project="$1"
+  osa "$ACCOUNT" "$COMPANY" "$project" <<'APPLESCRIPT'
 on run argv
   set acct to item 1 of argv
   set parentName to item 2 of argv
   set proj to item 3 of argv
-  set t to item 4 of argv
+  set output to ""
   tell application "Notes"
     try
       set projFolder to folder proj of folder parentName of account acct
@@ -561,14 +569,69 @@ on run argv
     end try
     set folderCount to count of folders of projFolder
     repeat with i from 1 to folderCount
+      set sName to ""
       try
         set sf to folder i of projFolder
-        set matches to (notes of sf whose name is t)
-        if (count of matches) > 0 then return name of sf
+        set sName to name of sf
       end try
+      if sName is not "" then
+        try
+          repeat with n in (notes of sf)
+            set output to output & sName & tab & (id of n) & tab & my squash(name of n) & linefeed
+          end repeat
+        end try
+      end if
     end repeat
   end tell
-  return ""
+  return output
+end run
+
+on squash(t)
+  set text item delimiters of AppleScript to {linefeed, return, tab}
+  set parts to text items of t
+  set text item delimiters of AppleScript to " "
+  set t2 to parts as text
+  set text item delimiters of AppleScript to ""
+  return t2
+end squash
+APPLESCRIPT
+}
+
+# ─── find_note <project> <title-or-id> ────────────────────────────────────
+# Tolerant resolver. Sets globals FN_STATUS / FN_ID / FN_NAME on success, or
+# `die`s on not-found / ambiguous / AppleScript error. Accepts a raw
+# x-coredata:// id (matched exactly) or a title that may be truncated, cut to
+# a different length, or use "..." instead of "…" — see _helper.py match-title.
+FN_STATUS=""; FN_ID=""; FN_NAME=""
+find_note() {
+  local project="$1" title="$2"
+  local idx
+  idx="$(note_index "$project")"
+  case "$idx" in ERR:*) die "${idx#ERR:}";; esac
+  local res
+  res="$(printf '%s' "$idx" | python3 "$HELPER" match-title "$title")"
+  case "$res" in
+    OK*)
+      FN_STATUS="$(printf '%s' "$res" | cut -f2)"
+      FN_ID="$(printf '%s' "$res" | cut -f3)"
+      FN_NAME="$(printf '%s' "$res" | cut -f4-)"
+      ;;
+    AMBIG*)
+      local cands; cands="$(printf '%s' "$res" | cut -f2-)"
+      die "ambiguous title in $project — matches: $cands. Disambiguate with the note id from 'notes --json' (pass it as <title>)."
+      ;;
+    *)
+      die "note not found in any subfolder of $project: $title"
+      ;;
+  esac
+}
+
+# ─── body_by_id <id> ──────────────────────────────────────────────────────
+# Returns the raw HTML body of a note addressed by its stable id.
+body_by_id() {
+  osa "$1" <<'APPLESCRIPT'
+on run argv
+  tell application "Notes" to return body of (note id (item 1 of argv))
 end run
 APPLESCRIPT
 }
@@ -585,13 +648,10 @@ cmd_get() {
       *) die "unknown flag: $1" ;;
     esac
   done
-  local status
-  status="$(locate_note "$project" "$title")"
-  case "$status" in ERR:*) die "${status#ERR:}";; esac
-  [ -n "$status" ] || die "note not found in any subfolder of $project: $title"
+  find_note "$project" "$title"
 
   local out
-  out="$(osa_file get_note.applescript "$ACCOUNT" "$COMPANY" "$project" "$status" "$title")"
+  out="$(body_by_id "$FN_ID")"
   case "$out" in ERR:*) die "${out#ERR:}";; esac
   case "$format" in
     text) printf '%s' "$out" | python3 "$HELPER" to-text ;;
@@ -613,33 +673,15 @@ cmd_images() {
       *) die "unknown flag: $1" ;;
     esac
   done
-  local status
-  status="$(locate_note "$project" "$title")"
-  case "$status" in ERR:*) die "${status#ERR:}";; esac
-  [ -n "$status" ] || die "note not found in any subfolder of $project: $title"
+  find_note "$project" "$title"
 
   local slug
-  slug="$(echo "${project}_${title}" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | sed 's/^-//;s/-$//' | cut -c1-60)"
+  slug="$(echo "${project}_${FN_NAME}" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | sed 's/^-//;s/-$//' | cut -c1-60)"
   local target="$out_dir/$slug"
   mkdir -p "$target"
 
   local body
-  body="$(osa "$ACCOUNT" "$COMPANY" "$project" "$status" "$title" <<'APPLESCRIPT'
-on run argv
-  set acct to item 1 of argv
-  set parentName to item 2 of argv
-  set proj to item 3 of argv
-  set theStatus to item 4 of argv
-  set t to item 5 of argv
-  tell application "Notes"
-    set sf to folder theStatus of folder proj of folder parentName of account acct
-    set matches to (notes of sf whose name is t)
-    if (count of matches) = 0 then return "ERR:race condition"
-    return body of (item 1 of matches)
-  end tell
-end run
-APPLESCRIPT
-)"
+  body="$(body_by_id "$FN_ID")"
   case "$body" in ERR:*) die "${body#ERR:}";; esac
   printf '%s' "$body" | python3 "$HELPER" extract-images "$target"
 }
@@ -693,7 +735,7 @@ on run argv
               set p to plaintext of n
               if (count of p) > 400 then set p to (text 1 thru 400 of p)
               set p to my squash(p)
-              set output to output & pName & tab & sName & tab & (name of n) & tab & my isoDate(modDate) & tab & p & linefeed
+              set output to output & pName & tab & sName & tab & (id of n) & tab & (name of n) & tab & my isoDate(modDate) & tab & p & linefeed
             end repeat
           end try
         end if
@@ -731,10 +773,10 @@ preview=$preview
 for line in sys.stdin:
     line=line.rstrip('\n')
     if not line: continue
-    parts=line.split('\t', 4)
-    if len(parts)<5: continue
-    proj, st, title, date, body = parts
-    rows.append({'project':proj,'status':st,'title':title,'modified':date,'preview':body[:preview]})
+    parts=line.split('\t', 5)
+    if len(parts)<6: continue
+    proj, st, nid, title, date, body = parts
+    rows.append({'project':proj,'status':st,'id':nid,'title':title,'modified':date,'preview':body[:preview]})
 rows.sort(key=lambda r:r['modified'], reverse=True)
 
 if $json:
@@ -808,32 +850,23 @@ cmd_update() {
   if ! printf '%s' "$body" | grep -q '<'; then
     body="$(wrap_plain "$body")"
   fi
-  local status
-  status="$(locate_note "$project" "$title")"
-  case "$status" in ERR:*) die "${status#ERR:}";; esac
-  [ -n "$status" ] || die "note not found in any subfolder of $project: $title"
+  find_note "$project" "$title"
 
   local out
-  out="$(osa "$ACCOUNT" "$COMPANY" "$project" "$status" "$title" "$body" <<'APPLESCRIPT'
+  out="$(osa "$FN_ID" "$FN_NAME" "$body" <<'APPLESCRIPT'
 on run argv
-  set acct to item 1 of argv
-  set parentName to item 2 of argv
-  set proj to item 3 of argv
-  set theStatus to item 4 of argv
-  set t to item 5 of argv
-  set b to item 6 of argv
+  set theId to item 1 of argv
+  set t to item 2 of argv
+  set b to item 3 of argv
   tell application "Notes"
-    set sf to folder theStatus of folder proj of folder parentName of account acct
-    set matches to (notes of sf whose name is t)
-    if (count of matches) = 0 then return "ERR:race condition"
-    set body of (item 1 of matches) to "<div>" & t & "</div>" & b
+    set body of (note id theId) to "<div>" & t & "</div>" & b
   end tell
   return "OK"
 end run
 APPLESCRIPT
 )"
   case "$out" in ERR:*) die "${out#ERR:}";; esac
-  echo "updated: $title in $project/$status"
+  echo "updated: $FN_NAME in $project/$FN_STATUS"
 }
 
 cmd_append() {
@@ -845,25 +878,15 @@ cmd_append() {
   if ! printf '%s' "$body" | grep -q '<'; then
     body="$(wrap_plain "$body")"
   fi
-  local status
-  status="$(locate_note "$project" "$title")"
-  case "$status" in ERR:*) die "${status#ERR:}";; esac
-  [ -n "$status" ] || die "note not found in any subfolder of $project: $title"
+  find_note "$project" "$title"
 
   local out
-  out="$(osa "$ACCOUNT" "$COMPANY" "$project" "$status" "$title" "$body" <<'APPLESCRIPT'
+  out="$(osa "$FN_ID" "$body" <<'APPLESCRIPT'
 on run argv
-  set acct to item 1 of argv
-  set parentName to item 2 of argv
-  set proj to item 3 of argv
-  set theStatus to item 4 of argv
-  set t to item 5 of argv
-  set b to item 6 of argv
+  set theId to item 1 of argv
+  set b to item 2 of argv
   tell application "Notes"
-    set sf to folder theStatus of folder proj of folder parentName of account acct
-    set matches to (notes of sf whose name is t)
-    if (count of matches) = 0 then return "ERR:race condition"
-    set theNote to item 1 of matches
+    set theNote to note id theId
     set body of theNote to (body of theNote) & b
   end tell
   return "OK"
@@ -871,7 +894,7 @@ end run
 APPLESCRIPT
 )"
   case "$out" in ERR:*) die "${out#ERR:}";; esac
-  echo "appended to: $title in $project/$status"
+  echo "appended to: $FN_NAME in $project/$FN_STATUS"
 }
 
 # ───── triage ───────────────────────────────────────────────────────────
@@ -969,31 +992,18 @@ cmd_delete() {
     echo "About to delete '$title' in '$project'. Re-run with --force to confirm." >&2
     exit 1
   fi
-  local status
-  status="$(locate_note "$project" "$title")"
-  case "$status" in ERR:*) die "${status#ERR:}";; esac
-  [ -n "$status" ] || die "note not found in any subfolder of $project: $title"
+  find_note "$project" "$title"
 
   local out
-  out="$(osa "$ACCOUNT" "$COMPANY" "$project" "$status" "$title" <<'APPLESCRIPT'
+  out="$(osa "$FN_ID" <<'APPLESCRIPT'
 on run argv
-  set acct to item 1 of argv
-  set parentName to item 2 of argv
-  set proj to item 3 of argv
-  set theStatus to item 4 of argv
-  set t to item 5 of argv
-  tell application "Notes"
-    set sf to folder theStatus of folder proj of folder parentName of account acct
-    set matches to (notes of sf whose name is t)
-    if (count of matches) = 0 then return "ERR:race condition"
-    delete (item 1 of matches)
-  end tell
+  tell application "Notes" to delete (note id (item 1 of argv))
   return "OK"
 end run
 APPLESCRIPT
 )"
   case "$out" in ERR:*) die "${out#ERR:}";; esac
-  echo "deleted: $title from $project/$status (moved to Recently Deleted)"
+  echo "deleted: $FN_NAME from $project/$FN_STATUS (moved to Recently Deleted)"
 }
 
 # move <project> <title> <new-status>  →  changes status within same project
@@ -1002,42 +1012,35 @@ cmd_move() {
   local title="${2:-}"; need "$title" "<title>"
   local new_status="${3:-}"; need "$new_status" "<new-status>"
   validate_status "$new_status"
-  local from_status
-  from_status="$(locate_note "$project" "$title")"
-  case "$from_status" in ERR:*) die "${from_status#ERR:}";; esac
-  [ -n "$from_status" ] || die "note not found in any subfolder of $project: $title"
-  if [ "$from_status" = "$new_status" ]; then
-    echo "already in $new_status: $title"
+  find_note "$project" "$title"
+  if [ "$FN_STATUS" = "$new_status" ]; then
+    echo "already in $new_status: $FN_NAME"
     return 0
   fi
 
   local out
-  out="$(osa "$ACCOUNT" "$COMPANY" "$project" "$from_status" "$title" "$new_status" <<'APPLESCRIPT'
+  out="$(osa "$ACCOUNT" "$COMPANY" "$project" "$new_status" "$FN_ID" <<'APPLESCRIPT'
 on run argv
   set acct to item 1 of argv
   set parentName to item 2 of argv
   set proj to item 3 of argv
-  set fromStatus to item 4 of argv
-  set t to item 5 of argv
-  set toStatus to item 6 of argv
+  set toStatus to item 4 of argv
+  set theId to item 5 of argv
   tell application "Notes"
     set projFolder to folder proj of folder parentName of account acct
-    set fromFolder to folder fromStatus of projFolder
     try
       set toFolder to folder toStatus of projFolder
     on error
       return "ERR:target status folder missing: " & toStatus & " (run: apple-notes init " & proj & ")"
     end try
-    set matches to (notes of fromFolder whose name is t)
-    if (count of matches) = 0 then return "ERR:race condition"
-    move (item 1 of matches) to toFolder
+    move (note id theId) to toFolder
   end tell
   return "OK"
 end run
 APPLESCRIPT
 )"
   case "$out" in ERR:*) die "${out#ERR:}";; esac
-  echo "moved: $title from $project/$from_status to $project/$new_status"
+  echo "moved: $FN_NAME from $project/$FN_STATUS to $project/$new_status"
 }
 
 # ───── config ───────────────────────────────────────────────────────────
