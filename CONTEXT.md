@@ -9,7 +9,7 @@ Canonical terms used in this repo. Use them consistently; do not invent synonyms
 - **Frontmatter** — The YAML block at the top of `SKILL.md`. Required fields: `name`, `description`. Optional: `metadata.*`.
 - **Trigger pattern** — The phrases inside `description` that cause an agent to invoke the skill ("Use when the user says X, Y, or Z"). Trigger phrases are the public API of the skill — change them, change the calling behaviour.
 - **Discovery** — How an agent finds installed skills. The `skills` CLI writes to `~/.agents/skills/<name>/` and symlinks into agent-specific paths like `~/.claude/skills/<name>/`. Agents scan those paths at session start.
-- **Roundtrip** — The full edit-to-availability loop: edit in this repo → push → `npx skills@latest add silvio-l/skills` → skill is now reachable in a fresh agent session.
+- **Roundtrip** — The full edit-to-availability loop: edit in this repo → push → `npx skills@latest update -g -y` → skill is now reachable in a fresh agent session. (Refresh uses `update`, not `add -g`; the latter fails for script-bearing skills on the current CLI. See `CLAUDE.md` → Workflow.)
 - **Source of truth** — This repo. The home-dir `~/.claude/skills/` is downstream — do not edit it.
 
 ## Authoring terms

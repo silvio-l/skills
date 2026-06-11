@@ -24,7 +24,7 @@ Future implementation work in Track B3 of `.scratch/architecture-deepenings/` re
 **Hard Requirement.** These scripts are mandatory. If one is missing or not executable at runtime, the orchestrator sets the current issue to `Status: needs-human` and logs exactly:
 
 ```text
-✗ ratchet-up script missing or non-executable: scripts/<name>.sh — run `npx skills@latest update silvio-l/skills`
+✗ ratchet-up script missing or non-executable: scripts/<name>.sh — run `npx skills@latest update ratchet-up -g -y`
 ```
 
 No soft fallback to the prose form at runtime. The prose form for each section is removed once the corresponding script lands, so there is exactly one source of truth.

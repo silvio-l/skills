@@ -5,13 +5,17 @@ This repo is the source of truth for my personal Claude Code skills. It is maint
 ## Workflow
 
 ```
-edit here → git commit → git push → npx skills@latest add silvio-l/skills
+edit here → git commit → git push → npx skills@latest update -g -y
 ```
 
 1. Edit skill files in this working copy (`~/Documents/Projekte/skills/`).
 2. Commit with [Conventional Commits](https://www.conventionalcommits.org/) — `feat(skill-name): …`, `fix(skill-name): …`, `docs: …`, `chore: …`.
 3. Push to `origin/main`.
-4. Refresh the local installation: `npx skills@latest add silvio-l/skills -g` (or omit `-g` for the full interactive flow with scope, skill, and agent prompts).
+4. Refresh the global installation with **`update`**, not `add`:
+   - `npx skills@latest update -g -y` — refresh all global skills (auto-detects the source repo per skill, pulls only what changed).
+   - `npx skills@latest update <skill-name> -g -y` — refresh a single skill, e.g. `update humanize-text -g -y`.
+
+   **Do not use `add … -g` to refresh.** On the current `skills` CLI (≥1.5.x) global `add` fails with `PromptScript: PromptScript does not support global skill installation` for any skill that ships scripts (all of mine). `add` is for a *first-time* install only — and even then use it without `-g` (`npx skills@latest add silvio-l/skills`, which prompts for scope/skill/agent and installs project- or user-level). Once a skill is installed, `update` is the only working refresh path.
 
 **Never edit `~/.claude/skills/<skill-name>/` directly.** Those paths are CLI-managed symlinks into `~/.agents/skills/<skill-name>/`. Any edit there is overwritten on the next install.
 
