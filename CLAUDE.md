@@ -2,15 +2,6 @@
 
 This repo is the source of truth for my personal Claude Code skills. It is maintained by AI agents (mostly Claude Code itself) — that is who this guide is for.
 
-## Agent-Verhalten (Karpathy-Prinzipien)
-
-Verhaltensregeln gegen typische LLM-Coding-Fehler. Bias zu Sorgfalt statt Tempo — bei Trivialem mit Augenmaß.
-
-1. **Erst denken, dann coden.** Annahmen explizit benennen statt still raten. Bei mehreren Auslegungen die Optionen zeigen, nicht eine stillschweigend wählen. Gibt es einen einfacheren Weg, sag es. Was unklar ist, vor der Umsetzung fragen — nicht hinterher reparieren.
-2. **Einfachheit zuerst.** Minimaler Code, der das Problem löst. Keine spekulativen Features, keine Abstraktion für Einmal-Code, keine ungefragte „Flexibilität", kein Error-Handling für unmögliche Fälle. Wenn 200 Zeilen auch 50 sein könnten: neu schreiben.
-3. **Chirurgische Änderungen.** Nur anfassen, was die Aufgabe verlangt. Fremden Stil bewahren, auch wenn du es anders machen würdest. Angrenzenden Code/Kommentare/Formatierung nicht „verbessern". Toten Code melden, nicht ungefragt löschen. Nur die Orphans aufräumen, die deine eigene Änderung erzeugt hat. Test: Jede geänderte Zeile lässt sich direkt auf die Anfrage zurückführen.
-4. **Zielgetrieben arbeiten.** Vage Aufgaben in verifizierbare Erfolgskriterien übersetzen: „Bug fixen" → „Repro-Test schreiben, dann grün machen". Bei mehrstufigen Aufgaben kurzen Plan mit Verify-Checkpoints pro Schritt nennen. Starke Kriterien erlauben eigenständiges Loopen; „mach dass es geht" erzwingt Rückfragen.
-
 ## Workflow
 
 ```
