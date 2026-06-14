@@ -45,7 +45,7 @@ Rewrite **only the lines identified in Pass 1**. Work finding by finding.
 After each edit, mentally re-run the match: would the scanner still flag
 that line? If yes, the replacement is still slop.
 
-After the full pass, re-run the scorer mentally (or actually) to confirm
+After the full pass, re-run the scorer to confirm
 the `overall` score moves above the threshold.
 
 ## Hard protection rules
