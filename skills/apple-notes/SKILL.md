@@ -69,7 +69,7 @@ S=~/.claude/skills/apple-notes/scripts/apple-notes
 1. `apple-notes triage <project>` — see which inbox notes are well-formed.
 2. `apple-notes notes <project> --status inbox` — full list.
 3. `apple-notes get <project> <title>` for content; `apple-notes images …` for screenshots.
-4. Decide: `apple-notes move <project> <title> ready` (acknowledge, will fix) or `delete --force` (won't fix).
+4. Present your assessment and propose `apple-notes move <project> <title> ready` (acknowledge, will fix) or `delete --force` (won't fix). Wait for explicit user confirmation before running `delete --force` — deletion is destructive and the agent must not decide it autonomously.
 5. After implementation: `apple-notes move <project> <title> done`.
 
 **Onboarding a new project**
