@@ -67,6 +67,7 @@ Get user confirmation, then spawn one subagent per bucket with ≥ 3 findings:
 ```
 Agent(description="Fix cppcheck findings in windows/runner/",
       prompt="Fix these cppcheck findings in windows/runner/: [list]. 
+              Fix only the listed findings — do not touch or 'improve' surrounding code. 
               Run cppcheck after each logical group to verify. 
               Do not commit.")
 ```
