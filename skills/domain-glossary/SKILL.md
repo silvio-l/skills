@@ -37,6 +37,7 @@ Ask questions one at a time.
 5. Present options with recommendation
 6. Wait for explicit approval
 7. Only then: write to CONTEXT.md
+8. After writing: re-read the modified section and show it to the user to confirm it landed correctly
 ```
 
 ## Decision format
