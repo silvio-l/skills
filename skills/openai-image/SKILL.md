@@ -49,6 +49,7 @@ node ~/.claude/skills/openai-image/scripts/generate.mjs \
 - Transparent assets: add `isolated on transparent background, no shadow, no backdrop`.
 - Be explicit about style (e.g. `watercolor`, `flat vector`, `photorealistic`) for consistency.
 - Use `--dry-run` first to confirm the resolved model/size without spending a credit.
+- If the request is vague (no style, size, or output path), ask before spending a credit — or run `--dry-run` and confirm the resolved settings with the user first.
 
 ## Setup (first use)
 
