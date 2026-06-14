@@ -66,6 +66,7 @@ Scans all subfolders of `<project>`. AppleScript pulls `plaintext` (HTML strippe
 - `--status` filters to one subfolder.
 - `--limit` caps after sort (most-recent-first within each status).
 - `--json` adds the stable note `id` to each row (use it as `<title>` for any later `get`/`update`/`move`/`delete` to bypass title truncation entirely).
+- **Intent → status:** for any "new / incoming / newest / untriaged" request, pass `--status inbox`. The unscoped default scans *all* subfolders (incl. `ready` / `done` / legacy) and will surface old, already-handled items as if they were new.
 
 ### Addressing a note (title vs. id)
 

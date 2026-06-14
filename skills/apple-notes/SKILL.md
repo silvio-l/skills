@@ -25,6 +25,19 @@ Firma/                       ← company folder (configurable; default "Firma" i
 
 **Body**: free-form text. Non-technical partners write plain prose using the BUG / FEAT / IDEA / FB templates seeded under `docs/`. Only the TECH template (Silvio's own notes) carries a compact `·`-separated metadata first line — agents and `triage` do not require it for any other prefix.
 
+## What each folder means → which one to read
+
+Pick the folder by **intent**. Crucial: a bare `notes <project>` lists *every* status, and `search` spans *every* project + status — so neither answers "what's new". Both will surface long-done and ready items as if they were fresh. This is the #1 mistake: do not answer an "incoming" question from `search` or an unscoped `notes`.
+
+| Folder | Meaning | Read it when the user asks… |
+|--------|---------|------------------------------|
+| `inbox` | New, untriaged — the **only** "new" surface | "newest bugs", "what's new", "what did my partner report", "any new feedback", "triage the inbox" → `notes <project> --status inbox` (or `triage <project>`) |
+| `ready` | Triaged, accepted, waiting for work | "what's ready", "next task", "the backlog" → `notes <project> --status ready` |
+| `done` | Merged / shipped — history only | "what shipped", "already fixed", "what's done" → `notes <project> --status done` |
+| `docs` | Templates, briefing, specs — **never issues** | only when explicitly asked for a template/spec; never list these as bugs/issues |
+
+**Default rule:** any request about *incoming / new / latest / unhandled / untriaged* items ⇒ scope to **`--status inbox`**. Only widen to `ready`/`done`, or fall back to `search`, when the user *explicitly* asks for those statuses or for an across-everything lookup. When unsure which folder the user means, ask — don't silently pull from all of them.
+
 ## Quick start
 
 ```bash
