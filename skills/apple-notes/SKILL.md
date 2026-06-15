@@ -85,6 +85,15 @@ S=~/.claude/skills/apple-notes/scripts/apple-notes
 4. Present your assessment and propose `apple-notes move <project> <title> ready` (acknowledge, will fix) or `delete --force` (won't fix). Wait for explicit user confirmation before running `delete --force` — deletion is destructive and the agent must not decide it autonomously.
 5. After implementation: `apple-notes move <project> <title> done`.
 
+**Always close the loop on processed inbox notes (standing reminder rule)**
+
+Whenever you have *acted on* one or more `inbox` notes in a turn — triaged them, diagnosed them, turned them into a plan/PRD, or fixed them — you MUST end that turn by **offering to move those specific notes to `ready`** (acknowledged / will-fix). List the affected note titles and ask explicitly, e.g. "Soll ich diese N Notizen nach `ready` verschieben?".
+
+- This is a standing reminder that fires on **every** such turn, not a one-off.
+- **Never move them autonomously.** Always wait for explicit confirmation — the user may have only partly processed a note, or may want to revisit it later.
+- `ready` = "acknowledged, will fix". Reserve `done` for after the work ships, and `delete --force` (still confirmation-gated) for "won't fix".
+- If the user declines or stays silent, leave the notes in `inbox` and simply re-offer the next time they are processed.
+
 **Onboarding a new project**
 1. Create the project subfolder manually in Apple Notes UI (e.g. `Whispaste`).
 2. `apple-notes init Whispaste` — folders + templates land.
