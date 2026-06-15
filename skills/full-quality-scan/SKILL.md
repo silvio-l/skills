@@ -46,7 +46,7 @@ Parse each `BUCKET|FILE:LINE|MESSAGE` row and group by bucket. The bucket names 
 
 `TOTAL_FINDINGS` from the wrapper's summary line is the threshold input:
 
-**≤ 10 total → go directly to Phase 4 (fix inline).**
+**≤ 10 total → summarize the findings, get the user's OK, then fix inline (Phase 4).** Don't start editing files before the user confirms the fix list.
 **> 10 total → build a plan in Phase 3.**
 
 ## Phase 3 — Plan (> 10 findings only)
@@ -92,6 +92,8 @@ Re-run `bash scripts/scan-all.sh`. The wrapper must exit `0` with `TOTAL_FINDING
 If any finding remains: return to Phase 4 for the affected bucket only — do not loop through clean buckets again.
 
 ## Phase 6 — Commit
+
+Committing is irreversible — show the user the changed files and the commit message, get an explicit OK, then commit. Never auto-commit without confirmation.
 
 ```bash
 bash scripts/scan-all.sh        # must exit 0

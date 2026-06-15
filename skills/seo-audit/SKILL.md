@@ -51,7 +51,10 @@ python3 "$S" --root ~/code/whispaste --dist ~/code/whispaste/build \
 ```
 
 The dispatcher prints the absolute path of the written report on
-stdout. Read it back to summarize for the user.
+stdout. **Open that file and verify it before declaring the run done** —
+confirm it actually contains all four canonical sections (per
+[report.md](report.md)) and the findings table; exit 0 alone is not proof
+the report is well-formed. Only then read it back to summarize for the user.
 
 ## Phase order
 

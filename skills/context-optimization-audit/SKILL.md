@@ -94,7 +94,7 @@ No files will be changed until you approve this plan.
 2. Edit only approved files; do not touch unrelated changes.
 3. Prefer surgical edits — preserve important project rules.
 4. When deleting files, prefer archiving unless deletion was explicitly approved.
-5. Recalculate estimates after changes.
+5. Recalculate estimates by re-running the Step 1 inventory against the changed config — measured from the post-change files, not estimated from memory.
 6. Report before/after results using the Final Report format below.
 
 If branch policy is known, follow it. If unknown, do not create or delete branches unless asked.
@@ -129,6 +129,7 @@ If branch policy is known, follow it. If unknown, do not create or delete branch
 ### Remaining intentional duplication
 ### Manual follow-ups
 ### Verification performed
+<!-- Re-run the Step 1 inventory against the post-change state and paste the measured before/after counts here. A prose claim like "reviewed the changes" does not satisfy this field. -->
 ```
 
 ## Non-goals

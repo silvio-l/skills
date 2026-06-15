@@ -78,6 +78,8 @@ S=~/.claude/skills/apple-notes/scripts/apple-notes
 
 ## Workflows
 
+**Verify every write.** `move`, `create`, `update`, and `init` print `OK` or `ERR:…`. After any write, check that line — on `ERR:` surface it and do **not** report success. For `move`, confirm by re-listing: `apple-notes notes <project> --status <new-status>` must now include the note. Never claim a note was moved/created/updated without seeing it land.
+
 **Pull issues from a partner-maintained inbox**
 1. `apple-notes triage <project>` — see which inbox notes are well-formed.
 2. `apple-notes notes <project> --status inbox` — full list.

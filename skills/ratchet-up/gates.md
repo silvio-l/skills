@@ -114,8 +114,10 @@ If there are no code changes (e.g. a documentation-only issue resolved by an evi
 
 Derive scope from the affected module/feature. Subject imperative, lowercase, no trailing period, ≤72 chars. Reference the issue filename in the body.
 
+Stage **only** the files the worker enumerated in the Evidence block's `changed_files:` list — never `git add -A`, which would sweep in out-of-scope edits the worker shouldn't have made (the reviewer flags scope drift, but only *after* the commit; staging narrowly prevents it up front).
+
 ```bash
-git add -A
+git add <each path from the Evidence block's changed_files>
 git commit -m "$(cat <<'EOF'
 <type>(<scope>): <short imperative description>
 

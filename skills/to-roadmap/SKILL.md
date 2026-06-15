@@ -47,7 +47,8 @@ Wenn der Modus nicht eindeutig ist (z. B. `update` ohne existierende Roadmap), b
 3. **Dokument lesen** — vollständig, keine Stichproben.
 4. **Acht-Schritte-Analyse** (siehe [§ Arbeitsweise](#arbeitsweise-create)).
 5. **Schreiben** nach `.scratch/roadmap.md` exakt nach [template.md](template.md). Alle neun Sektionen ausfüllen, jeder Sprint mit `Sprint-ID:` (Slug-Schema) und `Status: todo`.
-6. **Kurzzusammenfassung** in den Chat: Phasenzahl, Sprintzahl, MVP-Sprintzahl, Zahl kritischer Rückfragen.
+6. **Zurücklesen & prüfen.** Die geschriebene Datei erneut lesen und gegen [template.md](template.md) abgleichen: alle neun Sektionen vorhanden, jeder Sprint-Block hat `Sprint-ID:` und `Status:`. Erst wenn das stimmt, weiter — die Kurzzusammenfassung ist kein Ersatz für die Dateiprüfung.
+7. **Kurzzusammenfassung** in den Chat: Phasenzahl, Sprintzahl, MVP-Sprintzahl, Zahl kritischer Rückfragen.
 
 ### Arbeitsweise (create)
 
@@ -96,7 +97,8 @@ Der Update-Modus modifiziert `.scratch/roadmap.md` punktuell — er schreibt sie
 5. **Anwenden** — die Änderungen so chirurgisch wie möglich. Slug-IDs bleiben stabil (Slug-Renaming nur, wenn der Nutzer das explizit verlangt). Nummern in Sprint-Überschriften und in Sektion 6 / 7 / 8 mit nachziehen, wenn neu sortiert wurde.
 6. **Sektionen 6 / 7 / 8 / 9 mit nachpflegen.** Reihenfolge, MVP-Schnitt, spätere Ausbaustufen und kritische Rückfragen aktuell halten.
 7. **Status-Felder behalten.** Update darf den `Status:` eines Sprints **nicht** ändern, außer der Nutzer fordert das explizit oder es geht um das Löschen eines Sprints. Statusänderungen gehen sonst über den `status`-Modus.
-8. **Kurzzusammenfassung** in den Chat: welche Sprints neu, geändert, gelöscht, umsortiert wurden.
+8. **Zurücklesen & prüfen.** Die geänderte `.scratch/roadmap.md` erneut lesen: betroffene Sprint-Blöcke korrekt umgesetzt, alle neun Sektionen noch vorhanden, jeder Sprint weiterhin mit `Sprint-ID:` und `Status:`. Die generierte Kurzzusammenfassung ersetzt diese Dateiprüfung nicht.
+9. **Kurzzusammenfassung** in den Chat: welche Sprints neu, geändert, gelöscht, umsortiert wurden.
 
 Wenn die Anweisung den Charakter der Roadmap so stark ändert, dass ein Re-Create sinnvoller wäre, sag das ehrlich und schlage `create` mit erneuertem Ideendokument vor — statt eine zerfaserte Roadmap zu hinterlassen.
 

@@ -49,7 +49,8 @@ node ~/.claude/skills/openai-image/scripts/generate.mjs \
 - Transparent assets: add `isolated on transparent background, no shadow, no backdrop`.
 - Be explicit about style (e.g. `watercolor`, `flat vector`, `photorealistic`) for consistency.
 - Use `--dry-run` first to confirm the resolved model/size without spending a credit.
-- If the request is vague (no style, size, or output path), ask before spending a credit — or run `--dry-run` and confirm the resolved settings with the user first.
+- If the request is vague — no clear style, size, or `--out` path — you **must** run `--dry-run` and confirm the resolved settings with the user *before* the first real (paid) call. Don't guess and spend a credit.
+- After a real generation, the script prints the saved path and file size on success. Report that path back to the user and confirm the PNG exists before declaring done — exit 0 with no file is a failure, not success.
 
 ## Setup (first use)
 
