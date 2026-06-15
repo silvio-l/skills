@@ -2,7 +2,7 @@
 /**
  * Self-contained OpenAI image generator.
  *
- * Reads OPENAI_API_KEY from (in order): process env → <skill>/.env → ./.env
+ * Reads OPENAI_API_KEY from (in order): process env → ~/.config/openai-image/.env → <skill>/.env → ./.env
  * Picks the model automatically: --transparent ⇒ gpt-image-1, else gpt-image-2.
  * Override anytime with --model. Retries transient errors (429/5xx) with backoff.
  *
@@ -24,11 +24,15 @@ import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname, resolve, join, extname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { homedir } from "node:os";
 import { argv, env, exit } from "node:process";
 
 const API_URL = "https://api.openai.com/v1/images/generations";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const SKILL_DIR = resolve(SCRIPT_DIR, "..");
+// Stable key location, outside the skill dir — survives `skills update`, which
+// wipes and re-writes the skill folder (deleting any <skill>/.env) on every refresh.
+const CONFIG_ENV = join(homedir(), ".config", "openai-image", ".env");
 
 // --- arg parsing -----------------------------------------------------------
 
@@ -108,7 +112,7 @@ function parseEnvFile(text) {
 
 async function resolveApiKey() {
   if (env.OPENAI_API_KEY) return env.OPENAI_API_KEY;
-  for (const candidate of [join(SKILL_DIR, ".env"), resolve(process.cwd(), ".env")]) {
+  for (const candidate of [CONFIG_ENV, join(SKILL_DIR, ".env"), resolve(process.cwd(), ".env")]) {
     if (existsSync(candidate)) {
       const parsed = parseEnvFile(await readFile(candidate, "utf8"));
       if (parsed.OPENAI_API_KEY) return parsed.OPENAI_API_KEY;
@@ -137,7 +141,7 @@ const apiKey = await resolveApiKey();
 if (!apiKey) {
   console.error(
     "Missing OPENAI_API_KEY.\n" +
-      `Add it to ${join(SKILL_DIR, ".env")} (OPENAI_API_KEY=sk-…) or export it in your shell.`,
+      `Add it to ${CONFIG_ENV} (OPENAI_API_KEY=sk-…) or export it in your shell.`,
   );
   exit(1);
 }

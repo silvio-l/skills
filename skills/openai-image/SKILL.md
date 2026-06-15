@@ -28,7 +28,7 @@ node ~/.claude/skills/openai-image/scripts/generate.mjs \
 ## How it works
 
 - **Model auto-selection:** `--transparent` ⇒ `gpt-image-1` (only model with alpha support); otherwise ⇒ `gpt-image-2` (higher quality, 1K/2K/4K, multilingual text). Override with `--model`.
-- **API key:** resolved from `OPENAI_API_KEY` (shell env) → `<skill>/.env` → `./.env`. The key lives in `<skill>/.env`, which is gitignored and never committed.
+- **API key:** resolved from `OPENAI_API_KEY` (shell env) → `~/.config/openai-image/.env` → `<skill>/.env` → `./.env`. Keep the key in `~/.config/openai-image/.env` — it lives outside the skill folder, so `skills update` (which wipes and re-writes the skill dir) never deletes it. `<skill>/.env` still works but is erased on every update.
 - **Robustness:** transient errors (HTTP 429 / 5xx / network) are retried with exponential backoff (up to 4 attempts). Fatal 4xx errors print the API body and exit.
 
 ## Options
@@ -53,10 +53,11 @@ node ~/.claude/skills/openai-image/scripts/generate.mjs \
 
 ## Setup (first use)
 
-If `<skill>/.env` is missing, create it with one line:
+Store your key in `~/.config/openai-image/.env` — outside the skill folder, so it survives `skills update`:
 
 ```
-OPENAI_API_KEY=sk-…
+mkdir -p ~/.config/openai-image
+printf 'OPENAI_API_KEY=sk-…\n' > ~/.config/openai-image/.env
 ```
 
-See [`.env.example`](.env.example).
+`<skill>/.env` and a `./.env` in the current directory still work as fallbacks, but the skill dir is wiped on every update — prefer the config path. See [`.env.example`](.env.example).
