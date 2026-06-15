@@ -1,6 +1,6 @@
 ---
 name: full-quality-scan
-description: Runs all configured linters and security scanners (cppcheck, ESLint, Semgrep, osv-scanner, dart analyze) across the entire repository, then fixes every finding — directly if ≤10, via a structured plan with parallel subagents if more. Use when user wants a full repo-wide quality or security scan, says "scan everything", "fix all lint issues", "clean up the whole repo", "full quality check", or asks to run tools across the full codebase (not just staged files or recent changes).
+description: Runs all configured linters and security scanners (cppcheck, ESLint, Semgrep, osv-scanner, dart analyze) repo-wide, then fixes every finding. Use for a repo-wide quality or security scan, e.g. "scan everything" or "fix all lint issues".
 ---
 
 # Full Quality Scan & Fix
@@ -62,10 +62,11 @@ PLAN
 ...
 ```
 
-Get user confirmation, then spawn one subagent per bucket with ≥ 3 findings:
+Get user confirmation, then spawn one subagent per bucket with ≥ 3 findings. **Set `model` explicitly on every spawn** — fixing lint/security findings is Sonnet-tier work; never let the subagent inherit the orchestrator's model (subagent spend is the biggest cost driver):
 
 ```
 Agent(description="Fix cppcheck findings in windows/runner/",
+      model="claude-sonnet-4-6",
       prompt="Fix these cppcheck findings in windows/runner/: [list]. 
               Fix only the listed findings — do not touch or 'improve' surrounding code. 
               Run cppcheck after each logical group to verify. 

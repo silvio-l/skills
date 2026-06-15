@@ -1,6 +1,6 @@
 ---
 name: context-optimization-audit
-description: Audit and optimize Claude Code context bloat across skills, agents, commands, MCP/plugin config, project instructions, and duplicated context. Use when asked to reduce token usage, remove overlap, clean up skills, optimize Claude Code setup, or review loaded context.
+description: Audit and optimize Claude Code context bloat across skills, agents, commands, MCP/plugin config, and project instructions. Use when asked to reduce token usage, remove overlap, clean up skills, optimize Claude Code setup, or review loaded context.
 ---
 
 # Claude Code Context Optimization Audit

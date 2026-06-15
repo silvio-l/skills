@@ -327,6 +327,7 @@ Before spawning:
 Spawn via `Agent` with `subagent_type: general-purpose` (worker needs Edit/Write):
 
 - `description`: `"Implement: <issue_filename>"` (or `"Rework: <issue_filename>"` on rework rounds).
+- `model`: `claude-sonnet-4-6` — set it explicitly; never inherit the orchestrator's model. Escalate to `claude-opus-4-8` only for an architecturally hard issue.
 - Do **not** set `isolation: worktree` — work on the active branch.
 
 Prompt variables: `{{ISSUE_PATH}}`, `{{ISSUE_CONTENT}}`, `{{FEATURE_PATH}}`, `{{COMPACT_CONTEXT}}`, `{{GATE_COMMANDS}}`, `{{REWORK_FEEDBACK}}`.
@@ -375,6 +376,7 @@ The reviewer inspects files and diff directly via its own tools.
 Spawn via `Agent` with `subagent_type: Explore` (read-only):
 
 - `description`: `"Review: <issue_filename>"`
+- `model`: `claude-sonnet-4-6` — review needs cross-file reasoning, but set it explicitly so it never inherits Opus from the orchestrator.
 
 Prompt variables: `{{ISSUE_PATH}}`, `{{ISSUE_CONTENT}}`, `{{FEATURE_PATH}}`, `{{GATE_COMMANDS}}`, `{{GATE_RESULT}}`, `{{CHANGED_FILES}}`, `{{DIFF_STAT}}`.
 

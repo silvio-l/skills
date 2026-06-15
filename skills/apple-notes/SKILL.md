@@ -1,6 +1,6 @@
 ---
 name: apple-notes
-description: Read, search, write, and extract images from Apple Notes on macOS via a single dispatcher script (AppleScript under the hood). Treats subfolders of one configured "company folder" as projects, auto-maps the current git repo to its project subfolder, and enforces a four-folder issue layout (inbox/ready/done/docs) with title-prefix conventions (BUG:/FEAT:/IDEA:/FB:/TECH:) so non-technical collaborators can drop in bug reports that agents can later triage and act on. Use when the user references Apple Notes, says "check my notes", "pull bug reports from Notes", "what did my partner write about this app", wants to extract screenshots from a note, triage the inbox, or move an issue between statuses.
+description: Read, search, write Apple Notes on macOS and extract their images. Enforces an inbox/ready/done/docs layout per project. Use when the user references Apple Notes, "check my notes", "pull bug reports from Notes", or extract screenshots.
 ---
 
 # Apple Notes

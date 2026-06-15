@@ -66,7 +66,7 @@ edit here → git commit → git push → npx skills@latest update -g -y
    ```yaml
    ---
    name: <new-name>           # lowercase, hyphens; MUST match the directory name
-   description: <one paragraph; end with trigger phrases — see CONTEXT.md "Trigger pattern">
+   description: <one paragraph, ≤ 250 chars HARD CAP; end with trigger phrases — see CONTEXT.md "Trigger pattern">
    ---
 
    # <Human Title>
@@ -83,7 +83,7 @@ For guidance on what makes a good skill (description shape, trigger phrases, sup
 ## Frontmatter rules (enforced by the `skills` CLI)
 
 - `name` — required. Lowercase, hyphens only. MUST match the directory name.
-- `description` — required. One paragraph. End with explicit trigger phrases ("Use when …").
+- `description` — required. One paragraph, **≤ 250 characters. This is a hard cap — never exceed it.** The description *is* the auto-invoke router: it must carry the core trigger phrases ("Use when …") and nothing more. Push every detail (modes, flags, tool lists, examples) into the body. Don't overcorrect into terseness either — too short and the model can't tell when to load the skill; aim for ~200–250 chars with the essential triggers intact. Count characters before committing (`python3 -c 'print(len(open("…").read()))'` on the extracted value, or just eyeball against an existing in-cap skill).
 - `metadata.*` — optional. Used for extra hints (e.g. `metadata.argument-hint` in `ratchet-up`).
 
 Frontmatter is currently checked by hand. If the skill count grows, add a small lint script and a CI job.

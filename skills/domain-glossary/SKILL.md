@@ -1,6 +1,6 @@
 ---
 name: domain-glossary
-description: Collaboratively build and maintain the project's domain vocabulary, glossary, and key conceptual decisions stored in CONTEXT.md. Use when the user wants to create, review, or refine project terminology, domain language, glossary entries, or conceptual decisions — including updating CONTEXT.md or discussing what belongs in it.
+description: Build and maintain the project's domain vocabulary, glossary, and key conceptual decisions in CONTEXT.md. Use when the user wants to create, review, or refine project terminology, glossary entries, or conceptual decisions in CONTEXT.md.
 ---
 
 # Domain Glossary

@@ -1,6 +1,6 @@
 ---
 name: seo-audit
-description: "Local-first, free-tier-only SEO audit for any repo with a built website. Phase pipeline: inventory (framework, pages, SEO assets, app-store listings, domain doc) → brand-consistency scan (anti-vocabulary table from CONTEXT.md/CLAUDE.md matched against built HTML, with contrastive-marker and frontmatter-flag suppression) → external probes (Lighthouse, pa11y, GSC, W3C, Schema, Observatory, PageSpeed) when `--url` is passed → synthesis (dedup, score by severity × user_impact / fix_effort, deterministic tiebreaker) → write Markdown report under .scratch/<feature>/seo-audit-<date>.md. Optional opt-in push module (`--push`): IndexNow + Bing Webmaster URL submission + llms.txt generator, confirmable per operation, with `--dry-run`. Use when the user says \"SEO audit\", \"check the brand voice on the site\", \"scan dist for anti-vocabulary\", \"is our site consistent with CONTEXT.md\", \"prep an SEO report\", \"push URLs to IndexNow / Bing\", \"generate llms.txt\", or runs /seo-audit."
+description: "Local-first, free-tier-only SEO audit for a repo with a built website: inventory, brand-consistency scan, external probes (Lighthouse, GSC, PageSpeed), scored Markdown report. Optional --push (IndexNow/Bing). Use for \"SEO audit\", /seo-audit."
 metadata:
   argument-hint: "[--root <path>] [--dist <path>] [--report-dir <path>] [--quick] [--url <url>] [--push] [--dry-run] [--compare-last] [--doctor] [--setup <tool>] [--verify] [--force]"
 ---

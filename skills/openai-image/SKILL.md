@@ -1,6 +1,6 @@
 ---
 name: openai-image
-description: Generate images from a text prompt via the OpenAI Image API (gpt-image-1 / gpt-image-2), writing PNG files to disk. Picks the model automatically — transparent backgrounds use gpt-image-1, everything else uses the higher-quality gpt-image-2. Use when the user wants to create, generate, or render an image, illustration, icon, asset, or graphic from a description, or mentions DALL·E / gpt-image / OpenAI image generation. Self-contained: reads the API key from its own .env.
+description: Generate images from a text prompt via the OpenAI Image API (gpt-image-1/2), writing PNGs to disk; auto-picks the model. Use when the user wants to create, generate, or render an image, icon, or asset, or mentions DALL·E / gpt-image.
 ---
 
 # OpenAI Image

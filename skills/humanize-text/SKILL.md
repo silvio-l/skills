@@ -1,6 +1,6 @@
 ---
 name: humanize-text
-description: "Scan text, markdown, Astro, HTML, and TypeScript files for AI-generated slop patterns in German and English. Three modes: scan (report findings, always exits 0), score (quality gate, exits 1 when below threshold), rewrite (script-assisted LLM pass to remove slop, only changes files after explicit user OK). The pipeline is deterministic — lexicon matches + scoring happen offline before any LLM involvement. Use when the user says \"mach diesen Text menschlicher\", \"prüf den Absatz auf KI-Floskeln\", \"scan for AI tells\", \"check for slop\", \"humanize this text\", \"detect overused AI phrases\", \"run a slop score on this file\", or runs /humanize-text."
+description: "Scan text, markdown, Astro, HTML, and TypeScript for AI slop in German and English. Modes: scan, score (gate), rewrite. Use when the user says \"mach diesen Text menschlicher\", \"scan for slop\", \"humanize this text\", or runs /humanize-text."
 ---
 
 # humanize-text

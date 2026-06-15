@@ -1,6 +1,6 @@
 ---
 name: ratchet-up
-description: "Context-safe agentic loop that ratchets a feature's issues forward — one click at a time, never backward. Discovers ready issues in a local feature directory, respects blocked-by dependencies, optionally consults a planner for ordering, dispatches isolated workers and read-only reviewers, runs format/analyze before review, persists rework feedback on disk, commits approved issues with conventional commits, and stays on the active branch (no worktrees, no auxiliary branches). Project-agnostic — gate commands auto-detected from CLAUDE.md or .ratchet-up/config.yaml. Usage: /ratchet-up <feature-path> [max-iter]"
+description: "Context-safe agentic loop that ratchets a feature's issues forward — discovers ready issues, respects blocked-by deps, dispatches workers and read-only reviewers, gates format/analyze, commits approved. Usage: /ratchet-up <feature-path> [max-iter]"
 metadata:
   argument-hint: "<feature-path> [max-iter]"
 ---
@@ -41,6 +41,7 @@ Read the file you need when you need it. SKILL.md is the always-on layer — kee
 - Commit only after the reviewer approves; one commit per issue.
 - On rework, **feed the reviewer's blockers back to the next worker** — never let a worker re-implement blind.
 - Spawn read-only sub-agents (reviewer, planner) with `subagent_type: Explore`; only the worker needs `general-purpose`.
+- **Always set `model:` explicitly on every spawn** — never let a sub-agent inherit the orchestrator's model (sub-agent spend is the biggest cost driver). Default `claude-sonnet-4-6` for worker, reviewer, and planner; escalate a single spawn to `claude-opus-4-8` only for an architecturally hard issue.
 - Stop and escalate to `needs-human` instead of improvising on scope, dependency, or assumption drift.
 - Never push. Never tag. Never merge to `main`. Never use hook-bypass flags.
 - Never delete `<feature_path>` unless objectively verified done — or explicitly confirmed by the user.

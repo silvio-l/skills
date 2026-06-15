@@ -1,6 +1,6 @@
 ---
 name: to-roadmap
-description: "Erzeugt, aktualisiert und pflegt den Status einer agentenoptimierten Sprint-Roadmap in `.scratch/roadmap.md`. Drei Modi: `create` zerlegt ein Ideen-/Konzeptdokument (rohes PRD, Brainstorm) in ~100k-Token-Sprints mit stabilen Sprint-IDs; `update` modifiziert eine bestehende Roadmap nach freier Anweisung mit Diff-Plan vor dem Schreiben; `status` setzt den Lebenszyklus eines Sprints (todo → in-progress → done), aufrufbar manuell oder durch `ratchet-up`. Grobe Vorstufe vor `/to-prd` — ein Sprint = später ein PRD = später ein Bündel Issues. Use when user wants to create, edit, refine, restructure or status-mark an implementation roadmap or sprint plan. Trigger phrases — roadmap erzeugen, Roadmap aktualisieren, Sprint hinzufügen, Sprint entfernen, Sprint umschreiben, Sprint splitten, Roadmap-Status setzen, sprint status done, idea to roadmap, PRD zerlegen, Featureplanung."
+description: "Pflegt eine agentenoptimierte Sprint-Roadmap in `.scratch/roadmap.md`. Modi: `create` (zerlegt ein Ideendokument), `update` (Diff-Plan), `status` (todo/in-progress/done). Use to create, edit, or status-mark a roadmap: roadmap erzeugen, PRD zerlegen."
 metadata:
   argument-hint: "[<idea-path>] | update <freitext> | status <sprint-id> <todo|in-progress|done>"
 ---
