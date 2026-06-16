@@ -12,7 +12,8 @@ Wenn die Tokens als **Figma Variables** gepflegt sind (das native Token-Primitiv
    Light **und** Dark beide Modi aus den Variable-Definitionen übernehmen — der
    Per-Node-Call gibt nicht beide gleichzeitig.
 2. Werte in `design/tokens.json` festhalten (Quelle der Wahrheit, beide Modi).
-3. Generator `tool/gen_tokens.dart` erzeugt `lib/theme/tokens.dart`:
+3. Schreibe im Projekt einen Generator `tool/gen_tokens.dart` (der Skill liefert ihn
+   nicht mit — er ist projektspezifisch), der `lib/theme/tokens.dart` erzeugt:
    - `ColorScheme` Light + Dark (`ColorScheme.light()/dark().copyWith(...)`).
    - `AppSpacing`, `AppRadius` als `static const double`.
 4. `dart run tool/gen_tokens.dart` → generierte Datei trägt einen
