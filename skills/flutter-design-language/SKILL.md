@@ -1,6 +1,6 @@
 ---
 name: flutter-design-language
-description: Phase-0-Gate gegen KI-Design-Slop vor der Figma→Flutter-Pipeline: erzwingt vorab einen bewussten Design-Plan statt generischem Default. Use when starting a Flutter design, defining a theme from scratch, or a design 'sieht generisch / nach KI aus'.
+description: Phase-0-Gate gegen KI-Design-Slop vor der Figma→Flutter-Pipeline — erzwingt vorab einen bewussten Design-Plan statt generischem Default. Use when starting a Flutter design, defining a theme from scratch, or a design 'sieht generisch / nach KI aus'.
 ---
 
 # Flutter Design Language (Anti-Slop Phase 0)
