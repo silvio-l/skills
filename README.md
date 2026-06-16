@@ -99,6 +99,18 @@ If you only want one of these, skip the dependencies you do not exercise.
 
 **The Fix.** Three operations on `.scratch/roadmap.md`: `create` decomposes the idea document into ~100k-token sprints with stable Sprint-IDs, dependencies, MVP cut, and later-release ordering; `update` patches the roadmap surgically from a free-text instruction with a diff-plan-then-confirm flow; `status` flips a sprint through `todo → in-progress → done`, called manually or automatically by `ratchet-up` at the start and end of a loop. One sprint at a time later becomes one PRD via `/to-prd`.
 
+### `flutter-design-language`
+
+**The Problem.** A Figma→Flutter pipeline is only as good as the design it carries. Pointed at no deliberate design language, it produces cleanly-packaged slop: the inherited Tailwind `#4F46E5` indigo, default Roboto/Inter, a uniform 16px radius on everything, a centred hero + one purple CTA. The tooling is fine; the taste is missing — and once the tokens exist, the slop is baked in.
+
+**The Fix.** A mandatory Phase-0 gate, before a single Figma variable or `ThemeData` is written. It forces a conscious design plan — a named 4–6 colour palette with rationale, a Display/Body/Utility type pairing off the default-font blocklist, a layout concept, and one *signature* element — then critiques every part of it against a verified AI-slop checklist ("would I land here on any similar brief? → it's a default, not a choice"). Only a plan that passes gets frozen into `design/design-language.md` + a role-named three-tier `design/tokens.json` (light **and** dark). The upstream stage that feeds `figma-to-flutter`.
+
+### `figma-to-flutter`
+
+**The Problem.** "Turn this Figma frame into Flutter" tempts an agent into autonomous codegen: raw `Color(0x…)` literals and magic numbers copied from the design, data-fetching and state stuffed into the widget, component instances guessed at, and the whole thing merged unseen. Figma Code Connect cannot even target Flutter, so the guessing is unbounded.
+
+**The Fix.** An assisted, one-frame-per-run translator with hard rails. It parses the design URL, pulls both `get_design_context` and a `get_screenshot` benchmark, resolves Figma variable *names* (never raw hex/px) onto the project's theme tokens, and writes a single presentation-only `StatelessWidget` that takes its data through the constructor — no Supabase, no `http`, no navigation. A golden test (light + dark) plus `dart analyze`/`flutter test` gate the output, vision-blind details (1px borders, shadow spread) are flagged for review, and nothing is wired into the app until a human OKs it at the explicit review gate. Consumes the tokens produced by `flutter-design-language`.
+
 ## Credit
 
 These skills exist because [Matt Pocock](https://github.com/mattpocock) made his own [`mattpocock/skills`](https://github.com/mattpocock/skills) public and showed what a working skill ecosystem looks like. The structural choices here — directory layout, frontmatter conventions, the `npx skills@latest add` install path, the failure-mode/fix narrative pattern in this README — are his. If you find any of this useful, point upstream first.

@@ -1,6 +1,6 @@
 ---
 name: figma-to-flutter
-description: Wandelt einen Figma-Frame (Design-URL mit node-id) in ein präsentationsorientiertes Flutter-Widget, das ausschließlich Theme-Tokens nutzt — assistiert, nicht autonom. Use when the user shares a Figma design URL and wants it built as a Flutter widget/screen, says "Figma in Flutter umsetzen", "diesen Screen bauen", "Figma-Frame zu Widget". NICHT für Code→Figma (dafür figma-generate-design) und NICHT für reine Design-System-Arbeit.
+description: Wandelt einen Figma-Frame (URL mit node-id) in ein Flutter-Widget, das nur Theme-Tokens nutzt. Use when sharing a Figma design URL to build a Flutter widget/screen, 'Figma in Flutter umsetzen', 'diesen Screen bauen', 'Figma-Frame zu Widget'.
 ---
 
 # Figma → Flutter

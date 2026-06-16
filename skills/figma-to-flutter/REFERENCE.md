@@ -23,7 +23,7 @@ Wenn die Tokens als **Figma Variables** gepflegt sind (das native Token-Primitiv
 
 ```json
 {
-  "color":  { "primary": { "light": "#4F46E5", "dark": "#818CF8" }, "...": {} },
+  "color":  { "primary": { "light": "#C9892F", "dark": "#E8B563" }, "...": {} },
   "space":  { "sm": 8, "md": 16, "lg": 24, "xl": 32 },
   "radius": { "md": 12, "lg": 20 }
 }
