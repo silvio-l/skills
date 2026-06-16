@@ -33,6 +33,13 @@ Mapping auf Material-3-`ColorScheme`-Slots: `primary`/`onPrimary`/`surface`/`onS
 `surfaceContainerHighest` (≈ surfaceVariant)/`onSurfaceVariant`/`outline`. Slots ohne
 Token behalten die Material-Defaults über `copyWith`.
 
+**Anti-Slop bei der Farbe:** Die Palette stammt aus `flutter-design-language` (Phase 0),
+nicht aus `ColorScheme.fromSeed(seedColor: <eine Farbe>)` — ein einzelner Seed erzeugt
+die generische Ein-Farb-Monokultur (und per Default das berüchtigte Indigo). Für ein
+seed-basiertes, aber charaktervolles Schema `flex_seed_scheme`
+(`SeedColorScheme.fromSeeds` mit primaryKey/secondaryKey/tertiaryKey + `FlexTones`)
+nutzen; für exakte Markenfarben das `ColorScheme` direkt aus den Tokens bauen.
+
 ## Alternative: Tokens Studio
 
 Nutzt das Projekt bereits das **Tokens-Studio-Plugin**: Tokens als JSON exportieren und

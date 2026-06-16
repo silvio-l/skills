@@ -14,6 +14,10 @@ Lies `REFERENCE.md` für die Token-Pipeline (Figma Variables → `tokens.dart`).
 
 ## Vorbedingungen (sonst STOPP und melden)
 
+0. **Bewusste Design-Sprache existiert.** `design/design-language.md` + ein
+   *rollenbenanntes* `design/tokens.json` (aus `flutter-design-language`, Phase 0).
+   Fehlt das → **zuerst `flutter-design-language` fahren**, sonst transportiert die
+   Pipeline nur sauber verpackten Slop (Indigo-Default, Roboto/Inter, uniformer Radius).
 1. **Theme-Layer existiert.** `lib/theme/tokens.dart` mit `ColorScheme` (Light/Dark),
    `AppSpacing`, `AppRadius`. Fehlt sie → zuerst die Token-Pipeline aufsetzen
    (siehe `REFERENCE.md`), nicht hardcoden.
