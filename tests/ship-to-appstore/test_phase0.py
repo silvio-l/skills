@@ -187,6 +187,123 @@ class MissingSigningTests(unittest.TestCase):
         self.assertEqual(self.data["build_number"], "10")
 
 
+class CredentialsPresentTests(unittest.TestCase):
+    """Flutter/iOS repo with a .p8 file and fastlane Appfile — credential section populated.
+
+    This fixture also verifies the security hard constraint: the script must
+    report file existence/path only and must never emit the file's contents.
+    The dummy .p8 file contains a known sentinel string ('DUMMY_P8_PLACEHOLDER_CONTENT').
+    If that string appears in stdout, the script is leaking secrets.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.result = _run("with_credentials")
+        try:
+            cls.data = json.loads(cls.result.stdout)
+        except json.JSONDecodeError:
+            cls.data = None
+
+    def test_exit_code_zero(self):
+        self.assertEqual(self.result.returncode, 0, self.result.stderr)
+
+    def test_stdout_is_valid_json(self):
+        self.assertIsNotNone(self.data, "stdout is not valid JSON")
+
+    def test_credentials_section_present(self):
+        self.assertIn("credentials", self.data, "Missing top-level 'credentials' key")
+
+    def test_p8_file_detected(self):
+        creds = self.data["credentials"]
+        self.assertGreater(len(creds["p8_files"]), 0, "Expected at least one .p8 entry")
+
+    def test_p8_path_field_present(self):
+        p8 = self.data["credentials"]["p8_files"][0]
+        self.assertIn("path", p8)
+
+    def test_p8_path_ends_with_p8(self):
+        p8 = self.data["credentials"]["p8_files"][0]
+        self.assertTrue(p8["path"].endswith(".p8"), f"Expected .p8 extension, got: {p8['path']}")
+
+    def test_p8_path_is_relative(self):
+        # Path must be relative so it is portable and does not reveal the host filesystem.
+        p8 = self.data["credentials"]["p8_files"][0]
+        self.assertFalse(os.path.isabs(p8["path"]), f"Expected relative path, got: {p8['path']}")
+
+    def test_fastlane_appfile_detected(self):
+        self.assertIsNotNone(
+            self.data["credentials"]["fastlane_appfile"],
+            "Expected fastlane_appfile to be non-null when Appfile exists",
+        )
+
+    def test_fastlane_appfile_path_field(self):
+        appfile = self.data["credentials"]["fastlane_appfile"]
+        self.assertIn("path", appfile)
+
+    # --- Security hard constraint: no secret contents ever emitted ---
+
+    def test_p8_sentinel_not_in_stdout(self):
+        """The dummy .p8 contains 'DUMMY_P8_PLACEHOLDER_CONTENT'. Must never appear in output."""
+        self.assertNotIn(
+            "DUMMY_P8_PLACEHOLDER_CONTENT",
+            self.result.stdout,
+            "Secret leak: .p8 file contents appeared in stdout",
+        )
+
+    def test_no_pem_header_in_output(self):
+        """Real .p8 keys start with '-----BEGIN'. Must never appear in output."""
+        self.assertNotIn("-----BEGIN", self.result.stdout)
+
+    def test_no_password_in_output(self):
+        self.assertNotIn("password", self.result.stdout.lower())
+
+
+class CredentialsAbsentTests(unittest.TestCase):
+    """Flutter/iOS repo with no credential files — credentials section reflects absence.
+
+    Reuses the happy_path fixture, which has no .p8 files, no fastlane/Appfile,
+    and no .env files.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.result = _run("happy_path")
+        try:
+            cls.data = json.loads(cls.result.stdout)
+        except json.JSONDecodeError:
+            cls.data = None
+
+    def test_exit_code_zero(self):
+        self.assertEqual(self.result.returncode, 0, self.result.stderr)
+
+    def test_credentials_section_present(self):
+        self.assertIn("credentials", self.data, "Missing top-level 'credentials' key")
+
+    def test_p8_files_empty(self):
+        self.assertEqual(
+            self.data["credentials"]["p8_files"],
+            [],
+            "Expected empty p8_files list when no .p8 files exist",
+        )
+
+    def test_fastlane_appfile_absent(self):
+        self.assertIsNone(
+            self.data["credentials"]["fastlane_appfile"],
+            "Expected fastlane_appfile to be null when Appfile does not exist",
+        )
+
+    def test_fastlane_env_absent(self):
+        self.assertIsNone(
+            self.data["credentials"]["fastlane_env"],
+            "Expected fastlane_env to be null when no .env file exists",
+        )
+
+    def test_credentials_subfields_present(self):
+        creds = self.data["credentials"]
+        for field in ("p8_files", "fastlane_appfile", "fastlane_env", "env_hints"):
+            self.assertIn(field, creds, f"Missing credentials sub-field: {field}")
+
+
 class NoCachePollutionTest(unittest.TestCase):
     """Running the tests must not leave __pycache__ inside skills/."""
 

@@ -1,0 +1,5 @@
+# fastlane/Appfile — fixture placeholder for credential-source discovery testing.
+# Contains only non-secret team/bundle identifiers.
+app_identifier "com.example.credstest"
+apple_id "fixture-user@example.com"
+team_id "ZZYYXX9988"

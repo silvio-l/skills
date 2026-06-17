@@ -29,10 +29,15 @@ Output contract (JSON keys):
     icon_set.present        int
     launch_assets.has_launch_screen_storyboard  bool
     launch_assets.has_launch_image_assets       bool
+    credentials.p8_files            list[{path: str}]  — relative paths to *.p8 files found
+    credentials.fastlane_appfile    {path: str}|null   — relative path if Appfile exists
+    credentials.fastlane_env        {path: str}|null   — relative path if .env exists
+    credentials.env_hints           list[str]  — env var NAMES that are set (never values)
 
 Security: this script never reads or emits credential secret contents
 (API keys, certificates, passwords). Team ID is an identifier, not a secret.
-Credential discovery is handled in a later phase (slice 03).
+The credentials section reports file existence and path only — the contents
+of .p8 files, Appfiles, and .env files are never read, logged, or emitted.
 """
 
 import json
@@ -207,6 +212,83 @@ def check_launch_assets(root: str) -> dict:
     }
 
 
+def discover_credentials(root: str) -> dict:
+    """Discover credential-source hints in the repo.
+
+    Reports existence and path only — never reads or emits any secret content.
+    Covers:
+      - *.p8 API key files in standard iOS/fastlane locations within the repo
+      - fastlane/Appfile (team / bundle config indicator)
+      - fastlane/.env or .env (env-based credentials indicator)
+      - Environment variable names that are SET (names only, never values)
+
+    Security guarantee: this function calls os.path.isfile() / os.listdir()
+    to detect file presence and os.environ.get() to detect env var presence.
+    It never opens, reads, or includes the contents of any credential file or
+    env var value in its return value.
+    """
+    result: dict = {
+        "p8_files": [],
+        "fastlane_appfile": None,
+        "fastlane_env": None,
+        "env_hints": [],
+    }
+
+    # --- *.p8 API key files ---
+    # Search standard locations where developers place ASC API keys.
+    p8_search_dirs = [
+        root,
+        os.path.join(root, "ios", "private_keys"),
+        os.path.join(root, "private_keys"),
+        os.path.join(root, "fastlane"),
+    ]
+    seen_paths: set[str] = set()
+    for search_dir in p8_search_dirs:
+        if not os.path.isdir(search_dir):
+            continue
+        try:
+            entries = os.listdir(search_dir)
+        except OSError:
+            continue
+        for entry in entries:
+            if entry.endswith(".p8"):
+                abs_path = os.path.join(search_dir, entry)
+                if os.path.isfile(abs_path) and abs_path not in seen_paths:
+                    seen_paths.add(abs_path)
+                    rel = os.path.relpath(abs_path, root)
+                    result["p8_files"].append({"path": rel})
+
+    # --- fastlane/Appfile ---
+    appfile_path = os.path.join(root, "fastlane", "Appfile")
+    if os.path.isfile(appfile_path):
+        result["fastlane_appfile"] = {"path": os.path.relpath(appfile_path, root)}
+
+    # --- fastlane/.env or .env (first found wins) ---
+    for env_candidate in (
+        os.path.join(root, "fastlane", ".env"),
+        os.path.join(root, ".env"),
+    ):
+        if os.path.isfile(env_candidate):
+            result["fastlane_env"] = {"path": os.path.relpath(env_candidate, root)}
+            break
+
+    # --- Environment variable hints (key names only, never values) ---
+    _ASC_HINT_ENV_VARS = (
+        "ASC_ISSUER_ID",
+        "APP_STORE_CONNECT_API_KEY_ISSUER_ID",
+        "ASC_KEY_ID",
+        "APP_STORE_CONNECT_KEY_ID",
+        "APP_STORE_CONNECT_API_KEY_KEY_ID",
+        "FASTLANE_ITC_TEAM_ID",
+        "FASTLANE_APPLE_APPLICATION_SPECIFIC_PASSWORD",
+    )
+    for var in _ASC_HINT_ENV_VARS:
+        if os.environ.get(var):
+            result["env_hints"].append(var)
+
+    return result
+
+
 def main() -> int:
     if len(sys.argv) > 2:
         print(
@@ -231,6 +313,7 @@ def main() -> int:
     report.update(parse_pbxproj(root))
     report["icon_set"] = check_icon_set(root)
     report["launch_assets"] = check_launch_assets(root)
+    report["credentials"] = discover_credentials(root)
 
     print(json.dumps(report, indent=2))
     return 0
