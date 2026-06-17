@@ -1,179 +1,179 @@
-# Output-Template — `.scratch/roadmap.md`
+# Output Template — `.scratch/roadmap.md`
 
-Verwende exakt diese Struktur und Reihenfolge. Sektionen dürfen nicht ausgelassen, umbenannt oder umsortiert werden. Wo eine Tabelle vorgegeben ist, behalte Spaltennamen und -reihenfolge bei.
+Use exactly this structure and order. Sections must not be omitted, renamed, or reordered. Where a table is specified, keep column names and order.
 
 ---
 
 ```markdown
-# Implementierungs-Roadmap
+# Implementation Roadmap
 
-**Quelle:** <Pfad zum Ideendokument>
-**Erstellt:** <ISO-Datum>
+**Source:** <path to the idea document>
+**Created:** <ISO date>
 **Status:** initial draft
 
 ---
 
-## 1. Kurzbewertung des Ideendokuments
+## 1. Brief Assessment of the Idea Document
 
-- **Produktziel:** <ein Satz>
-- **Kernnutzen:** <ein Satz>
-- **Wichtigste Nutzerflüsse:** <Aufzählung, 3–6 Punkte>
-- **Technische Hauptbereiche:** <Aufzählung der großen Bauteile>
-- **Größte Risiken / Blocker:** <Aufzählung>
-- **Offene Entscheidungen aus der Quelle:** <Aufzählung — nur was schon im Dokument als offen markiert war>
+- **Product goal:** <one sentence>
+- **Core value:** <one sentence>
+- **Key user flows:** <list, 3–6 items>
+- **Main technical areas:** <list of major components>
+- **Biggest risks / blockers:** <list>
+- **Open decisions from the source:** <list — only what was already marked as open in the document>
 
 ---
 
-## 2. Feature-Inventar
+## 2. Feature Inventory
 
-| Bereich | Feature | Priorität | Abhängigkeiten | Komplexität | Bemerkung |
+| Area | Feature | Priority | Dependencies | Complexity | Note |
 |---|---|---:|---|---:|---|
-| <z. B. Onboarding> | <Feature> | P0 | <vorausgesetzte Features oder „—"> | M | <kurz> |
+| <e.g. Onboarding> | <Feature> | P0 | <required features or "—"> | M | <brief> |
 
-**Prioritäten:**
+**Priorities:**
 
-- `P0` — zwingend für MVP
-- `P1` — wichtig, aber nicht MVP-blockierend
-- `P2` — später
+- `P0` — mandatory for MVP
+- `P1` — important, but not MVP-blocking
+- `P2` — later
 - `P3` — optional / nice-to-have
 
-**Komplexität:** `S` / `M` / `L` (klein / mittel / groß).
+**Complexity:** `S` / `M` / `L` (small / medium / large).
 
 ---
 
-## 3. Technische Abhängigkeitsanalyse
+## 3. Technical Dependency Analysis
 
-Beschreibe in Stichpunkten:
+Describe in bullet points:
 
-- Welche Grundlagen zuerst geschaffen werden müssen (Projektsetup, Auth, Storage, …)
-- Welche Datenmodelle früh feststehen müssen
-- Welche UI-Bereiche von Backend-/State-Logik abhängen
-- Welche Features erst später sinnvoll implementierbar sind
-- Welche Punkte noch unklar oder riskant sind
-- Welche Schritte **parallelisierbar** wären
-- Welche Schritte zwingend **sequenziell** erfolgen müssen
-
----
-
-## 4. Phasenplan
-
-Liste die Phasen mit Einzeiler-Begründung. Standardvorschlag — passe ihn am konkreten Dokument an, lösche / füge hinzu, was passt:
-
-- **Phase 0: Projektgrundlage & Architektur** — <Begründung>
-- **Phase 1: Datenmodell & Persistenz** — <Begründung>
-- **Phase 2: Kernlogik / Services** — <Begründung>
-- **Phase 3: Haupt-UI / zentrale Flows** — <Begründung>
-- **Phase 4: Erweiterte Funktionen** — <Begründung>
-- **Phase 5: Qualität, Fehlerbehandlung, Edge Cases** — <Begründung>
-- **Phase 6: Polishing & Release-Vorbereitung** — <Begründung>
+- What foundations must be established first (project setup, auth, storage, …)
+- Which data models must be locked in early
+- Which UI areas depend on backend/state logic
+- Which features can only be meaningfully implemented later
+- Which points are still unclear or risky
+- Which steps could be **parallelised**
+- Which steps must necessarily be **sequential**
 
 ---
 
-## 5. Agentenoptimierte Sprint-Roadmap
+## 4. Phase Plan
 
-**Sprint-ID — stabil und maschinenlesbar.** Format: `sprint-<zweistellig>-<kebab-case-slug>`, z. B. `sprint-03-pflegeobjekt-anlegen`. Die Nummer entspricht der initialen Position; bei späteren Umsortierungen oder Einfügungen **ändert sich die ID nicht** — die H3-Überschrift „Sprint X" ist nur Lesehilfe, der Slug bleibt für alle Verlinkungen (Feature-Verzeichnis, ratchet-up, manuelle Verweise) der stabile Anker.
+List the phases with a one-line justification. Default suggestion — adapt to the specific document, remove / add as appropriate:
 
-**Status — Lebenszyklus eines Sprints:** `todo` → `in-progress` → `done`.
+- **Phase 0: Project Foundation & Architecture** — <justification>
+- **Phase 1: Data Model & Persistence** — <justification>
+- **Phase 2: Core Logic / Services** — <justification>
+- **Phase 3: Main UI / Central Flows** — <justification>
+- **Phase 4: Extended Features** — <justification>
+- **Phase 5: Quality, Error Handling, Edge Cases** — <justification>
+- **Phase 6: Polishing & Release Preparation** — <justification>
 
-- `todo` — Default beim Anlegen. Sprint ist geschnitten, noch nicht in `/to-prd` überführt.
-- `in-progress` — Mindestens ein Issue dieses Sprints wird gerade bearbeitet (gesetzt von `ratchet-up` oder manuell).
-- `done` — Alle Issues aus dem zugehörigen PRD sind durch `ratchet-up` als `done` markiert.
+---
 
-Pro Sprint **exakt** dieser Block:
+## 5. Agent-Optimised Sprint Roadmap
 
-### Sprint <Nr>: <klarer Name>
+**Sprint ID — stable and machine-readable.** Format: `sprint-<two-digit>-<kebab-case-slug>`, e.g. `sprint-03-create-care-object`. The number reflects the initial position; on later reorderings or insertions, **the ID does not change** — the H3 heading "Sprint X" is a reading aid only; the slug remains the stable anchor for all references (feature directory, ratchet-up, manual links).
+
+**Status — sprint lifecycle:** `todo` → `in-progress` → `done`.
+
+- `todo` — Default when created. Sprint is scoped, not yet converted via `/to-prd`.
+- `in-progress` — At least one issue from this sprint is being worked on (set by `ratchet-up` or manually).
+- `done` — All issues from the corresponding PRD have been marked `done` by `ratchet-up`.
+
+Per sprint, **exactly** this block:
+
+### Sprint <No>: <clear name>
 
 **Sprint-ID:** sprint-<NN>-<kebab-case-slug>
 
 **Status:** todo
 
-**Phase:** <Phasennummer + Name>
+**Phase:** <phase number + name>
 
-**Ziel:**
-<Kurze Beschreibung des Ergebnisses, 1–3 Sätze.>
+**Goal:**
+<Brief description of the deliverable, 1–3 sentences.>
 
-**Warum jetzt:**
-<Begründung für die Position in der Reihenfolge.>
+**Why now:**
+<Justification for the position in the sequence.>
 
-**Umfang:** klein / mittel / groß
+**Scope:** small / medium / large
 
-**100k-Token-Eignung:** geeignet / grenzwertig / zu groß
+**100k-token suitability:** suitable / borderline / too large
 
-**Umzusetzen:**
-- <Konkrete Aufgaben>
-- <Betroffene Module>
-- <Relevante Datenmodelle>
-- <Relevante Screens oder Services>
+**To implement:**
+- <Concrete tasks>
+- <Affected modules>
+- <Relevant data models>
+- <Relevant screens or services>
 
-**Nicht enthalten:**
-- <Bewusst ausgeschlossene Dinge, um den Sprint klein zu halten>
+**Not included:**
+- <Things deliberately excluded to keep the sprint small>
 
-**Abhängigkeiten:**
-- <Vorherige Sprint-IDs, z. B. `sprint-02-…`, `sprint-04-…`>
-- <Offene Entscheidungen, die vorher fallen müssen>
-- <Technische Voraussetzungen>
+**Dependencies:**
+- <Prior sprint IDs, e.g. `sprint-02-…`, `sprint-04-…`>
+- <Open decisions that must be resolved first>
+- <Technical prerequisites>
 
-**Akzeptanzkriterien:**
-- <Prüfbar 1>
-- <Prüfbar 2>
-- <Prüfbar 3>
+**Acceptance criteria:**
+- <Verifiable 1>
+- <Verifiable 2>
+- <Verifiable 3>
 
-**Risiken / Hinweise für den KI-Coding-Agenten:**
-- <Risiko / Stolperstein>
-- <Konvention oder Naming, auf die der Agent achten muss>
-- <Was leicht ungewollt mit-refaktoriert würde>
-
----
-
-(Wiederhole Sprint-Block bis alle Sprints aufgeführt sind.)
+**Risks / notes for the AI coding agent:**
+- <Risk / pitfall>
+- <Convention or naming the agent must follow>
+- <What might accidentally get refactored along>
 
 ---
 
-## 6. Empfohlene Reihenfolge
+(Repeat sprint block until all sprints are listed.)
 
-Nummerierte Liste **aller** Sprints in der finalen Umsetzungsreihenfolge — referenziere Sprints über ihre **Sprint-ID**, nicht über die H3-Nummer:
+---
 
-1. `sprint-01-<slug>` — <Name>
-2. `sprint-02-<slug>` — <Name>
+## 6. Recommended Order
+
+Numbered list of **all** sprints in the final implementation order — reference sprints by their **sprint ID**, not the H3 number:
+
+1. `sprint-01-<slug>` — <name>
+2. `sprint-02-<slug>` — <name>
 3. …
 
-Wenn Sprints parallelisierbar sind, markiere sie mit `‖` und derselben Nummer (z. B. `3a ‖ 3b`). Status steht **nicht** in dieser Liste — Single Source of Truth ist das `Status:`-Feld im jeweiligen Sprint-Block.
+If sprints are parallelisable, mark them with `‖` and the same number (e.g. `3a ‖ 3b`). Status is **not** in this list — the single source of truth is the `Status:` field in each sprint block.
 
 ---
 
-## 7. MVP-Schnitt
+## 7. MVP Cut
 
-Liste die Sprints, die zwingend für ein erstes nutzbares MVP nötig sind — referenziere wieder per **Sprint-ID**:
+List the sprints that are mandatory for a first usable MVP — reference again by **sprint ID**:
 
-- `sprint-<NN>-<slug>` — <Name>
-- `sprint-<NN>-<slug>` — <Name>
+- `sprint-<NN>-<slug>` — <name>
+- `sprint-<NN>-<slug>` — <name>
 - …
 
-Kurzbegründung, warum genau diese Auswahl den MVP-Vertrag aus Sektion 1 abdeckt.
+Brief justification of why exactly this selection covers the MVP contract from section 1.
 
 ---
 
-## 8. Spätere Ausbaustufen
+## 8. Later Expansion Stages
 
-Ordne alle nicht-MVP-Sprints in spätere Releases ein:
+Assign all non-MVP sprints to later releases:
 
-### Release 1.1 — <Thema>
-- `sprint-<NN>-<slug>` — <Name>
+### Release 1.1 — <Theme>
+- `sprint-<NN>-<slug>` — <name>
 
-### Release 1.2 — <Thema>
-- `sprint-<NN>-<slug>` — <Name>
+### Release 1.2 — <Theme>
+- `sprint-<NN>-<slug>` — <name>
 
-### Backlog (P2/P3, ohne Releasezuordnung)
-- `sprint-<NN>-<slug>` — <Name>
+### Backlog (P2/P3, no release assignment)
+- `sprint-<NN>-<slug>` — <name>
 
 ---
 
-## 9. Kritische Rückfragen
+## 9. Critical Open Questions
 
-Nur Fragen, deren fehlende Antwort zu **Fehlplanung oder größerem Rework** führen würde. Keine Wunschliste, keine „nice to know".
+Only questions whose missing answer would lead to **misplanning or significant rework**. No wish list, no "nice to know".
 
-1. <Frage> — _blockiert: `sprint-NN-<slug>`, `sprint-MM-<slug>`_
-2. <Frage> — _blockiert: …_
+1. <Question> — _blocks: `sprint-NN-<slug>`, `sprint-MM-<slug>`_
+2. <Question> — _blocks: …_
 
-Wenn keine Rückfragen offen sind, schreibe: `Keine kritischen Rückfragen offen.`
+If no questions are open, write: `No critical open questions.`
 ```

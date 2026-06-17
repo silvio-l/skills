@@ -1,126 +1,127 @@
-# Formate — Finding, Per-Screen-Report, Subagent-Rückgabe, Gesamtbericht
+# Formats — Finding, Per-Screen Report, Subagent Return, Master Report
 
-Alle Formate sind bewusst **strikt und maschinenparsebar**: stabile IDs, fixes
-Severity-Enum, imperative Empfehlungen. Ein nachgelagerter Agent (oder `/ratchet-up`
-via `## Visual expectations`) soll die Findings ohne Rückfragen abarbeiten können.
+All formats are deliberately **strict and machine-parseable**: stable IDs, fixed
+severity enum, imperative recommendations. A downstream agent (or `/ratchet-up`
+via `## Visual expectations`) must be able to work through the findings without
+back-and-forth.
 
 ---
 
-## Finding-Format
+## Finding Format
 
-Jedes Finding ist ein Markdown-Block in exakt dieser Struktur:
+Every finding is a Markdown block in exactly this structure:
 
 ```md
-### <SCREEN-ID>-001 · <Kategorie> · <Severity>
+### <SCREEN-ID>-001 · <Category> · <Severity>
 
-- **Bereich:** <konkreter sichtbarer Ort, z.B. "Header / Hauptüberschrift">
-- **Beobachtung:** <was im Bild sichtbar ist — verankert, ohne Wertung>
-- **Warum problematisch:** <Effekt auf Nutzer/Zielgruppe>
-- **Empfehlung:** <imperative, umsetzbare Anweisung; Richtung statt erfundener Zahl>
-- **Erwarteter Effekt:** <was die Behebung bringt>
-- **Konfidenz:** hoch | mittel | gering   <!-- gering, wenn vision-limitiert -->
+- **Area:** <concrete visible location, e.g. "Header / Main Heading">
+- **Observation:** <what is visible in the image — anchored, no judgement>
+- **Why problematic:** <effect on user/target audience>
+- **Recommendation:** <imperative, actionable instruction; direction not invented number>
+- **Expected effect:** <what fixing this achieves>
+- **Confidence:** high | medium | low   <!-- low if vision-limited -->
 ```
 
-Regeln:
-- **ID** = `<SCREEN-ID>-NNN`, fortlaufend pro Screen (`<SCREEN-ID>` = Dateiname ohne
-  Endung). Damit ist jede Empfehlung global eindeutig referenzierbar.
-- **Kategorie** = einer der Rubrik-Bereiche, exakt benannt (z.B. `Typografie`,
-  `Accessibility`, `Komponentenqualität`).
-- **Severity-Enum:** `Critical` | `High` | `Medium` | `Low`. Kalibrierung:
-  - **Critical** — blockiert Nutzung/Verständnis oder verletzt eine im Briefing
-    *deklarierte* Erwartung (Token, design-language.md, manifest): abgeschnittener
-    Text, unlesbarer Kontrast, nicht erkennbare Primäraktion, kaputtes Layout, falsche
-    Token-Farbe gegen deklarierte Palette.
-  - **High** — deutliche Hürde, aber nicht blockierend: schwache Hierarchie,
-    inkonsistente Komponenten, zu kleine Touch-Targets.
-  - **Medium** — spürbare Schwäche ohne funktionalen Schaden: Spacing-Rhythmus,
-    uneinheitliche Rundungen.
-  - **Low** — Politur/Geschmack: Mikro-Alignment, dezente Farbnuance.
-- **Konfidenz `gering`** ist Pflicht, wenn das Finding an einem vision-limitierten
-  Detail hängt (1px-Border, Shadow, exakter Kontrast) — das Finding bleibt, aber
-  ehrlich markiert.
+Rules:
+- **ID** = `<SCREEN-ID>-NNN`, sequential per screen (`<SCREEN-ID>` = filename without
+  extension). This makes every recommendation globally uniquely referenceable.
+- **Category** = one of the rubric areas, named exactly (e.g. `Typography`,
+  `Accessibility`, `Component Quality`).
+- **Severity enum:** `Critical` | `High` | `Medium` | `Low`. Calibration:
+  - **Critical** — blocks usage/comprehension or violates a *declared* expectation
+    from the briefing (token, design-language.md, manifest): clipped text, unreadable
+    contrast, unrecognisable primary action, broken layout, wrong token colour against
+    declared palette.
+  - **High** — significant friction, but not blocking: weak hierarchy,
+    inconsistent components, touch targets too small.
+  - **Medium** — noticeable weakness without functional damage: spacing rhythm,
+    inconsistent corner radii.
+  - **Low** — polish/taste: micro-alignment, subtle colour nuance.
+- **Confidence `low`** is mandatory when a finding depends on a vision-limited
+  detail (1 px border, shadow, exact contrast) — the finding stays, but honestly
+  flagged.
 
 ---
 
-## Per-Screen-Report — `screens/<screen-id>.md`
+## Per-Screen Report — `screens/<screen-id>.md`
 
-Der Reviewer-Subagent schreibt **diese** Datei:
+The reviewer subagent writes **this** file:
 
 ```md
-# Screen-Review: <screen-id>
+# Screen Review: <screen-id>
 
-- **Datei:** <relativer Pfad zum Screenshot>
-- **Plattform/Stack:** <aus Briefing>
-- **Reviewt gegen:** <Zielgruppe + deklarierte Erwartungsquelle, oder "kein expliziter Kontext">
+- **File:** <relative path to screenshot>
+- **Platform/Stack:** <from briefing>
+- **Reviewed against:** <target audience + declared expectation source, or "no explicit context">
 
 ## Scores (0–100)
 | Dimension | Score |
 |---|---|
-| UI-Qualität | NN |
-| UX-Qualität | NN |
+| UI Quality | NN |
+| UX Quality | NN |
 | Accessibility | NN |
-| Konsistenz | NN |
-| Zielgruppen-Fit | NN |
+| Consistency | NN |
+| Audience Fit | NN |
 
 ## Findings
-<alle Finding-Blöcke, nach Severity sortiert (Critical zuerst)>
+<all finding blocks, sorted by severity (Critical first)>
 
-## Kritische Probleme
-<Bullet-Liste der Critical-Finding-IDs + Einzeiler; "keine", wenn keine>
+## Critical Issues
+<bullet list of Critical finding IDs + one-liner; "none" if none>
 
-## Priorisierte Behebungsreihenfolge
-1. <Finding-ID> — <Kurzbegründung der Priorität>
+## Prioritised Fix Order
+1. <finding-ID> — <brief rationale for priority>
 2. …
 ```
 
-Score-Leitlinie: nicht großzügig sein. Ein Screen mit einem Critical kann in keiner
-Dimension über ~50 liegen, die das Critical betrifft.
+Score guideline: do not be generous. A screen with a Critical cannot score above
+~50 in any dimension affected by that Critical.
 
 ---
 
-## Subagent-Rückgabe (an den Orchestrator — KEIN Report-Volltext)
+## Subagent Return (to the orchestrator — NO report full-text)
 
-Der Subagent gibt dem Orchestrator **nur** diese kompakte Zeile zurück (context-safe;
-der Volltext steht in der Datei):
+The subagent returns **only** this compact line to the orchestrator (context-safe;
+the full text lives in the file):
 
 ```
-<screen-id> | scores: ui=NN ux=NN a11y=NN cons=NN fit=NN | findings: C=n H=n M=n L=n | top: <ID kürzeste Critical/High-Beschreibung>
+<screen-id> | scores: ui=NN ux=NN a11y=NN cons=NN fit=NN | findings: C=n H=n M=n L=n | top: <ID shortest Critical/High description>
 ```
 
-Findet der Subagent keinen Screenshot oder kann das Bild nicht lesen, gibt er
-`<screen-id> | ERROR: <grund>` zurück und schreibt keine Datei.
+If the subagent cannot find the screenshot or cannot read the image, it returns
+`<screen-id> | ERROR: <reason>` and writes no file.
 
 ---
 
-## Gesamtbericht — `report.md` (Orchestrator, Phase 2)
+## Master Report — `report.md` (orchestrator, Phase 2)
 
 ```md
-# Screenshot-Review — Gesamtbericht (<YYYY-MM-DD>)
+# Screenshot Review — Master Report (<YYYY-MM-DD>)
 
-- **Ordner:** <screenshot-folder>
+- **Folder:** <screenshot-folder>
 - **Screens:** <n>
-- **App-Kontext:** <Zielgruppe · Zweck · Plattform · Design-System (1 Zeile)>
+- **App context:** <target audience · purpose · platform · design system (1 line)>
 
-## Score-Übersicht
-| Screen | UI | UX | A11y | Konsistenz | Fit | Critical |
+## Score Overview
+| Screen | UI | UX | A11y | Consistency | Fit | Critical |
 |---|---|---|---|---|---|---|
 | <screen-id> | NN | NN | NN | NN | NN | n |
 | … |
 
-## Kritische Probleme (alle Screens)
-<Liste aller Critical-Finding-IDs mit Screen + Einzeiler>
+## Critical Issues (all screens)
+<list of all Critical finding IDs with screen + one-liner>
 
-## App-weite Konsistenz-Muster
-<NUR hier: gleiche Komponente über Screens unterschiedlich gestylt, uneinheitliche
-AppBars/Buttons/Spacing-Skala/Rundungen über den Ordner hinweg. Verweise auf die
-betroffenen Finding-IDs aus den Einzelreports. Keine im Aggregat sichtbare
-Inkonsistenz erfinden, die in keinem Einzelreport steht.>
+## App-Wide Consistency Patterns
+<ONLY here: same component styled differently across screens, inconsistent
+AppBars/buttons/spacing scale/corner radii across the folder. Reference the
+affected finding IDs from individual reports. Do not invent aggregate
+inconsistencies that appear in no individual report.>
 
-## Global priorisierte Worklist
-| # | Finding-ID(s) | Screen(s) | Severity | Aufwand (S/M/L) | Maßnahme |
+## Globally Prioritised Worklist
+| # | Finding ID(s) | Screen(s) | Severity | Effort (S/M/L) | Action |
 |---|---|---|---|---|---|
-| 1 | … | … | Critical | S | <imperative Maßnahme> |
+| 1 | … | … | Critical | S | <imperative action> |
 
-Reihenfolge: Severity zuerst, bei Gleichstand kleinerer Aufwand zuerst. App-weite
-Muster (ein Fix räumt mehrere Screens) vor Einzel-Screen-Findings.
+Order: severity first, equal severity → smaller effort first. App-wide
+patterns (one fix clears multiple screens) before single-screen findings.
 ```

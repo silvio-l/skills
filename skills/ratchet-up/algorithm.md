@@ -495,18 +495,18 @@ grep -rLE "^(Status:|- \*\*Status:\*\*) done" "$feature_path/issues/" || true
 **B) Incomplete** — at least one issue is not `done` → print summary, **do not delete**, ask explicitly:
 
 ```text
-⚠️  Cleanup übersprungen — nicht alle Issues sind abgeschlossen.
+⚠️  Cleanup skipped — not all issues are complete.
 
-Offene Issues:
+Open issues:
   - issues/03-foo.md (Status: needs-info)
   - issues/04-bar.md (Status: ready-for-agent)
 
-Empfehlung: Lösch den Ordner jetzt nicht. Die offenen Issues enthalten
-wichtige Informationen (Blockaden, Fehlerbeschreibungen), die du noch
-brauchst, um den Strang abzuschließen. Ein vorzeitiges Löschen würde
-diesen Kontext unwiederbringlich vernichten.
+Recommendation: do not delete the folder now. The open issues hold
+important information (blockers, error descriptions) you still need to
+finish the thread. Deleting prematurely would irreversibly destroy this
+context.
 
-Möchtest du den Ordner <feature_path> trotzdem löschen? (ja/nein)
+Do you want to delete the folder <feature_path> anyway? (yes/no)
 ```
 
 Only delete if the user answers `ja` explicitly.

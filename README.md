@@ -113,30 +113,30 @@ If you only want one of these, skip the dependencies you do not exercise.
 
 ### `screenshot-review`
 
-**The Problem.** „Reviewe mal die Screens" verleitet einen Agenten zu zwei
-Versagensmodi gleichzeitig: er lobt höflich, statt Probleme zu finden — oder er
-wird „kompromisslos" und halluziniert dann falsch-präzise Findings („Headline auf
-28 px setzen") aus einem Screenshot, der gar keine px hergibt. Dazu kennt er die
-Zielgruppe nicht, also ist jedes Zielgruppen-Fit-Urteil geraten, und sobald der
-Ordner mehr als eine Handvoll Bilder hat, zieht jeder Screen den ganzen Berg in
-einen Kontext und der Reviewer verliert auf halbem Weg den Faden.
+**The Problem.** "Review the screens" tempts an agent into two failure modes at
+once: it praises politely instead of finding problems — or it turns
+"uncompromising" and then hallucinates falsely-precise findings ("set the headline
+to 28 px") from a screenshot that carries no px at all. On top of that it does not
+know the audience, so every audience-fit verdict is guessed, and once the folder
+holds more than a handful of images, each screen drags the whole pile into one
+context and the reviewer loses the thread halfway through.
 
-**The Fix.** Ein Standalone-Audit über einen Screenshot-Ordner mit der Disziplin aus
-`ratchet-up`: Phase 0 zieht den App-Kontext (Zielgruppe, Zweck, Plattform,
-Design-System, deklarierte Tokens) selbst aus `CLAUDE.md`, `design/design-language.md`,
-`pubspec.yaml` und `README`, markiert Lücken als `UNBEKANNT` und klärt sie in einer
-Feedback-Schleife, bevor ein einziger Screen reviewt wird. Phase 1 dispatcht pro
-Screenshot einen read-only Sonnet-Subagenten, der gegen eine 13-Punkte-Rubrik
-auditiert, seinen Report direkt auf Platte schreibt und dem Orchestrator nur eine
-kompakte Score-Zeile zurückgibt — kein Volltext im aktiven Kontext. Der Ton bleibt
-kompromisslos (volle Severity, „immer tiefer suchen"), aber jedes Finding ist im
-sichtbaren Pixel verankert: relativ formuliert statt falsch-präzise, vision-limitierte
-Urteile (1px-Border, Shadow, Kontrast) ehrlich als Konfidenz „gering" markiert. Phase 2
-aggregiert die Einzelreports zum Gesamtbericht inklusive der app-weiten
-Konsistenz-Muster, die nur im Aggregat sichtbar werden. Das Report-Format ist bewusst
-maschinenparsebar (stabile Finding-IDs, Severity-Enum, imperative Empfehlungen,
-priorisierte Worklist), sodass ein nachgelagerter Agent — etwa `/ratchet-up` — die
-Findings ohne Rückfragen abarbeiten kann.
+**The Fix.** A standalone audit over a screenshot folder with the discipline of
+`ratchet-up`: Phase 0 pulls the app context (audience, purpose, platform, design
+system, declared tokens) from `CLAUDE.md`, `design/design-language.md`,
+`pubspec.yaml`, and `README`, marks gaps as `UNKNOWN`, and clarifies them in a
+feedback loop before a single screen is reviewed. Phase 1 dispatches one read-only
+Sonnet subagent per screenshot that audits against a 13-point rubric, writes its
+report straight to disk, and returns only a compact score line to the orchestrator —
+no full text in active context. The tone stays uncompromising (full severity, "always
+dig deeper"), but every finding is anchored in a visible pixel: phrased relatively
+instead of falsely-precise, vision-limited calls (1px border, shadow, contrast)
+honestly flagged as "low" confidence. Phase 2 aggregates the per-screen reports into
+an overall report, including the app-wide consistency patterns that only become
+visible in the aggregate. The report format is deliberately machine-parseable (stable
+finding IDs, severity enum, imperative recommendations, prioritised worklist) so a
+downstream agent — e.g. `/ratchet-up` — can work the findings off without follow-up
+questions.
 
 ## Credit
 

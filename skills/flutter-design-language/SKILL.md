@@ -1,68 +1,68 @@
 ---
 name: flutter-design-language
-description: Phase-0-Gate gegen KI-Design-Slop vor der Figma→Flutter-Pipeline — erzwingt vorab einen bewussten Design-Plan statt generischem Default. Use when starting a Flutter design, defining a theme from scratch, or a design 'sieht generisch / nach KI aus'.
+description: Phase-0 gate against AI design slop before the Figma→Flutter pipeline — enforces a deliberate design plan instead of a generic default. Use when starting a Flutter design, defining a theme from scratch, or a design 'sieht generisch / nach KI aus'.
 ---
 
 # Flutter Design Language (Anti-Slop Phase 0)
 
-Bevor in Figma eine Variable oder in Flutter ein `ThemeData` entsteht, wird hier die
-**Design-Sprache bewusst entschieden**. Ohne dieses Gate erzeugt die Pipeline sauber
-verpackten Slop: `#4F46E5`-Indigo, Default-Roboto/Inter, uniformer 16er-Radius,
-zentrierte Hero+CTA, zaghafte Palette.
+Before a single variable is created in Figma or a `ThemeData` written in Flutter, this
+**design language is decided deliberately**. Without this gate the pipeline produces
+neatly packaged slop: `#4F46E5`-indigo, default Roboto/Inter, a uniform 16px radius,
+centred Hero+CTA, timid palette.
 
-> Haltung (von Anthropics `frontend-design`): Arbeite wie der Design-Lead eines kleinen
-> Studios, das jedem Kunden eine *unverwechselbare* Identität gibt. Templatiges wurde
-> schon abgelehnt. Triff bewusste, meinungsstarke Entscheidungen — und **ein** echtes,
-> begründbares ästhetisches Risiko.
+> Attitude (from Anthropic's `frontend-design`): Work like the design lead of a small
+> studio that gives every client an *unmistakable* identity. Templated work has already
+> been rejected. Make deliberate, opinionated decisions — and take **one** genuine,
+> justifiable aesthetic risk.
 
-## Ablauf (Pflicht, in dieser Reihenfolge)
+## Steps (mandatory, in this order)
 
-### 1. Im Subjekt verankern
-Benenne **ein** konkretes Subjekt, seine Zielgruppe und **die eine Aufgabe** des
-Haupt-Screens. Distinktive Entscheidungen kommen aus der Welt des Subjekts (Material,
-Artefakte, Vokabular) — nicht aus Design-Defaults. Nutze bekannte Nutzer-Präferenzen.
-Pinnst du das nicht, gestaltest du den Durchschnitt.
+### 1. Anchor in the subject
+Name **one** concrete subject, its target audience, and **the single job** of the main
+screen. Distinctive decisions come from the subject's world (materials, artefacts,
+vocabulary) — not from design defaults. Use known user preferences.
+Fail to pin this and you are designing the average.
 
-### 2. Design-Plan = kompaktes Token-System (im Denken erarbeiten)
-- **Color:** 4–6 **benannte** Hex-Werte mit Begründung. Keine Default-Brand-Farbe.
-  Beschreibe, *warum* diese Palette zum Subjekt gehört.
-- **Type:** 2+ Rollen — eine charaktervolle **Display**-Schrift (mit Zurückhaltung
-  eingesetzt), eine komplementäre **Body**-Schrift, optional eine **Utility/Mono** für
-  Daten/Captions. Konkrete Schriftnamen. Siehe Verbots-/Empfehlungsliste in `REFERENCE.md`.
-- **Layout:** Konzept in einem Satz + ASCII-Wireframe. Keine reflexhafte zentrierte
-  Hero+CTA, kein Drei-Icon-Grid „weil man das so macht".
-- **Signature:** das **eine** Element, an das man sich erinnert und das das Subjekt
-  verkörpert. Strukturelle Mittel (Nummerierung, Eyebrows, Divider) müssen etwas
-  *Wahres* kodieren, nicht dekorieren.
+### 2. Design plan = compact token system (worked out mentally)
+- **Color:** 4–6 **named** hex values with justification. No default brand colour.
+  Describe *why* this palette belongs to the subject.
+- **Type:** 2+ roles — one characterful **Display** font (used sparingly),
+  a complementary **Body** font, optionally a **Utility/Mono** for data/captions.
+  Concrete font names. See the block/allow list in `REFERENCE.md`.
+- **Layout:** concept in one sentence + ASCII wireframe. No reflexive centred
+  Hero+CTA, no three-icon grid "because that's what you do".
+- **Signature:** the **one** element people remember, embodying the subject.
+  Structural devices (numbering, eyebrows, dividers) must encode something
+  *true* — not decorate.
 
-### 3. Kritik gegen den generischen Default (das eigentliche Gate)
-Frage für **jeden** Plan-Teil: „Würde ich bei einem ähnlichen Brief hier landen?"
-Wenn ja → es ist ein Default, kein Choice → **überarbeiten und benennen, was du
-geändert hast und warum.** Gleiche den Plan gegen die Slop-Checkliste in `REFERENCE.md`
-ab. Erst wenn der Plan die Prüfung besteht, geht es weiter.
+### 3. Critique against the generic default (the actual gate)
+For **every** part of the plan ask: "Would I land here given a similar brief?"
+If yes → it's a default, not a choice → **revise it and name what you changed and why.**
+Check the plan against the slop checklist in `REFERENCE.md`. Only once the plan
+passes this review do you proceed.
 
-### 4. Festschreiben
-- `design/design-language.md` — Subjekt, Palette (mit Begründung), Typo, Layout,
-  Signature, das gewählte Risiko, verworfene Defaults.
-- `design/tokens.json` — drei-stufig & **rollenbenannt** (siehe `REFERENCE.md`):
-  *primitive* (Roh-Werte) → *semantic/`sys.*`* (Rolle) → *component*. Light **und** Dark.
+### 4. Commit
+- `design/design-language.md` — subject, palette (with justification), typography,
+  layout, signature, the chosen risk, rejected defaults.
+- `design/tokens.json` — three-tier & **role-named** (see `REFERENCE.md`):
+  *primitive* (raw values) → *semantic/`sys.*`* (role) → *component*. Light **and** Dark.
 
-Danach → `figma-to-flutter`: die Tokens speisen Figma-Variables **und** das Flutter-Theme.
+Then → `figma-to-flutter`: tokens feed Figma Variables **and** the Flutter theme.
 
-## Harte Regeln
+## Hard rules
 
-- **Spend boldness in one place.** Das Signature-Element ist das eine Memorable; alles
-  drumherum ruhig und diszipliniert. „Vor dem Rausgehen ein Accessoire wieder abnehmen."
-- **Begründungspflicht.** Jede Farbe/Schrift/Radius-Entscheidung leitet sich aus
-  `design-language.md` ab — keine Werte „aus dem Bauch".
-- **Defaults sind verboten, nicht nur unschön.** Die Slop-Checkliste ist ein Gate, kein
-  Vorschlag. Wo der Brief eine Richtung *vorgibt* (auch eine „generische"), gewinnt der
-  Brief — aber freie Achsen nie mit Defaults füllen.
-- **Quality-Floor ohne Ankündigung:** responsive bis Mobile, sichtbarer Fokus,
-  `reduced-motion`/Accessibility respektiert, Kontrast geprüft.
-- **Motion sparsam.** Ein orchestrierter Moment schlägt verstreute Effekte; zu viel
-  Animation *ist* ein Slop-Signal.
+- **Spend boldness in one place.** The signature element is the one memorable thing;
+  everything around it calm and disciplined. "Take one accessory off before you leave."
+- **Justification required.** Every colour/font/radius decision derives from
+  `design-language.md` — no values "from the gut".
+- **Defaults are forbidden, not merely ugly.** The slop checklist is a gate, not a
+  suggestion. Where the brief *prescribes* a direction (even a "generic" one), the
+  brief wins — but never fill free axes with defaults.
+- **Quality floor without announcement:** responsive down to mobile, visible focus,
+  `reduced-motion`/accessibility respected, contrast checked.
+- **Motion sparingly.** One orchestrated moment beats scattered effects; too much
+  animation *is* a slop signal.
 
-## Was dieser Skill NICHT tut
-- Keine Frame→Widget-Übersetzung (das ist `figma-to-flutter`).
-- Kein blindes Generieren — der Plan + die Kritik passieren **vor** dem ersten Pixel.
+## What this skill does NOT do
+- No frame→widget translation (that is `figma-to-flutter`).
+- No blind generation — the plan + critique happen **before** the first pixel.

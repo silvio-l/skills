@@ -1,82 +1,84 @@
-# Audit-Rubrik — die 13 Analysebereiche
+# Audit Rubric — the 13 Analysis Areas
 
-Der Reviewer geht **jeden** Bereich für seinen einen Screenshot durch. Pro Bereich
-gilt: aktiv nach Problemen suchen, nichts als korrekt voraussetzen — aber jedes
-Finding auf ein im Bild *sichtbares* Element verankern. Findet ein Bereich nichts,
-notier das knapp; erfinde nichts, um die Liste zu füllen.
+The reviewer works through **every** area for its one screenshot. Per area:
+actively look for problems, assume nothing is correct — but anchor every finding
+to a *visible* element in the image. If an area yields nothing, note it briefly;
+do not invent findings to fill the list.
 
-Querschnitt-Disziplin (gilt überall):
-- **Relativ statt falsch-präzise.** Aus einem Screenshot sind exakte px/Hex/Kontrast-
-  Ratios geraten. Beschreibe Verhältnisse („Headline kaum schwerer als Body"), nicht
-  Absolutwerte. Empfehlungen geben die *Richtung* an („Headline-Gewicht/Größe deutlich
-  anheben, Body zurücknehmen"), keine erfundene Zielzahl.
-- **Vision-Grenzen deklarieren.** 1px-Borders, Shadow-Spread, exakte Kontrastwerte,
-  Sub-Pixel-Alignment erkennt Vision nicht zuverlässig. Wo ein Urteil daran hängt,
-  schreib „aus dem Screenshot nicht sicher beurteilbar" ins Finding, statt zu raten.
+Cross-cutting discipline (applies everywhere):
+- **Relative, not falsely precise.** Exact px/hex/contrast ratios from a screenshot
+  are guesswork. Describe proportions ("headline barely heavier than body"), not
+  absolute values. Recommendations give the *direction* ("increase headline
+  weight/size noticeably, pull body back"), not an invented target number.
+- **Declare vision limits.** 1 px borders, shadow spread, exact contrast values,
+  sub-pixel alignment are not reliably detectable by vision. Where a judgement
+  depends on one of these, write "not confidently assessable from the screenshot"
+  in the finding instead of guessing.
 
 ---
 
-## 1. Erster Eindruck
-3-Sekunden-Urteil: modern / hochwertig / vertrauenswürdig / professionell — oder
-überladen / leer / inkonsistent / unverständlich? Benenne die Wirkung konkret und
-woran sie im Bild hängt.
+## 1. First Impression
+3-second verdict: modern / high-quality / trustworthy / professional — or
+cluttered / empty / inconsistent / unclear? Name the effect concretely and what
+in the image produces it.
 
-## 2. Visuelle Hierarchie
-Ist sofort klar, was wichtig ist? Klarer Fokuspunkt? Wird Wichtiges hervorgehoben,
-Unwichtiges zurückgenommen? Konkurrieren Elemente um Aufmerksamkeit?
+## 2. Visual Hierarchy
+Is it immediately clear what matters? Clear focal point? Are important elements
+emphasised, unimportant ones de-emphasised? Do elements compete for attention?
 
 ## 3. Layout & Spacing
-Außen-/Innenabstände, Grid-Konsistenz, Alignment, Padding/Margins, Safe Areas,
-visuelle Balance, Rhythmus. Suche: unregelmäßige Abstände, inkonsistente
-Einrückungen, visuelle Sprünge, schlecht ausgerichtete Elemente.
+Outer/inner spacing, grid consistency, alignment, padding/margins, safe areas,
+visual balance, rhythm. Look for: irregular spacing, inconsistent indentation,
+visual jumps, poorly aligned elements.
 
-## 4. Typografie
-Größenverhältnisse, Zeilenhöhe, Lesbarkeit, Gewichtungen, Überschriften-Hierarchie,
-Textkontrast, Textlängen/Umbrüche. Suche: zu kleine/große Schrift, inkonsistente
-Größen, fehlende Hierarchie, abgeschnittener Text.
+## 4. Typography
+Size ratios, line height, legibility, weights, heading hierarchy, text contrast,
+line lengths/breaks. Look for: text too small/large, inconsistent sizes, missing
+hierarchy, clipped text.
 
-## 5. Farben
-Palette, Markenwirkung, Konsistenz, Kontrast, Hervorhebungs-/Fokus-/CTA-Farben.
-Suche: unnötige Farben, schwache Kontraste, visuelle Unruhe, fehlende Farbstrategie.
-Gegen `design/tokens.json` prüfen, falls im Briefing deklariert.
+## 5. Colours
+Palette, brand effect, consistency, contrast, highlight/focus/CTA colours. Look
+for: unnecessary colours, weak contrasts, visual noise, missing colour strategy.
+Check against `design/tokens.json` if declared in the briefing.
 
-## 6. Komponentenqualität
-Jede sichtbare Komponente (Buttons, Cards, Dialoge, Navigation, Listen, Formulare,
-Chips, Tabs, Badges, FABs, Suchfelder, Dropdowns): Konsistenz, Größe, Modernität,
-erkennbare Klickbarkeit, ausreichend große Touch-Zonen.
+## 6. Component Quality
+Every visible component (buttons, cards, dialogs, navigation, lists, forms,
+chips, tabs, badges, FABs, search fields, dropdowns): consistency, size,
+modernity, recognisable tappability, adequate touch target size.
 
 ## 7. Mobile UX
-Thumb-Reachability, Einhand-Bedienung, Informationsdichte, erkennbares
-Scroll-Verhalten, Priorisierung. Suche: unnötige Schritte, schlechte Platzierung
-wichtiger Aktionen, ergonomische Probleme.
+Thumb reachability, one-handed operation, information density, recognisable
+scroll behaviour, prioritisation. Look for: unnecessary steps, poor placement of
+key actions, ergonomic issues.
 
 ## 8. Accessibility
-Farbkontraste (qualitativ, gegen WCAG 2.2 als Maßstab), Schriftgrößen, Touch-Target-
-Größe, Lesbarkeit, soweit aus dem Bild ableitbar auch Screenreader-Tauglichkeit
-(reine Icon-Buttons ohne Label etc.). Kontrast nie als exakte Ratio behaupten.
+Colour contrasts (qualitative, using WCAG 2.2 as reference), font sizes, touch
+target size, legibility, and — where derivable from the image — screen-reader
+suitability (icon-only buttons without labels, etc.). Never state contrast as an
+exact ratio.
 
-## 9. Design-System-Konsistenz (innerhalb des Screens)
-Inkonsistenzen *innerhalb dieses einen Screens*: abweichende Rundungen, Schatten,
-Größen, Abstände, doppelte Komponenten-Varianten. **Cross-Screen-Konsistenz gehört
-NICHT hierher** — die beurteilt der Orchestrator in der Synthese.
+## 9. Design System Consistency (within this screen)
+Inconsistencies *within this one screen*: deviating corner radii, shadows, sizes,
+spacing, duplicate component variants. **Cross-screen consistency does NOT belong
+here** — the orchestrator assesses that in the synthesis.
 
-## 10. Informationsarchitektur
-Verständlichkeit, Gruppierungen, Reihenfolgen, mentale Modelle. Leitfrage:
-„Versteht die Zielgruppe sofort, was hier passiert?"
+## 10. Information Architecture
+Comprehensibility, groupings, ordering, mental models. Key question:
+"Does the target audience immediately understand what is happening here?"
 
-## 11. Zielgruppen-Fit
-Passt der Screen zur im Briefing definierten Zielgruppe? Bewerte Sprache,
-Komplexität, Informationsdichte, Farbwahl, Emotionalität, Professionalität. Erkläre
-jede Abweichung. Ist die Zielgruppe `UNBEKANNT`, überspring diesen Bereich und
-vermerk das — rate nicht.
+## 11. Audience Fit
+Does the screen match the target audience defined in the briefing? Assess language,
+complexity, information density, colour choice, emotionality, professionalism.
+Explain every deviation. If the target audience is `UNKNOWN`, skip this area and
+note it — do not guess.
 
-## 12. Emotionale Wirkung
-Welche Wirkung transportiert der Screen (modern / altmodisch / technisch /
-freundlich / vertrauenswürdig / hochwertig / billig / professionell / verspielt)?
-Passt sie zum App-Zweck?
+## 12. Emotional Effect
+What effect does the screen convey (modern / dated / technical / friendly /
+trustworthy / premium / cheap / professional / playful)? Does it match the app's
+purpose?
 
-## 13. Flutter-spezifische Qualität
-Anzeichen für: unangepasste Standard-Widgets, Material-3-Inkonsistenzen,
-inkonsistente AppBars, schwache Responsive-Anpassung, typische Flutter-Anti-Patterns
-(z.B. Default-Purple, uniformer 16er-Radius, generische Default-Schrift). Nur
-anwenden, wenn das Briefing Flutter als Stack ausweist; sonst überspringen.
+## 13. Flutter-Specific Quality
+Signs of: unstyled default widgets, Material 3 inconsistencies, inconsistent
+AppBars, weak responsive adaptation, typical Flutter anti-patterns (e.g.
+default purple, uniform 16-radius, generic default font). Apply only if the
+briefing declares Flutter as the stack; otherwise skip.

@@ -52,11 +52,11 @@ For every term or formulation in question, present:
 | **Recommendation** | your preferred option and why |
 | **Decision needed** | explicit yes/no question for the user |
 
-## Sprache
+## Language
 
-CONTEXT.md wird **auf Deutsch** verfasst — Begriffe, Definitionen, Entscheidungen, Erläuterungen.
-Technische Bezeichner (Klassen-, Methoden-, Feldnamen) bleiben im Original (meist Englisch), werden aber auf Deutsch erklärt.
-Niemals auf Englisch wechseln, auch wenn eine Formulierung auf Englisch präziser wirkt — finde stattdessen das deutsche Äquivalent und halte die Präzision durch Kontext.
+The CONTEXT.md artifact is authored **in German** — terms, definitions, decisions, explanations. This is a deliberate domain choice, not a default: the project's domain language is German, so the glossary must be too.
+Technical identifiers (class, method, field names) stay in their original form (usually English) but are explained in German.
+Never switch to English, even when an English phrasing feels more precise — find the German equivalent instead and carry the precision through context.
 
 ## Hard rules — never bypass
 

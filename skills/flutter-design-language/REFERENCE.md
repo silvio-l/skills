@@ -1,102 +1,103 @@
-# Flutter Design Language — Referenz
+# Flutter Design Language — Reference
 
-Belegt durch Anthropics `frontend-design`-Skill + Cookbook und eine verifizierte
-Deep-Research (Stand Juni 2026). Quellen am Ende.
+Backed by Anthropic's `frontend-design` skill + Cookbook and a verified
+deep-research (as of June 2026). Sources at the end.
 
-## Slop-Checkliste (Gate — das alles vermeiden)
+## Slop Checklist (Gate — avoid all of this)
 
-Der verifizierte „AI-Design-Fingerabdruck":
+The verified "AI design fingerprint":
 
-- [ ] **Kein Default-Indigo/Purple** (`#4F46E5`, `bg-indigo-500` & Verwandte). Das ist
-      der vererbte Tailwind-UI-Button-Default — das verräterischste Slop-Signal.
-- [ ] **Keine Default-Fonts:** Inter, Roboto, Poppins, Open Sans, Lato, System-Sans
-      ohne anderen Grund. (Anthropic-Cookbook verbietet diese explizit.)
-- [ ] **Kein uniformer 16px-Radius** auf allem. Radien bewusst variieren.
-- [ ] **Keine reflexhafte zentrierte Hero + ein lila CTA.**
-- [ ] **Kein Drei-Icon-Feature-Grid** als Default-Struktur.
-- [ ] **Keine zaghafte Palette** (alles entsättigtes Grau-Blau), keine blassen
-      Alibi-Schatten, kein Glassmorphism-Overkill, keine Emoji-Bullets.
+- [ ] **No default indigo/purple** (`#4F46E5`, `bg-indigo-500` and relatives). This is
+      the inherited Tailwind UI button default — the most tell-tale slop signal.
+- [ ] **No default fonts:** Inter, Roboto, Poppins, Open Sans, Lato, System-Sans
+      without another reason. (Anthropic Cookbook forbids these explicitly.)
+- [ ] **No uniform 16px radius** on everything. Vary radii deliberately.
+- [ ] **No reflexive centred Hero + a purple CTA.**
+- [ ] **No three-icon feature grid** as default structure.
+- [ ] **No timid palette** (everything desaturated grey-blue), no wan alibi shadows,
+      no glassmorphism overkill, no emoji bullets.
 
-Plus die drei Cluster, die der `frontend-design`-SKILL.md nennt (auch Defaults):
-(1) Creme `#F4F1EA` + High-Contrast-Serif + Terracotta;
-(2) Near-Black + ein Acid-Green/Vermilion-Akzent;
-(3) Broadsheet-Layout mit Haarlinien, Zero-Radius, dichten Zeitungsspalten.
-Legitim *wenn der Brief sie verlangt* — sonst freie Achsen nicht damit füllen.
+Plus the three clusters that `frontend-design`'s SKILL.md names (also defaults):
+(1) Cream `#F4F1EA` + high-contrast serif + terracotta;
+(2) near-black + one acid-green/vermilion accent;
+(3) broadsheet layout with hairlines, zero radius, dense newspaper columns.
+Legitimate *if the brief calls for them* — otherwise never fill free axes with them.
 
-## Typografie
+## Typography
 
-Anthropics Drei-Teile-Strategie: **(a) jede Dimension einzeln führen, (b) Referenzen
-nennen, (c) Defaults verbieten.** Für Fonts heißt das konkret:
+Anthropic's three-part strategy: **(a) lead each dimension separately, (b) name
+references, (c) ban defaults.** For fonts that means concretely:
 
-- **Meiden:** Inter, Roboto, Poppins, Open Sans, Lato, System-Default.
-- **Charakter-Schriften (Beispiele):** Display — Fraunces, Playfair Display, Clash
+- **Avoid:** Inter, Roboto, Poppins, Open Sans, Lato, System-Default.
+- **Character fonts (examples):** Display — Fraunces, Playfair Display, Clash
   Display, Bricolage Grotesque, Space Grotesk; Body — DM Sans, Spline Sans, Satoshi,
   Mulish; Mono/Utility — JetBrains Mono, Space Mono.
-- In Flutter via `google_fonts` (schnell) oder gebündelte Asset-Fonts (offline,
-  Free-Tier-freundlich, keine Laufzeit-Fetches). Bewusstes Display+Body-Pairing,
-  klare Skala mit intentionalen Gewichten.
+- In Flutter via `google_fonts` (fast) or bundled asset fonts (offline,
+  free-tier-friendly, no runtime fetches). Deliberate Display+Body pairing,
+  clear scale with intentional weights.
 
-## Farbe in Flutter (jenseits Seed-Purple)
+## Colour in Flutter (beyond seed-purple)
 
-`ColorScheme.fromSeed(seedColor: …)` nimmt **nur einen** Seed — secondary/tertiary sind
-bloße Overrides. Zwei bessere Wege:
+`ColorScheme.fromSeed(seedColor: …)` takes **only one** seed — secondary/tertiary are
+mere overrides. Two better approaches:
 
-1. **`flex_seed_scheme`** (`SeedColorScheme.fromSeeds`): mehrere **Schlüsselfarben**
-   (primaryKey/secondaryKey/tertiaryKey) + ein **`FlexTones`-Preset**
-   (`vivid`/`soft`/`highContrast`/`chroma`/…) → eine Palette mit Charakter statt
-   Ein-Seed-Monokultur. Light + Dark aus denselben Keys.
-2. **Hand-autorisiertes `ColorScheme`** aus der bewussten 4–6-Hex-Palette
-   (`ColorScheme.light()/dark().copyWith(...)`), wenn die Markenfarben exakt sitzen sollen.
+1. **`flex_seed_scheme`** (`SeedColorScheme.fromSeeds`): multiple **key colours**
+   (primaryKey/secondaryKey/tertiaryKey) + a **`FlexTones` preset**
+   (`vivid`/`soft`/`highContrast`/`chroma`/…) → a palette with character instead of
+   single-seed monoculture. Light + Dark from the same keys.
+2. **Hand-authorised `ColorScheme`** from the deliberate 4–6-hex palette
+   (`ColorScheme.light()/dark().copyWith(...)`), when brand colours must be exact.
 
-Radius/Elevation/Motion/Sonderfarben, die nicht in `ColorScheme` passen → als
-`ThemeExtension` registrieren (z.B. `AppRadius`, `AppElevation`, Brand-Akzente).
+Radius/elevation/motion/special colours that don't fit `ColorScheme` → register as a
+`ThemeExtension` (e.g. `AppRadius`, `AppElevation`, brand accents).
 
-## Design-Tokens: drei Stufen, rollenbenannt
+## Design Tokens: three tiers, role-named
 
-Nach W3C-DTCG / Figma-Best-Practice (überlebt Rebrands):
+Per W3C DTCG / Figma best practice (survives rebrands):
 
-- **primitive** — Rohwerte ohne Bedeutung: `color.amber.500 = #C9892F`, `space.4 = 16`.
-- **semantic / `sys.*`** — **Rolle**, nicht Aussehen: `sys.color.brand`,
-  `sys.color.surface`, `sys.color.danger`. Aliassiert auf primitive.
-- **component** — komponentenspezifisch: `button.bg = sys.color.brand`.
+- **primitive** — raw values with no meaning: `color.amber.500 = #C9892F`, `space.4 = 16`.
+- **semantic / `sys.*`** — **role**, not appearance: `sys.color.brand`,
+  `sys.color.surface`, `sys.color.danger`. Aliased to primitives.
+- **component** — component-specific: `button.bg = sys.color.brand`.
 
-Benenne nie nach Aussehen (`color.purple`) — immer nach Rolle (`sys.color.brand`).
-`design_tokens_builder` macht aus `sys.*`-Tokens nativ `ColorScheme`/`TextTheme`;
-Light/Dark über Set-Suffixe. (Unsere MCP-native Variante: Figma-Variables zweistufig —
-eine *primitive*-Collection + eine *semantic*-Collection, die darauf aliasiert.)
+Never name by appearance (`color.purple`) — always by role (`sys.color.brand`).
+`design_tokens_builder` turns `sys.*` tokens natively into `ColorScheme`/`TextTheme`;
+Light/Dark via set suffixes. (Our MCP-native variant: Figma Variables two-tier —
+one *primitive* collection + one *semantic* collection aliased onto it.)
 
-## Figma-Seite
+## Figma Side
 
-- Zwei Variable-Collections: **Primitive** (Rohwerte) + **Semantic** (Rollen, aliasiert
-  auf Primitive). So bleibt ein Rebrand ein Edit an einer Stelle.
-- **Text Styles** für die Typo-Rollen (Display/Body/Utility) statt Ad-hoc-Größen — das
-  macht später das `figma-to-flutter`-Typo-Mapping exakt statt approximativ.
-- Components mit Charakter: das Signature-Element als echte Component.
+- Two variable collections: **Primitive** (raw values) + **Semantic** (roles, aliased
+  to Primitive). This keeps a rebrand a one-place edit.
+- **Text Styles** for typographic roles (Display/Body/Utility) rather than ad-hoc
+  sizes — this makes the later `figma-to-flutter` typography mapping exact rather than
+  approximate.
+- Components with character: the signature element as a real component.
 
-## Brief-Template (Phase 0, Schritt 2)
+## Brief Template (Phase 0, Step 2)
 
 ```
-Subjekt:      <was ist das konkret>
-Zielgruppe:   <wer nutzt es>
-Eine Aufgabe: <der eine Job des Haupt-Screens>
-Risiko:       <das eine begründete ästhetische Risiko>
+Subject:        <what this concretely is>
+Audience:       <who uses it>
+One job:        <the single job of the main screen>
+Risk:           <the one justified aesthetic risk>
 
-Color (4–6, benannt + Begründung):
-  <name> <#hex>  — <warum gehört das zum Subjekt>
+Color (4–6, named + justification):
+  <name> <#hex>  — <why this belongs to the subject>
 Type:
-  Display: <Schrift> — <Charakter>
-  Body:    <Schrift>
-  Utility: <Schrift/Mono, optional>
-Layout:   <ein Satz> + ASCII-Wireframe
-Signature: <das eine Memorable, kodiert etwas Wahres>
+  Display: <font> — <character>
+  Body:    <font>
+  Utility: <font/mono, optional>
+Layout:   <one sentence> + ASCII wireframe
+Signature: <the one memorable thing, encodes something true>
 
-Verworfene Defaults: <was du bewusst NICHT genommen hast und warum>
+Rejected defaults: <what you deliberately did NOT take and why>
 ```
 
-## Quellen
-- Anthropic `frontend-design` Skill (installiert) + Cookbook „Prompting for frontend
+## Sources
+- Anthropic `frontend-design` skill (installed) + Cookbook "Prompting for frontend
   aesthetics" (platform.claude.com/cookbook).
-- Deep Research Juni 2026: 925studios, monet.design, prg.sh (Slop-Fingerabdruck);
-  dev.to/alanwest (Tailwind `indigo-500`-Ursprung); flex_color_scheme / rydmike,
-  Flutter-API (ColorScheme/Seed); Figma design-tokens, W3C DTCG (Token-Tiers);
+- Deep Research June 2026: 925studios, monet.design, prg.sh (slop fingerprint);
+  dev.to/alanwest (Tailwind `indigo-500` origin); flex_color_scheme / rydmike,
+  Flutter API (ColorScheme/Seed); Figma design-tokens, W3C DTCG (token tiers);
   simpleclub/design_tokens_builder (`sys.*`→ThemeData).

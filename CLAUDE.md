@@ -66,7 +66,7 @@ edit here → git commit → git push → npx skills@latest update -g -y
    ```yaml
    ---
    name: <new-name>           # lowercase, hyphens; MUST match the directory name
-   description: <one paragraph, ≤ 250 chars HARD CAP; end with trigger phrases — see CONTEXT.md "Trigger pattern">
+   description: <English prose, ≤ 250 chars HARD CAP; end with trigger phrases (may be German) — see "Authoring language" and CONTEXT.md "Trigger pattern">
    ---
 
    # <Human Title>
@@ -87,6 +87,20 @@ For guidance on what makes a good skill (description shape, trigger phrases, sup
 - `metadata.*` — optional. Used for extra hints (e.g. `metadata.argument-hint` in `ratchet-up`).
 
 Frontmatter is currently checked by hand. If the skill count grows, add a small lint script and a CI job.
+
+## Authoring language (HARD RULE)
+
+**Skill documentation is written in English.** This is non-negotiable and applies to every new skill and every edit: `SKILL.md` (including the `description` prose), every supporting/phase/reference `.md` file, code comments inside scripts, and the skill's `README.md` block. The repo's baseline is English (this file, `README.md`, `ratchet-up`, `formats.md`); a German skill body is a defect to fix, not a style choice. Rationale: a skill must be readable by any agent or maintainer that picks it up, and mixed-language bodies fracture that.
+
+The user prompts in German and the *running* agent still talks to the user in German (per the global `~/.claude/CLAUDE.md` language rule) — that is conversation, not skill source, and is unaffected by this rule.
+
+Three deliberate carve-outs stay non-English (everything else is English):
+
+1. **Trigger phrases in the `description`.** German trigger phrases may — and should — be kept alongside the English ones, because the `description` is the auto-invoke router and the user phrases requests in German (e.g. `'Screens prüfen'`, `'Figma in Flutter umsetzen'`, `'sieht generisch / nach KI aus'`). The descriptive prose around them is still English.
+2. **Functional language data.** Content that *is* the skill's payload rather than its documentation stays in its native language — e.g. `humanize-text`'s German slop lexica, `seo-audit`'s German brand anti-vocabulary. These are data, not prose.
+3. **Deliberate German artifact/output mandates.** Where German is the skill's stated intent for what it *produces*, the mandate stays (phrased in English). Example: `domain-glossary` mandates that the `CONTEXT.md` artifact is authored in German because the project domain is German — the instruction is English, the mandated artifact language is German on purpose.
+
+When in doubt, ask: is this string *documentation* (→ English) or *payload/trigger/output* (→ may stay German)?
 
 ## Tooling and testing
 
