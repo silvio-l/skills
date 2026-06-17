@@ -74,6 +74,7 @@ mkdir -p "$feature_path/.ratchet-up/rework"
 | `deviations.md` | one-liners for `needs-info` / `needs-human` |
 | `test-notes.md` | raw gate failure output |
 | `config-resolved.md` | gate commands chosen by `gates.md` §1 |
+| `visual-report.md` | full output of the §15.4 batched visual pass (verdict-only flows back) |
 | `rework/<basename>.md` | transient: reviewer blockers → next worker |
 
 **Rule:** raw outputs, long logs, analyzer/test failure dumps go into these files — **never** into orchestrator context. Only one-line outcomes flow back to the orchestrator.
@@ -489,7 +490,7 @@ grep -rlE "^(Status:|- \*\*Status:\*\*) ready-for-agent" "$feature_path/issues/"
 grep -rLE "^(Status:|- \*\*Status:\*\*) done" "$feature_path/issues/" || true
 ```
 
-**A) All Done** — every issue file has `Status: done` and none have `ready-for-agent`, `needs-info`, or `needs-human` → proceed to §15.5, then §16, then §17.
+**A) All Done** — every issue file has `Status: done` and none have `ready-for-agent`, `needs-info`, or `needs-human` → proceed to §15.4 (batched visual pass), then §15.5, then §16, then §17.
 
 **B) Incomplete** — at least one issue is not `done` → print summary, **do not delete**, ask explicitly:
 
@@ -509,6 +510,33 @@ Möchtest du den Ordner <feature_path> trotzdem löschen? (ja/nein)
 ```
 
 Only delete if the user answers `ja` explicitly.
+
+---
+
+## §15.4 — Batched Visual Pass (frontend features only, runs on Branch A)
+
+Runs only when §15 classified the result as **All Done**. This is where a **heavy** capture path (simulator boot, full build, a discovered visual-QA command) pays off: one pass over the whole feature instead of a simulator boot per issue. Per-issue reviewers handle only cheap/code-level visual checks (`visual-review.md` tiers 1–2); tier 3 lives here.
+
+1. **Find the UI surfaces touched across the whole run.** Use the baseline SHA recorded in §3:
+
+   ```bash
+   git diff --name-only <baseline_sha>..HEAD
+   ```
+
+   Classify the result for UI surfaces per `gates.md` §2.5. If **none**, skip §15.4 silently (this feature touched no UI) and continue to §15.5.
+
+2. **Resolve the capture path** from `config-resolved.md` `visual:` line (resolved in `gates.md` §1.5):
+   - `visual: skip` → log `visual batched pass skipped (config: skip)`; continue to §15.5.
+   - `visual: auto` with no cheap path → log `visual batched pass skipped (no capture path)`, add a one-line follow-up to the §16 summary (e.g. *"set `visual:` to your screenshot command to enable visual verification"*); continue to §15.5.
+   - a `visual: <command>` (cheap or `[heavy]`) **or** `auto` with a cheap path available → run **one** pass (next step).
+
+3. **Run one visual pass.** Spawn a single read-only agent (`subagent_type: Explore`, `model: claude-sonnet-4-6` — set explicitly; never inherit Opus) over the **union** of touched UI surfaces. Give it `visual-review.md` as its protocol (expectation resolution + grading), the resolved `visual:` command, the touched surfaces, and the relevant issues' declared `## Visual expectations`. It may run the heavy command **once**, capture a handful of screenshots, compare against declared expectations + sibling precedent, and must tear down anything it launched. Write its full output to `<feature>/.ratchet-up/visual-report.md` — **never** into orchestrator context; keep only the one-line verdict + any blocker locators.
+
+4. **Act on the verdict:**
+   - **No blockers** → log `visual batched pass: ok`; keep Branch A; continue to §15.5. Fold suggestions into §16.
+   - **Blockers** (declared-expectation violation, sibling divergence, or objective render defect) → for each affected issue (map by screen/surface; if unmappable, attach to the most relevant committed issue), `persist_rework_feedback` (§9 format, source = `visual batched pass`) and set that issue back to `Status: ready-for-agent`, `rework_count += 1` (bounded by `rework_limit`; over the limit → `needs-human`). This **downgrades the result to Branch B (Incomplete)**: do **not** clean up, print the summary, and instruct the user to re-run `/ratchet-up <feature>` so the next worker fixes the visual blockers with the persisted feedback. Skip §15.5 (Sprint stays `in-progress`).
+
+Rationale: a heavy capture path that boots a simulator is real but expensive — batching it once at feature-end is the resource-efficient tier (the HellerIO `visual-qa` case). Per-issue reviewers never boot it; this pass does, exactly once.
 
 ---
 
@@ -561,6 +589,10 @@ Print a compact markdown summary:
 ## Gate mode
 - format / analyze / test commands actually used (or `skipped`)
 - quick-path hits: <count>
+
+## Visual pass
+- batched visual pass: <ok | skipped (reason) | blockers → N issue(s) reopened | n/a (no UI touched)>
+- capture path: <command | auto | skip>
 
 ## Roadmap
 - linked sprint: <sprint-id> | none | (no roadmap)

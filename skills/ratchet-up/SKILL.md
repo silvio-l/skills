@@ -19,7 +19,7 @@ The skill is **project-agnostic** and works on the **active branch** (typically 
 
 | Concern | File |
 |---|---|
-| Step-by-step state machine (§1–§17, incl. roadmap hooks §3.5 + §15.5) | [algorithm.md](algorithm.md) |
+| Step-by-step state machine (§1–§17, incl. roadmap hooks §3.5 + §15.5, batched visual pass §15.4) | [algorithm.md](algorithm.md) |
 | Project detection, gate, commit, quick-path | [gates.md](gates.md) |
 | Issue contract, synonyms, status transitions | [formats.md](formats.md) |
 | Worker prompt template | [worker.md](worker.md) |
@@ -37,7 +37,7 @@ Read the file you need when you need it. SKILL.md is the always-on layer — kee
 - Never load full issue contents into orchestrator context — pass them only to the assigned worker/reviewer.
 - Treat every issue as a small, independently verifiable slice.
 - Gate format/analyze **before** the reviewer — fail fast, save a sub-agent.
-- For **frontend diffs only** (UI surfaces touched, per `gates.md` §2.5), the reviewer additionally verifies the rendered result against the plan's declared visual expectations — in-spawn, capture only via a cheap already-available path, skip silently when none exists. Backend diffs pay nothing. See `visual-review.md`.
+- For **frontend diffs only** (UI surfaces touched, per `gates.md` §2.5), the reviewer additionally verifies the rendered result against the plan's declared visual expectations. Three tiers, cheapest first: (1) screenshot-free **code-level** checks incl. sibling-component comparison — always; (2) **cheap capture** (running session, goldens, installed browser) per-issue in the reviewer spawn; (3) **heavy capture** (simulator boot / full build / discovered visual-QA command) is *never* run per-issue — it is batched into **one** pass at feature-end (`algorithm.md` §15.4). Backend diffs pay nothing; when no capture path exists the step skips with a suggestion, never a blocker. See `visual-review.md`.
 - Skip the gate for doc-only diffs (quick-path) — don't burn `flutter analyze` on a CHANGELOG bump.
 - Run the cheap Evidence pre-check **before** the gate — catches the most common worker miss in milliseconds.
 - Commit only after the reviewer approves; one commit per issue.
@@ -64,7 +64,7 @@ A single issue is **DONE** only when **all** of the following hold. Worker self-
 9. The issue file contains a worker-supplied **Evidence block** (see `worker.md` § Mandatory Evidence block).
 10. The reviewer found no blockers and explicitly returned `APPROVED:`.
 11. Exactly one commit produced (or `no changes` recorded if the issue is documentation-only and that is explicitly the expected outcome).
-12. **Frontend issues only** — if the diff touched a UI surface **and** the issue declared visual expectations (`## Visual expectations` / Figma / design tokens), the reviewer's Visual Verification confirmed the rendered result matches them. Does not apply to backend issues, to UI diffs with no declared visual expectation, or when no cheap capture path exists (then it is a recorded suggestion, not a gate).
+12. **Frontend issues only** — if the diff touched a UI surface **and** a visual expectation exists (declared in the issue, or set by precedent in a sibling component, or in the project design language), the visual verification confirmed the rendered result matches it — per-issue for cheap/code-level checks, and via the batched §15.4 pass for heavy capture paths. Does not apply to backend issues, to UI with no expectation source, or when no capture path exists at all (then it is a recorded suggestion, not a gate). A batched-pass visual blocker reopens the affected issue (it is not "done").
 
 A task that fails any of these is **not done**, regardless of how the worker self-rates the result.
 
@@ -96,7 +96,8 @@ feature_marker: "/.scratch/"   # feature_path must contain this substring
 | `.scratch/roadmap.md` exists at repo root | `algorithm.md` §3.5: read/ask for `<feature>/.roadmap-sprint`, flip linked Sprint `todo → in-progress` |
 | Choosing gate commands | `gates.md` §1 (override → CLAUDE.md → auto-detect) |
 | Worker returned `DONE:` | Run `scripts/check-evidence.sh`, then gate (`gates.md` §3 — quick-path if diff is doc-only) |
-| Diff touches a UI surface | Classify `{{UI_DIFF}}` (`gates.md` §2.5); reviewer runs visual verification (`visual-review.md`) |
+| Diff touches a UI surface | Classify `{{UI_DIFF}}` (`gates.md` §2.5); reviewer runs visual verification (`visual-review.md`, tiers 1–2) |
+| All issues `done` and any UI was touched | `algorithm.md` §15.4: one batched visual pass (tier 3, heavy capture) before §15.5 |
 | Reviewer returned `REWORK:` | `persist_rework_feedback` (`algorithm.md` §9), then re-queue |
 | Reviewer output malformed | Retry **once**, then escalate to `needs-human` (`algorithm.md` §7) |
 | All issues `done` | Verify (`algorithm.md` §15) → roadmap status to `done` (§15.5, if linked) → summary (§16) → cleanup (§17) |

@@ -48,6 +48,28 @@ Worker and reviewer load this file via Read; the orchestrator passes its full co
 
 ---
 
+## 1.5 Resolving the `visual` command (discovery + heavy detection)
+
+Run once, only when `visual` is `auto` or absent (an explicit command or `skip` is used verbatim). The point: real frontend projects usually *have* a screenshot path — it is just not a running session or golden test. Discover it so the batched visual pass (`algorithm.md` §15.4) can use it, instead of silently skipping.
+
+**Discovery — first hit wins:**
+
+1. `CLAUDE.md` — a "Visual" / "Screenshots" / "Visual QA" command line (same extraction as the Commands section in §1.2).
+2. `package.json` `scripts` — a key matching `visual*`, `screenshot*`, `*visual-qa*`, `storybook:*test*`, or `chromatic`.
+3. A repo script — `tool/visual_qa.dart`, `scripts/visual-qa*`, `bin/screenshots*`, a `Makefile` target named `visual`/`screenshots`, or an `integration_test/` screenshot driver.
+4. Nothing found → keep `visual: auto` (reviewer falls back to its own cheap probe and otherwise skips).
+
+**Heavy detection.** Tag a discovered (or explicit) command `[heavy]` when it boots a simulator/emulator or does a full build — heuristics: the command or the script it calls mentions `simulator`, `emulator`, `flutter run`, `flutter drive`, `integration_test`, `xcrun simctl`, `adb`, `playwright` with a full app build, or a `build` step. A fast headless screenshot (`shot-scraper`, a golden run, a pre-built-dist screenshot) is **not** heavy.
+
+**Persist** the result into `config-resolved.md` (see §1.4):
+
+- `visual: <command> [heavy]` — discovered/explicit heavy path → the per-issue reviewer defers it; the §15.4 batched pass runs it once.
+- `visual: <command>` — discovered/explicit cheap path → the per-issue reviewer may run it.
+- `visual: auto` — nothing discovered → reviewer best-effort cheap probe, else skip.
+- `visual: skip` — opted out.
+
+---
+
 ## 2. Quick-Path Heuristic (skip format/analyze for doc-only issues)
 
 After a worker returns `DONE:` and **before** running the format/analyze gate, classify the diff:
