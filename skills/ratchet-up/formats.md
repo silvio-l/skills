@@ -31,7 +31,9 @@ grep -iE "^## Blocked by$" "$issue_path"
 
 If any required row has zero matches → set the issue to `needs-info`, log a one-liner in `deviations.md`, skip the worker. This is the cheapest way to avoid wasting a full Worker+Reviewer cycle on under-specified issues.
 
-Optional sections (no gate failure if absent): `## Scope`, `## Verification`, `## Out of scope`, `## Triage Notes`, `## Parent`, `## Phase`.
+Optional sections (no gate failure if absent): `## Scope`, `## Verification`, `## Out of scope`, `## Triage Notes`, `## Parent`, `## Phase`, `## Visual expectations` (or `## Design reference`).
+
+**`## Visual expectations` / `## Design reference`** — optional, for frontend issues. Anything the reviewer's Visual Verification step (`visual-review.md`) can check a screenshot against: a Figma node-id/URL, named design tokens, spacing/typography rules, required component states, or a path to a mockup in the feature dir. Declaring it here is what turns a visual deviation into a **BLOCKER** rather than a SUGGESTION — without a declared expectation the reviewer only flags objective rendering defects (overflow, clipped text, broken contrast). No gate failure if absent.
 
 ---
 

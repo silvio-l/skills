@@ -8,13 +8,16 @@ Orchestrator-only. Resolves which shell commands to run for `format`, `analyze`,
 
 Run once at the start of every `/ratchet-up` invocation. First hit wins.
 
-**1.1 Per-feature override** — `<feature_path>/.ratchet-up/config.yaml`. Keys: `format`, `analyze`, `test`. Each is a shell command line, or the literal `skip` to disable that gate.
+**1.1 Per-feature override** — `<feature_path>/.ratchet-up/config.yaml`. Keys: `format`, `analyze`, `test`, and the optional `visual`. Each is a shell command line, or the literal `skip` to disable. `visual` also accepts `auto` (the default when the key is absent).
 
 ```yaml
 format: "dart format ."
 analyze: "flutter analyze --fatal-infos --fatal-warnings"
 test: "flutter test"
+visual: "auto"   # auto = best-effort cheap capture; a command = sanctioned capture; skip = no screenshots
 ```
+
+`visual` is the reviewer's cost knob for the conditional Visual Verification step (`visual-review.md`). It only ever matters when the diff touched a UI surface (§2.5); for backend-only diffs it is irrelevant. `auto` lets the reviewer probe for an already-running app / golden tests / an installed headless-browser CLI and skip if none is cheap; a command pins one sanctioned capture path; `skip` disables visual capture entirely.
 
 **1.2 Repo `CLAUDE.md`** — grep for a "Commands" / "Quality gates" / "Quality gates before commit" section, extract the format / analyze / test lines verbatim. Examples that should be copied as-is: `flutter analyze --fatal-infos`, `npm run typecheck`, `pnpm test`, `cargo clippy --all-targets -- -D warnings`, `go vet ./...`.
 
@@ -38,6 +41,7 @@ If detection fails entirely, log a one-liner to `run-log.md`, set all three to `
 format: dart format .
 analyze: flutter analyze --fatal-infos --fatal-warnings
 test: flutter test
+visual: auto
 ```
 
 Worker and reviewer load this file via Read; the orchestrator passes its full content as `{{GATE_COMMANDS}}`.
@@ -67,6 +71,24 @@ If doc-only:
 **Mixed diff** (code + docs) or **code-only** → full gate per §3 below.
 
 The reviewer always knows the gate mode via the line in `run-log.md` and can re-run any check itself.
+
+---
+
+## 2.5 UI-surface detection (cheap hint for the reviewer's visual step)
+
+After classifying the gate mode and **before** spawning the reviewer (§9), classify the same `git diff --name-only HEAD` output a second way: does it touch a **UI surface**? This is a millisecond glob check — no app launch, no extra agent.
+
+A changed file is a UI surface when it matches the project's frontend conventions, e.g.:
+
+- **Flutter:** `.dart` under `lib/` whose path or name signals UI — `**/widgets/**`, `**/screens/**`, `**/pages/**`, `**/views/**`, `**/components/**`, `*_screen.dart`, `*_page.dart`, `*_view.dart`, `*_widget.dart` — plus theme/token files (`**/theme/**`, `**/design*/**`).
+- **Web:** `.html`, `.css`, `.scss`, `.vue`, `.svelte`, `.astro`, and `.tsx`/`.jsx` under a UI directory (`**/components/**`, `**/pages/**`, `**/routes/**`, `**/views/**`).
+
+Produce the `{{UI_DIFF}}` value the orchestrator passes to the reviewer:
+
+- **No UI surface touched** → `{{UI_DIFF}}` = `none`. The reviewer skips visual verification at zero cost.
+- **One or more touched** → `{{UI_DIFF}}` = the matching paths (one per line). The reviewer loads `visual-review.md`.
+
+When unsure whether a path is a UI surface, **err toward `none`** — a missed visual check is cheaper than burning capture infrastructure on a false positive. The reviewer's protocol degrades safely either way (it skips when no cheap capture path exists).
 
 ---
 

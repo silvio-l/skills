@@ -373,12 +373,14 @@ git diff --name-only
 
 The reviewer inspects files and diff directly via its own tools.
 
+Classify the same `git diff --name-only` output for **UI surfaces** per `gates.md` §2.5 (a cheap glob — no app launch). Set `{{UI_DIFF}}` to the matching paths (one per line), or the literal `none` if the diff touched no UI surface. This is the on/off switch for the reviewer's visual step; `none` keeps the visual path at zero cost.
+
 Spawn via `Agent` with `subagent_type: Explore` (read-only):
 
 - `description`: `"Review: <issue_filename>"`
 - `model`: `claude-sonnet-4-6` — review needs cross-file reasoning, but set it explicitly so it never inherits Opus from the orchestrator.
 
-Prompt variables: `{{ISSUE_PATH}}`, `{{ISSUE_CONTENT}}`, `{{FEATURE_PATH}}`, `{{GATE_COMMANDS}}`, `{{GATE_RESULT}}`, `{{CHANGED_FILES}}`, `{{DIFF_STAT}}`.
+Prompt variables: `{{ISSUE_PATH}}`, `{{ISSUE_CONTENT}}`, `{{FEATURE_PATH}}`, `{{GATE_COMMANDS}}`, `{{GATE_RESULT}}`, `{{CHANGED_FILES}}`, `{{DIFF_STAT}}`, `{{UI_DIFF}}`.
 
 `{{GATE_RESULT}}` is the literal output line from §10 — e.g. `gate ok`, `gate ok (quick-path: doc-only)`, or `gate skipped`. The reviewer **trusts** this result and does not re-run the heavy gate commands; it may only run `--check`-form spot probes if it has a concrete suspicion.
 

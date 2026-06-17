@@ -1,6 +1,6 @@
 # Reviewer Prompt Template
 
-Use this template after each worker completes. Substitute `{{ISSUE_PATH}}`, `{{ISSUE_CONTENT}}`, `{{FEATURE_PATH}}`, `{{GATE_COMMANDS}}`, `{{GATE_RESULT}}`, `{{CHANGED_FILES}}`, and `{{DIFF_STAT}}` before spawning.
+Use this template after each worker completes. Substitute `{{ISSUE_PATH}}`, `{{ISSUE_CONTENT}}`, `{{FEATURE_PATH}}`, `{{GATE_COMMANDS}}`, `{{GATE_RESULT}}`, `{{CHANGED_FILES}}`, `{{DIFF_STAT}}`, and `{{UI_DIFF}}` before spawning.
 
 The orchestrator spawns this agent with `subagent_type: Explore` (read-only, optimised for inspection).
 
@@ -27,6 +27,8 @@ You are a **read-only** agent. Use only these tools:
 - `Bash` — only for non-mutating commands: `git diff`, `git diff --stat`, `git show`, `git log`, and **light** non-mutating probes (see "Gate trust" below).
 
 You **must not** use `Edit`, `Write`, `NotebookEdit`, or any tool that mutates files. You **must not** call git commands that change state (`git add`, `git commit`, `git checkout`, `git reset`, `git stash`, `git push`, …). If you discover a problem that requires a code change, return `REWORK:` with the precise instruction — do not "just fix it".
+
+**One scoped carve-out:** if `{{UI_DIFF}}` is non-empty, the Visual Verification step (below) may additionally probe for an already-running app/dev server and capture screenshots via tooling the project already provides — strictly read-only on source, with hard resource limits. The details and limits live in `visual-review.md`; do not improvise beyond them.
 
 If you accidentally modify a file, return `ERROR:` and stop — the orchestrator will treat the run as invalid.
 
@@ -65,6 +67,12 @@ Diff stat:
 {{DIFF_STAT}}
 
 You may inspect the full diff and individual files yourself via your tools — the orchestrator deliberately did not paste the full diff into context. Pull only what you need.
+
+## UI surfaces touched by this diff
+
+{{UI_DIFF}}
+
+If this is `none`, **skip visual verification entirely** — do not probe, do not screenshot, spend zero tokens on it. If it lists UI surfaces (Flutter widgets/screens, web routes/components/styles), run the **Visual Verification** protocol in `visual-review.md` as part of your review. Read that file only in this case. It tells you how to capture cheaply, what to compare against, and how a visual finding is graded (a declared visual expectation that is unmet → BLOCKER; pure polish → SUGGESTION; inability to capture → SUGGESTION, never a blocker).
 
 ## Mandatory Gates (all must pass)
 
@@ -109,6 +117,7 @@ Walk these in order. Cite `path/file:NN` for every blocker.
 - Every acceptance criterion fully met (no partial implementations, no workarounds).
 - Edge cases (null/empty/invalid) handled per spec.
 - No stale TODOs, debug prints, or commented-out code in the diff.
+- **If `{{UI_DIFF}}` is non-empty:** run the Visual Verification protocol (`visual-review.md`) and fold its findings into the blocker/suggestion lists below.
 
 **2. Tests & TDD verification** (highest weight after correctness)
 - Mirror test file exists for every new unit of logic (when TDD applies).

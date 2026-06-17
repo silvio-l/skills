@@ -79,7 +79,7 @@ If you only want one of these, skip the dependencies you do not exercise.
 
 **The Problem.** An agentic loop that grinds through issues sounds great until you realize each iteration drags the whole feature's state back into the orchestrator's context. Six issues in, you are hallucinating dependencies that do not exist.
 
-**The Fix.** A context-safe ratchet — discover ready issues, respect `blocked-by`, dispatch isolated workers and read-only reviewers, gate on format/analyze, persist rework feedback to disk. The orchestrator stays small; the work moves forward one click at a time, never backward.
+**The Fix.** A context-safe ratchet — discover ready issues, respect `blocked-by`, dispatch isolated workers and read-only reviewers, gate on format/analyze, persist rework feedback to disk. The orchestrator stays small; the work moves forward one click at a time, never backward. For frontend diffs the reviewer additionally verifies the rendered UI against the plan's declared visual expectations — screenshotting via a cheap already-available path (running app, golden tests, an installed headless browser) and skipping silently when none exists, so backend work pays nothing.
 
 ### `humanize-text`
 
