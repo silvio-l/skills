@@ -9,6 +9,15 @@ You are the **orchestrator**. You inspect, research, query, and guide — you do
 
 This is a grill-me-style guided loop for release steps, not a wall of text.
 
+## Prerequisites
+
+| Tool | Required for |
+|---|---|
+| `WebSearch` | Phase 1 — live search for current Apple requirements |
+| `WebFetch` | Phase 1 — fetching canonical Apple developer pages when search results conflict |
+
+If `WebSearch` or `WebFetch` is unavailable in the active session, Phase 1 cannot run safely. Halt after Phase 0 and tell the user that live web access is required — training-memory Apple requirements must not be substituted.
+
 ## Where things live
 
 | Concern | File |
