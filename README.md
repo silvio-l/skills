@@ -99,6 +99,12 @@ If you only want one of these, skip the dependencies you do not exercise.
 
 **The Fix.** Three operations on `.scratch/roadmap.md`: `create` decomposes the idea document into ~100k-token sprints with stable Sprint-IDs, dependencies, MVP cut, and later-release ordering; `update` patches the roadmap surgically from a free-text instruction with a diff-plan-then-confirm flow; `status` flips a sprint through `todo → in-progress → done`, called manually or automatically by `ratchet-up` at the start and end of a loop. One sprint at a time later becomes one PRD via `/to-prd`.
 
+### `ship-to-appstore`
+
+**The Problem.** Publishing a Flutter app to the Apple App Store is a long, error-prone path with many interdependent steps — bundle ID, certificates, provisioning, versioning, archive, upload, TestFlight, store metadata, privacy labels, age rating, export compliance, review submission. Apple changes requirements continuously (minimum Xcode/SDK versions, screenshot sizes, privacy rules), so even a correct guide from six months ago can be wrong today. The solo-dev gets lost in Apple's documentation, misses mandatory steps, and never knows exactly where in the process they stand.
+
+**The Fix.** An interactive, step-by-step guided release skill — grill-me style for release steps, not a wall of text. Phase 0 runs a deterministic introspection script that reads `pubspec.yaml` and the iOS project to extract a structured situation report (bundle ID, marketing version, build number, Team ID, signing style, icon-set completeness, launch assets) and aborts cleanly on non-Flutter repos. Phase 1 web-searches for current Apple requirements before suggesting any step — nothing from training memory. Phase 2 discovers ASC credentials from the repo/environment and queries the live app record. Phase 3 presents one release step at a time, waits for "done" or "stuck here", and only advances when the user confirms.
+
 ### `flutter-design-language`
 
 **The Problem.** A Figma→Flutter pipeline is only as good as the design it carries. Pointed at no deliberate design language, it produces cleanly-packaged slop: the inherited Tailwind `#4F46E5` indigo, default Roboto/Inter, a uniform 16px radius on everything, a centred hero + one purple CTA. The tooling is fine; the taste is missing — and once the tokens exist, the slop is baked in.

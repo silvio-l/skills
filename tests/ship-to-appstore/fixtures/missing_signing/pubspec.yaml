@@ -1,0 +1,14 @@
+name: missing_signing_app
+description: A Flutter app missing signing config.
+version: 2.0.0+10
+publish_to: 'none'
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true

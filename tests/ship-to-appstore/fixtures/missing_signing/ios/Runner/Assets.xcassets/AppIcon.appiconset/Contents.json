@@ -1,0 +1,14 @@
+{
+  "images": [
+    {
+      "idiom": "iphone",
+      "scale": "2x",
+      "size": "20x20",
+      "filename": "icon_20@2x.png"
+    }
+  ],
+  "info": {
+    "author": "xcode",
+    "version": 1
+  }
+}

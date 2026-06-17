@@ -1,0 +1,240 @@
+#!/usr/bin/env python3
+"""Phase 0 introspection for ship-to-appstore.
+
+Reads pubspec.yaml and the iOS project to extract release-relevant facts
+and emits a structured JSON situation report to stdout.
+
+Usage:
+    phase0-introspect [<repo-path>]
+
+Arguments:
+    repo-path   Path to the Flutter repo root (default: current directory).
+
+Exit codes:
+    0  Flutter/iOS project detected; JSON situation report on stdout.
+    1  Not a Flutter/iOS project; warning on stderr, no JSON emitted.
+    2  Usage error.
+
+Output contract (JSON keys):
+    flutter_ios             bool  — always true on exit 0
+    app_display_name        str|null  — pubspec.yaml `name` field
+    marketing_version       str|null  — semver part of pubspec version (before `+`)
+    build_number            str|null  — build number part of pubspec version (after `+`)
+    bundle_id               str|null  — PRODUCT_BUNDLE_IDENTIFIER from pbxproj
+    team_id                 str|null  — DEVELOPMENT_TEAM from pbxproj (null if absent)
+    signing_style           str  — "automatic", "manual", or "unknown"
+    icon_set.complete       bool
+    icon_set.missing_sizes  list[str]  — descriptors for missing icon slots
+    icon_set.total_required int
+    icon_set.present        int
+    launch_assets.has_launch_screen_storyboard  bool
+    launch_assets.has_launch_image_assets       bool
+
+Security: this script never reads or emits credential secret contents
+(API keys, certificates, passwords). Team ID is an identifier, not a secret.
+Credential discovery is handled in a later phase (slice 03).
+"""
+
+import json
+import os
+import re
+import sys
+
+sys.dont_write_bytecode = True
+
+
+def _read_file(path: str) -> str | None:
+    """Read a text file; return None on any OSError."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def detect_flutter_ios(root: str) -> tuple[bool, str | None]:
+    """Return (is_flutter_ios, reason_if_not).
+
+    A project qualifies when:
+      1. pubspec.yaml exists in root, AND
+      2. pubspec.yaml contains a top-level 'flutter:' key (not just a dependency
+         reference — that rules out plain Dart CLI apps), AND
+      3. an ios/ directory exists alongside pubspec.yaml.
+    """
+    pubspec_path = os.path.join(root, "pubspec.yaml")
+    content = _read_file(pubspec_path)
+    if content is None:
+        return False, "pubspec.yaml not found"
+    # Look for a top-level `flutter:` key (at line start, possibly with trailing space).
+    if not re.search(r"^\s*flutter\s*:", content, re.MULTILINE):
+        return False, "pubspec.yaml found but no 'flutter:' key (looks like a plain Dart project)"
+    ios_dir = os.path.join(root, "ios")
+    if not os.path.isdir(ios_dir):
+        return False, "Flutter project detected but no ios/ directory (iOS target missing)"
+    return True, None
+
+
+def parse_pubspec(root: str) -> dict:
+    """Extract app_display_name, marketing_version, and build_number from pubspec.yaml."""
+    path = os.path.join(root, "pubspec.yaml")
+    content = _read_file(path) or ""
+    result: dict = {
+        "app_display_name": None,
+        "marketing_version": None,
+        "build_number": None,
+    }
+
+    m = re.search(r"^name:\s*(.+)$", content, re.MULTILINE)
+    if m:
+        result["app_display_name"] = m.group(1).strip()
+
+    m = re.search(r"^version:\s*(.+)$", content, re.MULTILINE)
+    if m:
+        raw = m.group(1).strip()
+        # Flutter version format: "1.2.3+42" where +42 is the build number.
+        if "+" in raw:
+            ver, build = raw.split("+", 1)
+            result["marketing_version"] = ver.strip()
+            result["build_number"] = build.strip()
+        else:
+            result["marketing_version"] = raw
+            result["build_number"] = None
+
+    return result
+
+
+def parse_pbxproj(root: str) -> dict:
+    """Extract bundle_id, team_id, and signing_style from project.pbxproj.
+
+    Uses first-match regex — sufficient for Flutter's standard project structure
+    where all build configurations share the same values.
+    """
+    pbxproj_path = os.path.join(root, "ios", "Runner.xcodeproj", "project.pbxproj")
+    result: dict = {
+        "bundle_id": None,
+        "team_id": None,
+        "signing_style": "unknown",
+    }
+    content = _read_file(pbxproj_path)
+    if content is None:
+        return result
+
+    m = re.search(r"PRODUCT_BUNDLE_IDENTIFIER\s*=\s*([^;]+);", content)
+    if m:
+        result["bundle_id"] = m.group(1).strip()
+
+    m = re.search(r"DEVELOPMENT_TEAM\s*=\s*([^;]+);", content)
+    if m:
+        val = m.group(1).strip()
+        # An empty assignment ("DEVELOPMENT_TEAM = ;") means not set.
+        result["team_id"] = val if val else None
+
+    m = re.search(r"CODE_SIGN_STYLE\s*=\s*([^;]+);", content, re.IGNORECASE)
+    if m:
+        result["signing_style"] = m.group(1).strip().lower()
+
+    return result
+
+
+def check_icon_set(root: str) -> dict:
+    """Check AppIcon.appiconset completeness via Contents.json.
+
+    Returns a summary of how many icon slots are defined, how many have their
+    corresponding file present, and which slots are missing.
+    """
+    asset_dir = os.path.join(
+        root, "ios", "Runner", "Assets.xcassets", "AppIcon.appiconset"
+    )
+    contents_path = os.path.join(asset_dir, "Contents.json")
+    result: dict = {
+        "complete": False,
+        "missing_sizes": [],
+        "total_required": 0,
+        "present": 0,
+    }
+
+    raw = _read_file(contents_path)
+    if raw is None:
+        return result
+
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return result
+
+    images = data.get("images", [])
+    result["total_required"] = len(images)
+    missing: list[str] = []
+    present = 0
+
+    for img in images:
+        filename = img.get("filename")
+        idiom = img.get("idiom", "?")
+        size = img.get("size", "?")
+        scale = img.get("scale", "?")
+        if filename:
+            if os.path.isfile(os.path.join(asset_dir, filename)):
+                present += 1
+            else:
+                missing.append(f"{idiom}_{size}@{scale}")
+        else:
+            # Slot defined but no filename assigned yet.
+            missing.append(f"{idiom}_{size}@{scale}__unset")
+
+    result["present"] = present
+    result["missing_sizes"] = missing
+    result["complete"] = len(missing) == 0 and len(images) > 0
+
+    return result
+
+
+def check_launch_assets(root: str) -> dict:
+    """Check for launch screen resources.
+
+    Modern Flutter projects use a LaunchScreen.storyboard.
+    Older projects may still use a LaunchImage.imageset.
+    Both are reported so the orchestrator can advise accordingly.
+    """
+    storyboard = os.path.join(
+        root, "ios", "Runner", "Base.lproj", "LaunchScreen.storyboard"
+    )
+    launch_image_dir = os.path.join(
+        root, "ios", "Runner", "Assets.xcassets", "LaunchImage.imageset"
+    )
+    return {
+        "has_launch_screen_storyboard": os.path.isfile(storyboard),
+        "has_launch_image_assets": os.path.isdir(launch_image_dir),
+    }
+
+
+def main() -> int:
+    if len(sys.argv) > 2:
+        print(
+            f"Usage: {os.path.basename(sys.argv[0])} [<repo-path>]",
+            file=sys.stderr,
+        )
+        return 2
+
+    root = os.path.abspath(sys.argv[1] if len(sys.argv) == 2 else os.getcwd())
+
+    is_flutter_ios, reason = detect_flutter_ios(root)
+    if not is_flutter_ios:
+        print(
+            f"WARNING: Not a Flutter/iOS project — {reason}. "
+            "ship-to-appstore requires a Flutter project with an iOS target.",
+            file=sys.stderr,
+        )
+        return 1
+
+    report: dict = {"flutter_ios": True}
+    report.update(parse_pubspec(root))
+    report.update(parse_pbxproj(root))
+    report["icon_set"] = check_icon_set(root)
+    report["launch_assets"] = check_launch_assets(root)
+
+    print(json.dumps(report, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
