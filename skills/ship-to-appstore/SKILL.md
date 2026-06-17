@@ -37,6 +37,8 @@ Read the phase file you need when you need it. This SKILL.md is the always-on la
 - **Abort cleanly on non-Flutter repos.** Phase 0 detects the project type; if not Flutter/iOS, explain clearly and stop.
 - **Never submit autonomously.** Submission to App Store Connect is a human action — the skill guides but does not execute it.
 - **No credentials emitted.** The situation report includes identifiers (bundle ID, team ID) but never secrets.
+- **Verify, don't assume — tri-state.** Every ASC fact is `✓ verified` (HTTP 200 + data), `? cannot-verify` (non-200, or no read endpoint — ask the user to confirm in the UI), or `□ confirmed-open`. Never collapse cannot-verify into open, and never tell the user to redo already-done work. Always check HTTP status explicitly; never swallow errors to an empty result.
+- **Detect, don't interrogate.** Phase 0 reads the repo for tracking SDKs, account-deletion flow, fastlane lanes, and the Ruby/Bundler env. Answer privacy/ATT/deletion questions from those facts instead of asking the user — they often don't know.
 
 ## Entry point
 

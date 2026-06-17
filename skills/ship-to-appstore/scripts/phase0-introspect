@@ -33,6 +33,15 @@ Output contract (JSON keys):
     credentials.fastlane_appfile    {path: str}|null   — relative path if Appfile exists
     credentials.fastlane_env        {path: str}|null   — relative path if .env exists
     credentials.env_hints           list[str]  — env var NAMES that are set (never values)
+    fastlane_lanes                  list[str]  — lane names declared in fastlane/Fastfile
+    analytics_tracking              list[{package: str, category: str}]  — privacy/ATT-relevant SDKs in pubspec
+    account_deletion.likely_present bool       — heuristic: in-app deletion flow found in lib/
+    account_deletion.hints          list[str]  — matched marker strings (no full file contents)
+    ruby_env.has_gemfile            bool
+    ruby_env.ruby_version_file      str|null   — contents of .ruby-version if present
+    ruby_env.bundler_locked         str|null   — "BUNDLED WITH" version from Gemfile.lock
+    ruby_env.rbenv_present          bool       — ~/.rbenv exists
+    ruby_env.rvm_present            bool       — ~/.rvm exists
 
 Security: this script never reads or emits credential secret contents
 (API keys, certificates, passwords). Team ID is an identifier, not a secret.
@@ -289,6 +298,110 @@ def discover_credentials(root: str) -> dict:
     return result
 
 
+def detect_analytics_tracking(root: str) -> list[dict]:
+    """Detect privacy/ATT-relevant SDKs declared in pubspec.yaml.
+
+    Privacy nutrition labels and the ATT decision must be driven by which SDKs
+    are actually present, not by asking the user (who often does not know).
+    Reports dependency names and a coarse category. Names are package
+    identifiers, not secrets.
+    """
+    content = _read_file(os.path.join(root, "pubspec.yaml")) or ""
+    known = {
+        "sentry_flutter": "crash/diagnostics",
+        "sentry": "crash/diagnostics",
+        "firebase_crashlytics": "crash/diagnostics",
+        "posthog_flutter": "analytics",
+        "posthog": "analytics",
+        "firebase_analytics": "analytics",
+        "amplitude_flutter": "analytics",
+        "mixpanel_flutter": "analytics",
+        "app_tracking_transparency": "att/tracking",
+        "facebook_app_events": "att/tracking",
+        "appsflyer_sdk": "att/tracking",
+        "adjust_sdk": "att/tracking",
+    }
+    found: list[dict] = []
+    for dep, category in known.items():
+        # Match as a dependency key: indented `name:` at line start.
+        if re.search(rf"^\s{{2,}}{re.escape(dep)}\s*:", content, re.MULTILINE):
+            found.append({"package": dep, "category": category})
+    return found
+
+
+def detect_account_deletion(root: str) -> dict:
+    """Heuristic scan of lib/ for an in-app account-deletion flow.
+
+    Apple requires account deletion for any app that creates accounts. Scanning
+    the code beats asking the user. Reports a boolean and the matched marker
+    strings only — never full file contents.
+    """
+    lib_dir = os.path.join(root, "lib")
+    result = {"likely_present": False, "hints": []}
+    if not os.path.isdir(lib_dir):
+        return result
+    rx = re.compile(
+        r"admin\.deleteUser|auth\.admin|deleteUser\b|delete_account|deleteAccount"
+        r"|rpc\(['\"]delete|Konto\s+löschen|Account\s+löschen|delete\s+account",
+        re.IGNORECASE,
+    )
+    hits: list[str] = []
+    for dirpath, _dirs, files in os.walk(lib_dir):
+        for fn in files:
+            if not fn.endswith(".dart"):
+                continue
+            text = _read_file(os.path.join(dirpath, fn))
+            if not text:
+                continue
+            for m in rx.finditer(text):
+                marker = m.group(0).strip()
+                if marker not in hits:
+                    hits.append(marker)
+    result["hints"] = hits[:8]
+    result["likely_present"] = len(hits) > 0
+    return result
+
+
+def detect_ruby_env(root: str) -> dict:
+    """Detect the Ruby/Bundler setup that fastlane commands depend on.
+
+    The most common first-run failure is `bundle exec` resolving against system
+    Ruby instead of the project-pinned version (rbenv/rvm shims inactive in a
+    non-interactive shell). Report the pinned Ruby, the locked bundler version,
+    and which version manager is installed so Phase 2 can prescribe the right
+    PATH prefix up front instead of discovering it via a failed command.
+    """
+    result: dict = {
+        "has_gemfile": os.path.isfile(os.path.join(root, "Gemfile")),
+        "ruby_version_file": None,
+        "bundler_locked": None,
+        "rbenv_present": os.path.isdir(os.path.expanduser("~/.rbenv")),
+        "rvm_present": os.path.isdir(os.path.expanduser("~/.rvm")),
+    }
+    rv = _read_file(os.path.join(root, ".ruby-version"))
+    if rv and rv.strip():
+        result["ruby_version_file"] = rv.strip()
+    lock = _read_file(os.path.join(root, "Gemfile.lock"))
+    if lock:
+        m = re.search(r"BUNDLED WITH\s*\n\s*([0-9][0-9.]*)", lock)
+        if m:
+            result["bundler_locked"] = m.group(1).strip()
+    return result
+
+
+def detect_fastlane_lanes(root: str) -> list[str]:
+    """List lane names declared in fastlane/Fastfile.
+
+    A project may already define `status`, `release`, etc. lanes that are more
+    reliable than generic fastlane/altool commands. Report the names so Phase 2
+    can prefer project-defined lanes over inventing its own.
+    """
+    fastfile = _read_file(os.path.join(root, "fastlane", "Fastfile"))
+    if not fastfile:
+        return []
+    return sorted(set(re.findall(r"^\s*lane\s+:([A-Za-z0-9_]+)", fastfile, re.MULTILINE)))
+
+
 def main() -> int:
     if len(sys.argv) > 2:
         print(
@@ -314,6 +427,10 @@ def main() -> int:
     report["icon_set"] = check_icon_set(root)
     report["launch_assets"] = check_launch_assets(root)
     report["credentials"] = discover_credentials(root)
+    report["fastlane_lanes"] = detect_fastlane_lanes(root)
+    report["analytics_tracking"] = detect_analytics_tracking(root)
+    report["account_deletion"] = detect_account_deletion(root)
+    report["ruby_env"] = detect_ruby_env(root)
 
     print(json.dumps(report, indent=2))
     return 0

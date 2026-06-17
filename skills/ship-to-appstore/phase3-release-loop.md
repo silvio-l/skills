@@ -29,7 +29,7 @@ Before presenting any step, consolidate the three prior outputs:
 
 | Source | What to extract |
 |---|---|
-| Phase 0 situation report (JSON, already shown) | `bundle_id`, `marketing_version`, `build_number`, `ios_deployment_target`, `xcode_version`, `signing.code_signing_style`, `signing.has_provisioning_profile`, `credentials.*`, `supabase_hints`, detected screenshot sizes |
+| Phase 0 situation report (JSON, already shown) | `bundle_id`, `marketing_version`, `build_number`, `signing_style`, `team_id`, `credentials.*`, `fastlane_lanes`, `analytics_tracking`, `account_deletion`, `ruby_env`, icon/launch assets |
 | Phase 1 freshness report (table, already shown) | Minimum Xcode version, minimum iOS target, required screenshot sizes, privacy requirements, export-compliance rule, current recommended upload tool |
 | Phase 2 situation overview (block, already shown) | App record exists?, latest build upload/processing status, metadata completeness gap list, access strategy used |
 
@@ -46,6 +46,8 @@ yet confirmed complete. Present the resulting list to the user before starting t
 ```
 === Release Checklist (derived {YYYY-MM-DD}) ===
 
+Marker legend:  ✓ verified done   ? cannot-verify via API (confirm in ASC UI)   □ confirmed open
+
 Remaining steps:
   □ 1.  Version bump
   □ 2.  Signing & certificates
@@ -57,6 +59,8 @@ Remaining steps:
   □ 8.  Age rating questionnaire
   □ 9.  Export compliance
   □ 10. Screenshots
+  □ 10a Pricing & availability        ← first-release blocker if unset
+  □ 10b IAPs/subscriptions attached   ← first-release only; not API-verifiable
   □ 11. Submit for Review     ← this is on you in ASC
   □ 12. Review period + release options
 
@@ -69,6 +73,13 @@ Ready? Say "start" or "let's go".
 
 Adjust step numbering after filtering confirmed-done steps. Do not show filtered steps in the
 checklist — keep the list short and scannable.
+
+**Tri-state, not binary.** A step is "done" (✓) only when Phase 2 returned HTTP 200 + data
+confirming it. If the state could not be verified (non-200, or no read endpoint exists — e.g.
+privacy publish state, IAP-to-version attachment), mark it `?` and present it as "confirm in the
+ASC UI", **never** as an open `□` TODO. Telling the user to redo already-done work is the cardinal
+failure of this loop. Include **10a (pricing)** and **10b (IAP attachment)** for any first release
+with paid tiers or in-app purchases — both are blockers that the first real run hit.
 
 ---
 
@@ -210,6 +221,9 @@ When the user says "stuck here: <error>" or pastes error output:
 | Missing export-compliance key | "ITSAppUsesNonExemptEncryption" warning | Add plist key (§3.9); rebuild |
 | Flutter/Xcode version | "requires Xcode X.Y or later" | Install/select correct Xcode; `xcode-select -s /Applications/Xcode_{version}.app` |
 | Metadata blocked | "Missing required field" in ASC | Identify field; guide through the ASC Web UI step |
+| Missing pricing | "App is missing required pricing. … not eligible for submission until pricing has been set" | Set a price tier (Free/0 or paid) in ASC → Pricing and Availability; then re-run submit (Step 10a) |
+| Bundler/Ruby mismatch | "Could not find 'bundler' (X) required by your Gemfile.lock" | System Ruby is active instead of the pinned one — re-run with `PATH="$HOME/.rbenv/shims:$PATH"` prefix (Phase 2 §2.0); not a fastlane bug |
+| Version "not in valid state" | "appStoreVersions … is not in valid state … check associated errors" | A precondition (pricing, privacy, missing metadata) is unmet — read the *associated* error line; it names the real blocker |
 
 ---
 
@@ -409,6 +423,18 @@ are a common reject reason.
 
 Go to: **App Store Connect → My Apps → {App} → App Privacy**
 
+**Drive this from Phase 0 facts, not from questions.** Phase 0's `analytics_tracking` already
+answers what the app collects for diagnostics/analytics — use it directly:
+- a `crash/diagnostics` SDK (e.g. `sentry_flutter`) present → declare **Crash Data** (App
+  Functionality, Not Linked, not tracking).
+- an `analytics` SDK present → declare **Usage Data**.
+- if `analytics_tracking` is empty → declare neither; say so as a fact.
+
+Do **not** ask the user "do you use tracking?" — state what was detected and let them correct it.
+The privacy-label **publish state** is not reliably API-readable (Phase 2 §2.3): if you cannot
+confirm it, mark `?` and ask the user to check the App Privacy section in ASC — never assert it is
+empty from a failed/404 query.
+
 **Supabase-derived declaration map**
 
 This is the standard starting point for a Flutter app using Supabase (auth + database +
@@ -425,20 +451,24 @@ storage + realtime). Adjust only where the app's actual behavior differs.
 | Crash Data | Conditional | Developer diagnostics | No | Only if Sentry or PostHog is integrated |
 | Usage Data | Conditional | Analytics | No | Only if PostHog or a similar analytics SDK is integrated |
 
-**Account deletion**
+**Account deletion** (read Phase 0 `account_deletion`, do not ask blind)
 
 Apple requires that any app allowing account creation also provides an in-app account deletion
-flow. Because this app uses Supabase Auth to create accounts, an account deletion feature is
-required. The deletion must call the Supabase Auth Admin API (`DELETE /auth/v1/admin/users/{id}`)
-from a server-side function or a one-time Edge Function. If this flow is not yet implemented,
-flag it as a blocker before proceeding to Step 11 — Apple will reject the submission without it.
+flow. Phase 0 already scanned `lib/` for it:
+- `account_deletion.likely_present: true` → tell the user the flow **was found** (cite the `hints`,
+  e.g. "Konto löschen", `deleteAccount`) and treat the requirement as satisfied unless they say
+  otherwise. Do not present it as an open question or TODO.
+- `likely_present: false` → flag as a **blocker** before Step 11. The deletion should call the
+  Supabase Auth Admin API (`DELETE /auth/v1/admin/users/{id}`) from a server-side path. (Per the
+  free-tier discipline, avoid an Edge Function if it can be a Postgres function / client-with-RLS
+  path — but a single user-triggered deletion is the rare acceptable Edge-Function case.)
 
-**App Tracking Transparency (ATT)**
+**App Tracking Transparency (ATT)** (read Phase 0 `analytics_tracking`)
 
-ATT is required only when the app tracks users across other companies' apps or websites.
-Supabase does not enable cross-app tracking by default. If no third-party tracking SDK is
-present (confirmed from Phase 0's dependency list), `NSUserTrackingUsageDescription` is not
-required.
+ATT is required only when the app tracks users across other companies' apps or websites. If
+Phase 0's `analytics_tracking` contains **no** `att/tracking`-category SDK, `NSUserTrackingUsageDescription`
+is **not** required — state that as a fact. If one is present (e.g. `facebook_app_events`,
+`appsflyer_sdk`), ATT **is** required: the plist key and a runtime prompt must exist.
 
 After completing the privacy questionnaire in ASC, tell the agent "done".
 
@@ -543,6 +573,53 @@ After uploading all required sizes, tell the agent "done".
 
 ---
 
+### Step 10a — Pricing & Availability
+
+**Mode:** Manual — this is on you in ASC. Agent verifies via API where possible.
+
+**What:** A price tier must be set before Apple accepts a submission. A **first** release with no
+price tier fails at submit with *"App is missing required pricing. — App is not eligible for
+submission until pricing has been set."* (the exact error the first real run hit). This is easy to
+miss because every other field can be green while pricing is silently unset.
+
+The agent checks the price-schedule relationship via the ASC API if Strategy A is available
+(price-schedule exists but with **0** manual prices = unset). Because this is a frequent
+first-release blocker, surface it proactively — do not wait for the submit to fail.
+
+**Path:** App Store Connect → {App} → **Pricing and Availability** → choose a price tier
+(**Free / 0** for a freemium app whose premium is sold via IAP/subscriptions, or a paid tier) →
+set availability (default: all countries) → **Save**.
+
+> For a Supabase + Flutter freemium app (base app free, premium via subscriptions), the base price
+> is **Free**. Confirm with the user before assuming paid.
+
+After saving, tell the agent "done".
+
+---
+
+### Step 10b — In-App Purchases / Subscriptions Attached (first release only)
+
+**Mode:** Manual — this is on you in ASC. **Not API-verifiable** — treat as `?`/confirm, never `□`.
+
+**What:** On the **first** submission of an app that has IAPs/subscriptions, the products must be
+**manually attached to the version** before submitting. If they are not, Apple may approve the app
+while the paywall is dead (no purchasable products). The ASC REST API exposes **no** reliable
+"is this IAP attached to this version" relationship — so this is always a **cannot-verify** state:
+guide and confirm in the UI, do not assert it is missing from a failed query.
+
+**Path:** App Store Connect → {App} → open the version → section **In-App Purchases and
+Subscriptions** → **select** each product (the agent lists them from Phase 2, e.g. `lifetime`,
+`monthly`, `yearly`) → **Save**.
+
+**Indirect signal (post-submit):** once the version is submitted, attached IAPs flip from
+`READY_TO_SUBMIT` to `WAITING_FOR_REVIEW`. If they stay on `READY_TO_SUBMIT` after submission,
+they are almost certainly **not** attached — recovery is: attach them in the UI, then re-run the
+release lane. Verify this flip in the completion check (§3.7).
+
+After attaching all products in the UI, tell the agent "done" (or "confirmed").
+
+---
+
 ### Step 11 — Submit for Review
 
 **Mode:** Manual — THIS IS ON YOU. The agent does not and cannot press this button.
@@ -556,13 +633,15 @@ version enters the review queue.
 □ Build status in ASC: "Ready to Submit" (not still "Processing")
 □ All required metadata fields: no red warnings in ASC
 □ Screenshots: all required sizes uploaded for all required devices
-□ Privacy nutrition labels: questionnaire saved
+□ Privacy nutrition labels: questionnaire saved + label published
 □ Age rating: set
 □ Export compliance: answered
+□ Pricing & availability: a price tier is set (Free or paid)   ← else submit fails
+□ IAPs/subscriptions: attached to the version (first release)  ← confirm in UI, not API
 □ "What's New" text: filled in (for an update release)
 □ Privacy policy URL: reachable from a browser
 □ Support URL: reachable from a browser
-□ Account deletion flow: implemented and testable (if app has account creation)
+□ Account deletion flow: implemented (Phase 0 account_deletion) — confirmed, not asked
 ```
 
 Go to: **App Store Connect → My Apps → {App} → App Store → {Version} → "Submit for Review"**
@@ -625,7 +704,16 @@ When the user pauses or the session ends before completion, the agent prints:
 
 ## 3.7 — Completion Block (all steps done)
 
-When every checklist step is marked done, print:
+When every checklist step is marked done, **verify the submission via API before declaring success
+— do not trust the lane's success log alone.** Re-read the version state (Strategy A / `status`
+lane) and confirm:
+
+- version is `WAITING_FOR_REVIEW` (or `IN_REVIEW`), and a review submission exists;
+- for a first release with IAPs: the products flipped from `READY_TO_SUBMIT` to
+  `WAITING_FOR_REVIEW`. If they did **not**, warn loudly — they are likely not attached (Step 10b),
+  the app may ship with a dead paywall; recovery is attach-in-UI then re-run the release lane.
+
+Then print:
 
 ```
 === Release submitted ===

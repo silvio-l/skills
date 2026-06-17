@@ -7,6 +7,42 @@ and what the next required action is.
 
 ---
 
+## 2.0 Ruby / fastlane environment precheck (do this FIRST)
+
+Any ASC access via fastlane/`bundle exec` depends on the project's pinned Ruby being active.
+The #1 first-run failure is `bundle exec` resolving against **system Ruby** while the project pins
+a different version via rbenv — because the agent's Bash runs in a **non-interactive** shell that
+does **not** load `~/.zshrc`, so rbenv shims are inactive. The symptom is:
+
+```
+Could not find 'bundler' (X.Y.Z) required by your Gemfile.lock. (Gem::GemNotFoundException)
+```
+
+Read Phase 0's `ruby_env` block. If `rbenv_present` (or `rvm_present`) is true and a
+`ruby_version_file` is set, **prefix every fastlane / `bundle exec` command** — both the ones the
+agent runs and the ones it hands the user to run — with the shim PATH:
+
+```bash
+PATH="$HOME/.rbenv/shims:$PATH" bundle exec fastlane ios status
+```
+
+Verify once up front (should print the pinned version + `ruby_env.bundler_locked`, not system 2.6):
+
+```bash
+PATH="$HOME/.rbenv/shims:$PATH" ruby -v
+PATH="$HOME/.rbenv/shims:$PATH" bundle -v
+```
+
+If the user wants a permanent fix, offer to append an idempotent rbenv init to `~/.zshrc`
+(`eval "$(rbenv init - zsh)"`) — but note it only affects **new interactive** shells, so the
+agent's own commands still need the PATH prefix this session. **Caveat:** `zsh -l -c '…'` is a
+*login* shell, not interactive, and still won't load `~/.zshrc`; verify with `zsh -i -c '…'`.
+
+Do not skip this and "discover" the mismatch through a failed fastlane run — it costs two
+round-trips every time.
+
+---
+
 ## 2.1 Research available ASC access methods (live — always first)
 
 Before attempting any access, run a short live web search to confirm which methods
@@ -76,6 +112,38 @@ it is required:
 ---
 
 ## 2.3 Strategy selection (most automated → least)
+
+**Before the generic strategies below, check Phase 0's `fastlane_lanes`.** If the project defines
+a `status` lane, run it (with the §2.0 PATH prefix) — it encodes the developer's exact API-key
+wiring and reports versions/builds/IAPs in one shot, more reliably than raw endpoint calls. If it
+defines a `release`/`publish` lane, that is the Phase 3 submission path. Only fall back to the
+generic strategies when no Fastfile lane covers the need.
+
+### Reading ASC state: verified vs cannot-verify vs not-done (HARD RULE)
+
+Every ASC read has **three** possible outcomes — never collapse them into two:
+
+| State | Meaning | How to present |
+|---|---|---|
+| **✓ verified** | HTTP 200 + real data confirming it is done | "done" — skip it |
+| **? cannot-verify** | the API cannot express this fact, or returned a non-200 | "I can't see this via the API — please confirm in the ASC UI" |
+| **□ not-done** | HTTP 200 + data confirming the field is genuinely empty | "this is missing — here's how to set it" |
+
+The cardinal error (observed in the first real run): treating **cannot-verify as not-done** and
+telling the user to "do" something that was already done. Two concrete traps:
+
+1. **Always check the HTTP status explicitly.** Never wrap an API call in a bare `rescue {}` /
+   ignore-errors that turns a `404`/`401` into an empty `{}`. A 404 on a wrong endpoint path looks
+   identical to "no data" if you don't check the status — and you will report a published field as
+   "empty". Print the status code; on non-200, classify as **cannot-verify**, not not-done.
+2. **Some facts are not queryable at all.** The App-Privacy **publish state** and whether IAPs are
+   **attached to a version** have no reliable read endpoint. These are always **cannot-verify** →
+   ask the user to confirm in the UI. Never assert them as open TODOs from inference alone.
+
+After any **mutating** action (e.g. a `release` lane run), re-read the state via API to confirm the
+mutation landed — do not trust the success log alone.
+
+### Strategy ordering
 
 Try strategies in this order. Switch to the next when a required input is absent.
 
@@ -185,14 +253,21 @@ Metadata
   Support URL      : set | missing | unknown
   Privacy policy   : set | missing | unknown
 
+Pricing            : set | NOT SET (blocks submission) | ? cannot-verify
+Privacy label      : published | not published | ? cannot-verify (confirm in UI)
+In-App Purchases   : {list with status, e.g. lifetime READY_TO_SUBMIT} | none | ? cannot-verify
+
 Access strategy used : A (ASC REST API) | B (fastlane) | C (altool) | D (Web UI)
 
 Missing / action required:
   - {bullet per gap, or "nothing — ready for Phase 3"}
 ```
 
-Keep the overview to ~15 lines. Do not dump raw API responses. If a field could
-not be determined, say so and include a pointer to where the user can find it.
+Use the tri-state markers consistently: `✓` verified-done, `?` cannot-verify (point the user to
+the ASC UI), `□`/"NOT SET" only when HTTP 200 + data confirm it is genuinely empty. **Pricing**
+and the **privacy-label publish state** are frequent first-release blockers — always include them.
+Keep the overview to ~15 lines. Do not dump raw API responses. If a field could not be determined,
+say "cannot-verify" and point to where the user can confirm it — never guess "missing".
 
 ---
 
