@@ -111,6 +111,33 @@ If you only want one of these, skip the dependencies you do not exercise.
 
 **The Fix.** An assisted, one-frame-per-run translator with hard rails. It parses the design URL, pulls both `get_design_context` and a `get_screenshot` benchmark, resolves Figma variable *names* (never raw hex/px) onto the project's theme tokens, and writes a single presentation-only `StatelessWidget` that takes its data through the constructor — no Supabase, no `http`, no navigation. A golden test (light + dark) plus `dart analyze`/`flutter test` gate the output, vision-blind details (1px borders, shadow spread) are flagged for review, and nothing is wired into the app until a human OKs it at the explicit review gate. Consumes the tokens produced by `flutter-design-language`.
 
+### `screenshot-review`
+
+**The Problem.** „Reviewe mal die Screens" verleitet einen Agenten zu zwei
+Versagensmodi gleichzeitig: er lobt höflich, statt Probleme zu finden — oder er
+wird „kompromisslos" und halluziniert dann falsch-präzise Findings („Headline auf
+28 px setzen") aus einem Screenshot, der gar keine px hergibt. Dazu kennt er die
+Zielgruppe nicht, also ist jedes Zielgruppen-Fit-Urteil geraten, und sobald der
+Ordner mehr als eine Handvoll Bilder hat, zieht jeder Screen den ganzen Berg in
+einen Kontext und der Reviewer verliert auf halbem Weg den Faden.
+
+**The Fix.** Ein Standalone-Audit über einen Screenshot-Ordner mit der Disziplin aus
+`ratchet-up`: Phase 0 zieht den App-Kontext (Zielgruppe, Zweck, Plattform,
+Design-System, deklarierte Tokens) selbst aus `CLAUDE.md`, `design/design-language.md`,
+`pubspec.yaml` und `README`, markiert Lücken als `UNBEKANNT` und klärt sie in einer
+Feedback-Schleife, bevor ein einziger Screen reviewt wird. Phase 1 dispatcht pro
+Screenshot einen read-only Sonnet-Subagenten, der gegen eine 13-Punkte-Rubrik
+auditiert, seinen Report direkt auf Platte schreibt und dem Orchestrator nur eine
+kompakte Score-Zeile zurückgibt — kein Volltext im aktiven Kontext. Der Ton bleibt
+kompromisslos (volle Severity, „immer tiefer suchen"), aber jedes Finding ist im
+sichtbaren Pixel verankert: relativ formuliert statt falsch-präzise, vision-limitierte
+Urteile (1px-Border, Shadow, Kontrast) ehrlich als Konfidenz „gering" markiert. Phase 2
+aggregiert die Einzelreports zum Gesamtbericht inklusive der app-weiten
+Konsistenz-Muster, die nur im Aggregat sichtbar werden. Das Report-Format ist bewusst
+maschinenparsebar (stabile Finding-IDs, Severity-Enum, imperative Empfehlungen,
+priorisierte Worklist), sodass ein nachgelagerter Agent — etwa `/ratchet-up` — die
+Findings ohne Rückfragen abarbeiten kann.
+
 ## Credit
 
 These skills exist because [Matt Pocock](https://github.com/mattpocock) made his own [`mattpocock/skills`](https://github.com/mattpocock/skills) public and showed what a working skill ecosystem looks like. The structural choices here — directory layout, frontmatter conventions, the `npx skills@latest add` install path, the failure-mode/fix narrative pattern in this README — are his. If you find any of this useful, point upstream first.
