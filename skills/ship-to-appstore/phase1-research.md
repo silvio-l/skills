@@ -127,6 +127,41 @@ Establish:
   Transporter, and what the current recommended binary-upload path is.
 - Any mandatory API authentication changes (e.g., API key requirements, JWT scopes).
 
+### 1.6 In-App Purchase / Submission Requirements
+
+> **Skip this domain only if Phase 0 reported `in_app_purchases.likely_present: false`.**
+> Otherwise it is mandatory — the 2.1(b) App-Completeness reject is one of the most
+> common IAP-related rejections and is entirely a metadata/submission-state failure,
+> not a code bug.
+
+```
+WebSearch: "App Store In-App Purchase submission requirements <YYYY>"
+WebSearch: "auto-renewable subscription App Review screenshot requirement App Store <YYYY>"
+WebSearch: "Guideline 2.1b App Completeness In-App Purchase not submitted <YYYY>"
+```
+
+Establish:
+- The full per-IAP metadata checklist required before a product can flip to
+  `READY_TO_SUBMIT` — in particular the **App Review screenshot** per IAP and
+  (for subscriptions) the **subscription group** + reference name + description
+  + price tier. Without these the IAP cannot be submitted alongside the build,
+  which is exactly the 2.1(b) reject trigger.
+- Whether the IAPs must be **attached to the version** before `Submit for Review`
+  (yes — and attached IAPs are submitted *together* with the build only when each
+  is `READY_TO_SUBMIT`).
+- The current success signal: IAPs flip `READY_TO_SUBMIT → WAITING_FOR_REVIEW`
+  when the version is submitted. If they stay on `READY_TO_SUBMIT`, they were
+  not submitted (almost always missing metadata or not attached).
+- Whether Apple added any new IAP metadata field, localisation requirement, or
+  subscription-pricing change for the current year.
+
+Canonical sources if needed:
+
+```
+WebFetch: https://developer.apple.com/app-store/in-app-purchase/
+WebFetch: https://developer.apple.com/help/app-store-connect/manage-in-app-purchases
+```
+
 ---
 
 ## 2. Consolidate into a Freshness Report
@@ -148,6 +183,7 @@ Format it as a compact table:
 | ATT / tracking          | …                                | …          |
 | Export compliance       | …                                | …          |
 | ASC API / upload tool   | …                                | …          |
+| IAP submission rules    | … (skip row if no IAPs detected) | …          |
 ```
 
 For any domain where searches returned ambiguous or conflicting results, add a note in the
@@ -172,6 +208,7 @@ report (already presented to the user). Flag mismatches as blockers or warnings:
 | Privacy manifest | `NSPrivacyAccessedAPITypes` absent but Phase 0 detected APIs that need it |
 | ATT | `NSUserTrackingUsageDescription` absent but Phase 0 suggests tracking-adjacent SDKs |
 | Account deletion | No in-app delete flow detected and mandate is active |
+| In-App Purchases | Phase 0 `in_app_purchases.likely_present: true` but no IAP/submission research row (the 2.1(b) gate will be un-checked) |
 
 Present blockers in a numbered list before optional items. A blocker means: "submission will
 be rejected unless this is fixed." A warning means: "may cause issues — confirm before

@@ -44,6 +44,7 @@ python3 "$SCRIPT" "<path-to-flutter-repo>"
   "fastlane_lanes": ["status", "release", "beta"],
   "analytics_tracking": [{ "package": "sentry_flutter", "category": "crash/diagnostics" }],
   "account_deletion": { "likely_present": true, "hints": ["deleteAccount", "Konto löschen"] },
+  "in_app_purchases": { "likely_present": true, "packages": ["in_app_purchase"], "code_markers": ["InAppPurchase", "queryProductDetails"] },
   "ruby_env": {
     "has_gemfile": true,
     "ruby_version_file": "4.0.2",
@@ -112,6 +113,30 @@ deletion for any app that creates accounts.
 - `likely_present: true` → tell the user the flow **was found** (cite `hints`); treat the
   requirement as satisfied unless the user says otherwise. Do not ask "do you have one?".
 - `likely_present: false` → flag as a **blocker** to resolve before Step 11, not a question.
+
+### In-App Purchases / subscriptions (drives the 2.1(b) App-Completeness gate — do NOT ask the user)
+
+`in_app_purchases.likely_present` is the signal that the IAP-submission gate
+(Phase 3 Step 10b) is in scope at all. The most common IAP-related reject is
+**Guideline 2.1(b) — Performance: App Completeness**: the app references premium
+content but the IAP products were not submitted for review. Apple's standard
+reject mail even reminds you that *"you must provide an App Review screenshot in
+App Store Connect in order to submit In-App Purchases for review"*. The skill
+cannot catch this if it does not first know IAPs exist — this field is that
+signal.
+
+- `likely_present: true` (an IAP SDK is declared in `pubspec.yaml`, e.g.
+  `in_app_purchase`, `purchases_flutter`/RevenueCat, OR ≥2 IAP API markers in
+  `lib/`) → state as a fact that **Phase 3 Step 10b is required** and that the
+  release must clear the full IAP gate (each product: metadata + **App Review
+  screenshot** + status `READY_TO_SUBMIT` + attached to the version) **before**
+  the build is submitted. Cite the matched `packages` / `code_markers`.
+- `likely_present: false` → state as a fact that the IAP gate is **not in
+  scope** and Step 10b is skipped. Do not ask "do you have IAPs?".
+
+This field is a heuristic from on-disk facts. If it is `false` but the app
+clearly has premium content, treat that as a contradiction to surface, not a
+silent skip.
 
 ### Ruby / Bundler environment (prevents the #1 first-run failure)
 

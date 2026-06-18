@@ -37,6 +37,9 @@ Output contract (JSON keys):
     analytics_tracking              list[{package: str, category: str}]  — privacy/ATT-relevant SDKs in pubspec
     account_deletion.likely_present bool       — heuristic: in-app deletion flow found in lib/
     account_deletion.hints          list[str]  — matched marker strings (no full file contents)
+    in_app_purchases.likely_present bool       — IAP/subscription usage detected (drives Phase 3 Step 10b gate)
+    in_app_purchases.packages       list[str]  — IAP SDK names declared in pubspec.yaml
+    in_app_purchases.code_markers   list[str]  — matched IAP API surface strings in lib/
     ruby_env.has_gemfile            bool
     ruby_env.ruby_version_file      str|null   — contents of .ruby-version if present
     ruby_env.bundler_locked         str|null   — "BUNDLED WITH" version from Gemfile.lock
@@ -362,6 +365,74 @@ def detect_account_deletion(root: str) -> dict:
     return result
 
 
+def detect_in_app_purchases(root: str) -> dict:
+    """Detect In-App Purchase / subscription usage to drive the IAP-submission gate.
+
+    The #1 IAP-related App Review reject is Guideline 2.1(b) — App Completeness:
+    the app references premium content but the IAP products were not submitted
+    for review (typically because they were never attached to the version, or
+    were never fully completed — most often the App Review screenshot per IAP is
+    missing, which blocks the IAP from flipping to READY_TO_SUBMIT). This
+    detection tells Phase 3 Step 10b whether the IAP gate is in scope at all —
+    without it the skill has no way to know IAPs exist and silently skips the
+    check, which is exactly the gap that produced the reject.
+
+    Scans:
+      - pubspec.yaml for IAP/subscription SDKs (in_app_purchase, RevenueCat,
+        flutter_inapp_purchase).
+      - lib/ for IAP API surface markers (InAppPurchase, queryProductDetails,
+        Purchases.configure, ProductDetails, purchaseStream, etc.).
+
+    Reports a boolean, the matched packages, and matched code markers. Names
+    and marker strings only — never full file contents or secrets.
+    """
+    result: dict = {
+        "likely_present": False,
+        "packages": [],
+        "code_markers": [],
+    }
+
+    pubspec = _read_file(os.path.join(root, "pubspec.yaml")) or ""
+    known_iap_packages = (
+        "in_app_purchase",
+        "purchases_flutter",  # RevenueCat
+        "flutter_inapp_purchase",
+        "revenuecat_purchase",
+    )
+    found_packages: list[str] = []
+    for dep in known_iap_packages:
+        if re.search(rf"^\s{{2,}}{re.escape(dep)}\s*:", pubspec, re.MULTILINE):
+            found_packages.append(dep)
+    result["packages"] = found_packages
+
+    lib_dir = os.path.join(root, "lib")
+    markers: list[str] = []
+    if os.path.isdir(lib_dir):
+        rx = re.compile(
+            r"\bInAppPurchase\b|queryProductDetails|\bProductDetails\b"
+            r"|purchaseStream|purchaseNonConsumable|purchaseConsumable"
+            r"|Purchases\.configure|Purchases\.purchaseProduct|setPurchaseListener"
+            r"|SKProduct|\bInAppPurchaseStoreKitPlatform\b",
+        )
+        for dirpath, _dirs, files in os.walk(lib_dir):
+            for fn in files:
+                if not fn.endswith(".dart"):
+                    continue
+                text = _read_file(os.path.join(dirpath, fn))
+                if not text:
+                    continue
+                for m in rx.finditer(text):
+                    marker = m.group(0).strip()
+                    if marker not in markers:
+                        markers.append(marker)
+    result["code_markers"] = markers[:8]
+
+    # IAP is "likely present" if an IAP SDK is declared, OR at least 2 distinct
+    # API markers appear in code (>=2 guards against a stray comment reference).
+    result["likely_present"] = bool(found_packages) or len(markers) >= 2
+    return result
+
+
 def detect_ruby_env(root: str) -> dict:
     """Detect the Ruby/Bundler setup that fastlane commands depend on.
 
@@ -430,6 +501,7 @@ def main() -> int:
     report["fastlane_lanes"] = detect_fastlane_lanes(root)
     report["analytics_tracking"] = detect_analytics_tracking(root)
     report["account_deletion"] = detect_account_deletion(root)
+    report["in_app_purchases"] = detect_in_app_purchases(root)
     report["ruby_env"] = detect_ruby_env(root)
 
     print(json.dumps(report, indent=2))

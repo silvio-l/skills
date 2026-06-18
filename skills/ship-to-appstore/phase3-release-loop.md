@@ -29,7 +29,7 @@ Before presenting any step, consolidate the three prior outputs:
 
 | Source | What to extract |
 |---|---|
-| Phase 0 situation report (JSON, already shown) | `bundle_id`, `marketing_version`, `build_number`, `signing_style`, `team_id`, `credentials.*`, `fastlane_lanes`, `analytics_tracking`, `account_deletion`, `ruby_env`, icon/launch assets |
+| Phase 0 situation report (JSON, already shown) | `bundle_id`, `marketing_version`, `build_number`, `signing_style`, `team_id`, `credentials.*`, `fastlane_lanes`, `analytics_tracking`, `account_deletion`, `in_app_purchases`, `ruby_env`, icon/launch assets |
 | Phase 1 freshness report (table, already shown) | Minimum Xcode version, minimum iOS target, required screenshot sizes, privacy requirements, export-compliance rule, current recommended upload tool |
 | Phase 2 situation overview (block, already shown) | App record exists?, latest build upload/processing status, metadata completeness gap list, access strategy used |
 
@@ -60,7 +60,7 @@ Remaining steps:
   □ 9.  Export compliance
   □ 10. Screenshots
   □ 10a Pricing & availability        ← first-release blocker if unset
-  □ 10b IAPs/subscriptions attached   ← first-release only; not API-verifiable
+  □ 10b IAPs/submissions ready+attached ← first-release only; each product must be READY_TO_SUBMIT (screenshot!) + attached or 2.1(b) reject
   □ 11. Submit for Review     ← this is on you in ASC
   □ 12. Review period + release options
 
@@ -78,8 +78,11 @@ checklist — keep the list short and scannable.
 confirming it. If the state could not be verified (non-200, or no read endpoint exists — e.g.
 privacy publish state, IAP-to-version attachment), mark it `?` and present it as "confirm in the
 ASC UI", **never** as an open `□` TODO. Telling the user to redo already-done work is the cardinal
-failure of this loop. Include **10a (pricing)** and **10b (IAP attachment)** for any first release
-with paid tiers or in-app purchases — both are blockers that the first real run hit.
+failure of this loop. The **IAP product `state`** (`MISSING_METADATA`, `READY_TO_SUBMIT`, …) *is*
+API-readable via `inAppPurchasesV2`, so check it there and only fall back to `?`-confirm for the
+"is this product attached to this specific version" relationship. Include **10a (pricing)** and
+**10b (IAP submission gate)** for any first release with paid tiers or in-app purchases — both are
+blockers that the first real run hit.
 
 ---
 
@@ -597,26 +600,73 @@ After saving, tell the agent "done".
 
 ---
 
-### Step 10b — In-App Purchases / Subscriptions Attached (first release only)
+### Step 10b — In-App Purchases / Subscriptions Submitted (first release only)
 
-**Mode:** Manual — this is on you in ASC. **Not API-verifiable** — treat as `?`/confirm, never `□`.
+**Mode:** Manual — this is on you in ASC. Agent reads per-product state via API where
+possible; the rest is `?`/confirm.
 
-**What:** On the **first** submission of an app that has IAPs/subscriptions, the products must be
-**manually attached to the version** before submitting. If they are not, Apple may approve the app
-while the paywall is dead (no purchasable products). The ASC REST API exposes **no** reliable
-"is this IAP attached to this version" relationship — so this is always a **cannot-verify** state:
-guide and confirm in the UI, do not assert it is missing from a failed query.
+**What:** On the **first** submission of an app that offers premium content, **every**
+IAP/subscription product must be fully completed, attached to the version, and in state
+`READY_TO_SUBMIT` **before** the build is submitted. If any product is not at that state,
+Apple will approve the binary alone and reject the submission under **Guideline 2.1(b) —
+Performance: App Completeness** with *"one or more of the In-App Purchase products have not
+been submitted for review"*. The reject is almost always one of:
+
+- the per-IAP **App Review Screenshot** is missing (Apple's reject mail even says *"you must
+  provide an App Review screenshot in App Store Connect in order to submit In-App Purchases
+  for review"*), or
+- the product was never **attached to the version**, or
+- another required field is unset so the product is stuck on `MISSING_METADATA`.
+
+**In scope only if Phase 0 reported `in_app_purchases.likely_present: true`.** If Phase 0
+reported `false`, say so as a fact and skip this step — do not ask the user.
+
+**Read the current state first.** If Strategy A is available, query
+`GET /v1/apps/{id}/inAppPurchasesV2?limit=200` (Phase 2 §2.3 Strategy A, endpoint 5) and list
+every product with its `state`. Present the per-product table to the user:
+
+```
+IAP gate state:
+  lifetime    : READY_TO_SUBMIT   ✓ can submit
+  monthly     : MISSING_METADATA  ⚠ blocked — fill required fields (screenshot?)
+  yearly      : (not attached)    ⚠ blocked — attach to version
+```
+
+Any row that is not `READY_TO_SUBMIT` or `APPROVED` is a **hard blocker** for Step 11 — do
+not let the user submit the build until every row is ✓. If the API cannot see the IAPs
+(non-200, or subscriptions nested under a group endpoint the key cannot read), classify as
+`? cannot-verify` and have the user confirm each product's state in the ASC UI.
+
+**Per-product checklist (ASC → {App} → Monetization → In-App Purchases → open each product):**
+
+For **every** IAP / subscription product, all of:
+
+- Reference Name and **Product ID** set (the Product ID must match what the app code requests
+  — cross-check against Phase 0 `in_app_purchases.code_markers` if visible).
+- **Cleared for Sale** = on.
+- **Price Tier** set (and for subscriptions: a **Subscription Group** exists and the product
+  is a member of it).
+- **App Store Localization**: Display Name + Description (at least the primary language).
+- **App Review Screenshot** uploaded — one screenshot per product, **required** to leave
+  `MISSING_METADATA`. This is the single most-missed field.
+- **Review Notes** (optional but recommended) + a sandbox-test account if the purchase flow
+  is non-trivial.
+
+After the per-product fields are complete, **attach** the products to the version:
 
 **Path:** App Store Connect → {App} → open the version → section **In-App Purchases and
-Subscriptions** → **select** each product (the agent lists them from Phase 2, e.g. `lifetime`,
-`monthly`, `yearly`) → **Save**.
+Subscriptions** → **select/add** each product → **Save**.
 
-**Indirect signal (post-submit):** once the version is submitted, attached IAPs flip from
-`READY_TO_SUBMIT` to `WAITING_FOR_REVIEW`. If they stay on `READY_TO_SUBMIT` after submission,
-they are almost certainly **not** attached — recovery is: attach them in the UI, then re-run the
-release lane. Verify this flip in the completion check (§3.7).
+**The hard gate before Step 11:** every product shows state `READY_TO_SUBMIT` (or already
+`APPROVED` from a prior version) **and** is attached to the version. Re-query the API (or have
+the user confirm in the UI) and only then proceed.
 
-After attaching all products in the UI, tell the agent "done" (or "confirmed").
+**Success signal (checked post-submit in §3.7):** once the version is submitted, attached +
+ready IAPs flip `READY_TO_SUBMIT → WAITING_FOR_REVIEW`. If they stay on `READY_TO_SUBMIT`
+after the build went to review, they were **not** submitted with it — expect a 2.1(b) reject;
+recovery is: complete the missing field / attach, upload a new binary, re-submit.
+
+After every product is ✓ and attached, tell the agent "done" (or "confirmed").
 
 ---
 
@@ -637,7 +687,7 @@ version enters the review queue.
 □ Age rating: set
 □ Export compliance: answered
 □ Pricing & availability: a price tier is set (Free or paid)   ← else submit fails
-□ IAPs/subscriptions: attached to the version (first release)  ← confirm in UI, not API
+□ IAPs/subscriptions: each product state READY_TO_SUBMIT (screenshot + metadata complete) + attached to the version (first release)  ← else 2.1(b) reject
 □ "What's New" text: filled in (for an update release)
 □ Privacy policy URL: reachable from a browser
 □ Support URL: reachable from a browser
@@ -710,8 +760,10 @@ lane) and confirm:
 
 - version is `WAITING_FOR_REVIEW` (or `IN_REVIEW`), and a review submission exists;
 - for a first release with IAPs: the products flipped from `READY_TO_SUBMIT` to
-  `WAITING_FOR_REVIEW`. If they did **not**, warn loudly — they are likely not attached (Step 10b),
-  the app may ship with a dead paywall; recovery is attach-in-UI then re-run the release lane.
+  `WAITING_FOR_REVIEW`. If they did **not**, warn loudly — they were not submitted with the
+  build (Guideline 2.1(b) reject is incoming: usually a missing App Review screenshot, an
+  incomplete metadata field, or the product was not attached to the version). Recovery:
+  complete the missing field / attach in the UI, upload a new binary, re-run the release lane.
 
 Then print:
 
@@ -757,6 +809,7 @@ build a correction plan.
 | Reject category | Common causes | Typical correction |
 |---|---|---|
 | **2.1 — Performance: App Completeness** | Crash on launch, broken flows, placeholder content | Fix the crash/content; rebuild (Step 3) and re-upload (Step 4) |
+| **2.1(b) — App Completeness (IAP not submitted)** | *"one or more of the In-App Purchase products have not been submitted for review"*; app references premium but the IAPs went to review alone | Per-IAP: complete metadata + **App Review screenshot** → state `READY_TO_SUBMIT`; attach to version; **upload a new binary**; re-submit (Step 10b → Step 3 → Step 11) |
 | **2.3 — Accurate Metadata** | Screenshots don't match the app; misleading description | Update screenshots (Step 10) or description (Step 6) |
 | **3.1.1 — In-App Purchase** | Offers paid features without Apple IAP | Add Apple IAP or remove paid features |
 | **4.0 — Design** | Non-standard UI patterns; private API usage | Remove private API calls; follow Apple Human Interface Guidelines |

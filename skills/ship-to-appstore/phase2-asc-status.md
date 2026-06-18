@@ -160,6 +160,17 @@ Endpoints to call (refer to live-researched API docs):
 2. `GET /v1/apps/{id}/appStoreVersions?filter[appStoreState]=PREPARE_FOR_SUBMISSION,WAITING_FOR_REVIEW,IN_REVIEW,READY_FOR_SALE` — current versions
 3. `GET /v1/builds?filter[app]={id}&sort=-uploadedDate&limit=1` — latest build
 4. `GET /v1/apps/{id}/appInfos` — metadata completeness hints
+5. `GET /v1/apps/{id}/inAppPurchasesV2?limit=200` — **only if Phase 0 reported
+   `in_app_purchases.likely_present: true`.** Returns every IAP/subscription
+   product with its `state` (`MISSING_METADATA`, `READY_TO_SUBMIT`,
+   `WAITING_FOR_REVIEW`, `APPROVED`, …). This is the read-side of the 2.1(b)
+   gate: any product that is not at least `READY_TO_SUBMIT` (most often because
+   the App Review screenshot or another required field is missing → state stays
+   `MISSING_METADATA`) will not be submitted with the build and triggers
+   Guideline 2.1(b). For auto-renewable subscriptions the per-product state is
+   nested under a subscription group; if `inAppPurchasesV2` is empty but Phase
+   0 detected IAP usage, classify as `? cannot-verify` (may live in a different
+   group endpoint) and confirm in the UI.
 
 Parse responses to populate the situation overview (§ 2.5).
 
@@ -255,7 +266,9 @@ Metadata
 
 Pricing            : set | NOT SET (blocks submission) | ? cannot-verify
 Privacy label      : published | not published | ? cannot-verify (confirm in UI)
-In-App Purchases   : {list with status, e.g. lifetime READY_TO_SUBMIT} | none | ? cannot-verify
+In-App Purchases   : {per-product state, e.g. "lifetime=READY_TO_SUBMIT, monthly=MISSING_METADATA"} | none | ? cannot-verify
+                       ← if any product is not READY_TO_SUBMIT/APPROVED, Step 10b is a HARD BLOCKER
+                         before Step 11 (else Guideline 2.1b reject)
 
 Access strategy used : A (ASC REST API) | B (fastlane) | C (altool) | D (Web UI)
 
