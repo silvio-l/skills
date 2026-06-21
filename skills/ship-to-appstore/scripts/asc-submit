@@ -1,0 +1,357 @@
+#!/usr/bin/env python3
+"""asc-submit — opt-in App Store Connect mutations for the ship-to-appstore skill.
+
+Companion to the READ-ONLY `asc-status`. This script performs the few ASC write
+actions that the first real release runs proved are worth scripting because the
+ASC web UI is the single most error-prone step. Every command here mutates remote
+state, so it is **dry-run by default**: without `--yes` it prints exactly which
+HTTP calls it WOULD make and exits without touching anything. The agent must pass
+`--yes` only after the user has explicitly confirmed the action — this mirrors the
+skill's "never submit/mutate without explicit per-action confirmation" principle.
+
+Commands:
+  asc-submit screenshot   <bundle_id> <product_id> <png_path>  [--yes]
+      Upload (replacing any existing) the App Review screenshot for one IAP or
+      subscription product — the single most-missed field that keeps products on
+      MISSING_METADATA and triggers a Guideline 2.1(b) reject. Auto-detects
+      whether the product is a non-consumable (inAppPurchasesV2) or an
+      auto-renewable subscription (subscriptionGroups → subscriptions); the two
+      use DIFFERENT screenshot resources (see asc-api-reference.md §4).
+
+  asc-submit review-note  <bundle_id> <product_id> <text|@file> [--yes]
+      Set the reviewNote on one IAP/subscription (e.g. to correct a false claim
+      caught by pre-submit Gate B). `@file` reads the note text from a file.
+
+  asc-submit resubmit     <bundle_id>                          [--yes]
+      Re-submit an existing reviewSubmission that is in UNRESOLVED_ISSUES (a
+      stored reject) or READY_FOR_REVIEW via PATCH {submitted:true}. This is the
+      correct re-submit-after-reject path — do NOT re-run the fastlane release
+      lane for this (it 422s; see asc-api-reference.md §9).
+
+  asc-submit publish      <bundle_id>                          [--yes]
+      Release an APPROVED version that is in PENDING_DEVELOPER_RELEASE to the App
+      Store via POST /v1/appStoreVersionReleaseRequests. The scriptable
+      equivalent of clicking "Release this version" in ASC.
+
+This script NEVER prints a credential (.p8 content, the JWT, or the Issuer ID
+value). Credential discovery is identical to asc-status:
+  1. env: ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_PATH
+  2. a fastlane-style JSON (--config PATH, else ./fastlane/api_key.json) with
+     key_id / issuer_id / key_filepath
+  3. Apple's default ~/.appstoreconnect/private_keys/AuthKey_<KEY_ID>.p8
+
+Requires: pyjwt with the cryptography backend (`pip install 'pyjwt[crypto]'`).
+"""
+import hashlib
+import json
+import os
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from typing import NoReturn
+
+BASE = "https://api.appstoreconnect.apple.com"
+
+
+def _die(msg, code=2) -> NoReturn:
+    print(msg, file=sys.stderr)
+    sys.exit(code)
+
+
+def _load_creds(config_path):
+    key_id = os.environ.get("ASC_KEY_ID")
+    issuer = os.environ.get("ASC_ISSUER_ID")
+    p8 = os.environ.get("ASC_KEY_PATH") or os.environ.get("ASC_KEY_FILE")
+
+    if not (key_id and issuer and p8):
+        path = config_path or os.path.join(os.getcwd(), "fastlane", "api_key.json")
+        if os.path.exists(path):
+            cfg = json.load(open(path))
+            key_id = key_id or cfg.get("key_id")
+            issuer = issuer or cfg.get("issuer_id")
+            p8 = p8 or cfg.get("key_filepath")
+
+    if key_id and issuer and not p8:
+        default = os.path.expanduser(
+            f"~/.appstoreconnect/private_keys/AuthKey_{key_id}.p8")
+        if os.path.exists(default):
+            p8 = default
+
+    if not (key_id and issuer and p8):
+        _die("Missing ASC credentials. Provide ASC_KEY_ID / ASC_ISSUER_ID / "
+             "ASC_KEY_PATH in the environment, or a fastlane/api_key.json with "
+             "key_id / issuer_id / key_filepath.")
+    p8 = os.path.expanduser(p8)
+    if not os.path.exists(p8):
+        _die(f"Private key not found at the resolved path (key_id={key_id}).")
+    return key_id, issuer, p8
+
+
+def _token(key_id, issuer, p8):
+    try:
+        import jwt
+    except ImportError:
+        _die("PyJWT is required: pip install 'pyjwt[crypto]'")
+    now = int(time.time())
+    payload = {"iss": issuer, "iat": now, "exp": now + 1000,
+               "aud": "appstoreconnect-v1"}
+    return jwt.encode(payload, open(p8).read(), algorithm="ES256",
+                      headers={"kid": key_id, "typ": "JWT"})
+
+
+class ASC:
+    def __init__(self, key_id, issuer, p8):
+        self._auth = "Bearer " + _token(key_id, issuer, p8)
+
+    def call(self, method, path, body=None):
+        url = path if path.startswith("http") else BASE + path
+        data = json.dumps(body).encode() if body is not None else None
+        headers = {"Authorization": self._auth}
+        if data is not None:
+            headers["Content-Type"] = "application/json"
+        req = urllib.request.Request(url, data=data, method=method, headers=headers)
+        try:
+            with urllib.request.urlopen(req) as r:
+                txt = r.read().decode()
+                return r.status, (json.loads(txt) if txt else None)
+        except urllib.error.HTTPError as e:
+            txt = e.read().decode()
+            try:
+                return e.code, json.loads(txt)
+            except Exception:
+                return e.code, txt
+
+    def upload_part(self, operation, chunk):
+        """PUT one chunk to a presigned upload-operation URL (no auth header)."""
+        req = urllib.request.Request(operation["url"], data=chunk, method="PUT")
+        for h in operation.get("requestHeaders") or []:
+            req.add_header(h["name"], h["value"])
+        try:
+            with urllib.request.urlopen(req) as r:
+                return r.status
+        except urllib.error.HTTPError as e:
+            _die(f"Upload part failed → HTTP {e.code}: {e.read().decode()[:300]}")
+
+
+def _q(s):
+    return urllib.parse.quote(s, safe="")
+
+
+def _app_id(asc, bundle_id):
+    status, resp = asc.call(
+        "GET", f"/v1/apps?filter[bundleId]={_q(bundle_id)}&fields[apps]=bundleId")
+    if status != 200 or not isinstance(resp, dict) or not resp.get("data"):
+        _die(f"No app record for bundle id {bundle_id} (HTTP {status}).")
+    return resp["data"][0]["id"]
+
+
+def _resolve_product(asc, app_id, product_id):
+    """Return (kind, asc_id) where kind is 'iap' or 'sub'. Searches both
+    namespaces — non-consumables in inAppPurchasesV2, subscriptions nested under
+    subscriptionGroups."""
+    s, r = asc.call(
+        "GET",
+        f"/v1/apps/{app_id}/inAppPurchasesV2?filter[productId]={_q(product_id)}&limit=5")
+    if s == 200 and isinstance(r, dict) and r.get("data"):
+        return "iap", r["data"][0]["id"]
+    s, groups = asc.call("GET", f"/v1/apps/{app_id}/subscriptionGroups?limit=200")
+    for g in (groups.get("data", []) if isinstance(groups, dict) else []):
+        s2, subs = asc.call(
+            "GET",
+            f"/v1/subscriptionGroups/{g['id']}/subscriptions"
+            f"?filter[productId]={_q(product_id)}&limit=10")
+        if s2 == 200 and isinstance(subs, dict) and subs.get("data"):
+            return "sub", subs["data"][0]["id"]
+    _die(f"Product id {product_id} not found in either IAP namespace.")
+
+
+# Per-kind ASC resource wiring for the review-screenshot upload flow.
+_SHOT = {
+    "iap": {
+        "existing": "/v1/inAppPurchasesV2/{id}/appStoreReviewScreenshot",
+        "collection": "/v1/inAppPurchaseAppStoreReviewScreenshots",
+        "res_type": "inAppPurchaseAppStoreReviewScreenshots",
+        "rel_name": "inAppPurchaseV2",
+        "rel_type": "inAppPurchases",
+        "note_path": "/v2/inAppPurchasesV2/{id}",
+        "note_type": "inAppPurchasesV2",
+    },
+    "sub": {
+        "existing": "/v1/subscriptions/{id}/appStoreReviewScreenshot",
+        "collection": "/v1/subscriptionAppStoreReviewScreenshots",
+        "res_type": "subscriptionAppStoreReviewScreenshots",
+        "rel_name": "subscription",
+        "rel_type": "subscriptions",
+        "note_path": "/v1/subscriptions/{id}",
+        "note_type": "subscriptions",
+    },
+}
+
+
+def _ok(status):
+    return 200 <= status < 300
+
+
+def cmd_screenshot(asc, app_id, args, do_it):
+    if len(args) < 2:
+        _die("usage: asc-submit screenshot <bundle_id> <product_id> <png_path> [--yes]")
+    product_id, png = args[0], os.path.expanduser(args[1])
+    if not os.path.exists(png):
+        _die(f"Screenshot not found: {png}")
+    kind, pid = _resolve_product(asc, app_id, product_id)
+    w = _SHOT[kind]
+    data = open(png, "rb").read()
+    size, md5 = len(data), hashlib.md5(data).hexdigest()
+    name = os.path.basename(png)
+    print(f"Product {product_id} → {kind} {pid}; file {name} ({size} bytes)")
+    print(f"  GET    {w['existing'].format(id=pid)}   (find + delete existing)")
+    print(f"  POST   {w['collection']}   (reserve upload)")
+    print(f"  PUT    <presigned upload operations>   (chunked bytes)")
+    print(f"  PATCH  {w['collection']}/<id>   (uploaded:true + md5 checksum)")
+    if not do_it:
+        print("\nDRY RUN — pass --yes to upload. Nothing was changed.")
+        return
+
+    es, er = asc.call("GET", w["existing"].format(id=pid))
+    existing_id = er.get("data", {}).get("id") if isinstance(er, dict) and er.get("data") else None
+    if existing_id:
+        asc.call("DELETE", f"{w['collection']}/{existing_id}")
+        print(f"  deleted existing screenshot {existing_id}")
+    rs, rr = asc.call("POST", w["collection"], {
+        "data": {
+            "type": w["res_type"],
+            "attributes": {"fileName": name, "fileSize": size},
+            "relationships": {w["rel_name"]: {"data": {"type": w["rel_type"], "id": pid}}},
+        }
+    })
+    if not _ok(rs):
+        _die(f"Reservation failed → HTTP {rs}: {json.dumps(rr)[:400]}")
+    sid = rr["data"]["id"]
+    ops = rr["data"]["attributes"].get("uploadOperations") or []
+    if not ops:
+        _die("No upload operations returned.")
+    for i, op in enumerate(ops, 1):
+        chunk = data[int(op["offset"]):int(op["offset"]) + int(op["length"])]
+        asc.upload_part(op, chunk)
+        print(f"  uploaded chunk {i}/{len(ops)}")
+    ps, pr = asc.call("PATCH", f"{w['collection']}/{sid}", {
+        "data": {"type": w["res_type"], "id": sid,
+                 "attributes": {"sourceFileChecksum": md5, "uploaded": True}}
+    })
+    if not _ok(ps):
+        _die(f"Commit (uploaded:true) failed → HTTP {ps}: {json.dumps(pr)[:400]}")
+    print("✓ Review screenshot uploaded. Re-run `asc-status iap` to confirm the "
+          "product left MISSING_METADATA.")
+
+
+def cmd_review_note(asc, app_id, args, do_it):
+    if len(args) < 2:
+        _die("usage: asc-submit review-note <bundle_id> <product_id> <text|@file> [--yes]")
+    product_id, note = args[0], args[1]
+    if note.startswith("@"):
+        note = open(os.path.expanduser(note[1:])).read().strip()
+    kind, pid = _resolve_product(asc, app_id, product_id)
+    w = _SHOT[kind]
+    path = w["note_path"].format(id=pid)
+    print(f"Product {product_id} → {kind} {pid}")
+    print(f"  PATCH  {path}   reviewNote ({len(note)} chars)")
+    if not do_it:
+        print("\nDRY RUN — pass --yes to apply. Nothing was changed.")
+        return
+    s, r = asc.call("PATCH", path, {
+        "data": {"type": w["note_type"], "id": pid, "attributes": {"reviewNote": note}}
+    })
+    if not _ok(s):
+        _die(f"PATCH failed → HTTP {s}: {json.dumps(r)[:400]}")
+    print("✓ reviewNote set.")
+
+
+def cmd_resubmit(asc, app_id, args, do_it):
+    s, r = asc.call(
+        "GET", f"/v1/reviewSubmissions?filter[app]={app_id}&filter[platform]=IOS"
+               "&limit=10&fields[reviewSubmissions]=state,submittedDate")
+    subs = r.get("data", []) if isinstance(r, dict) else []
+    target = next((x for x in subs
+                   if x.get("attributes", {}).get("state") in
+                   ("UNRESOLVED_ISSUES", "READY_FOR_REVIEW")), None)
+    if not target:
+        states = ", ".join(f"{x['id'][:8]}={x.get('attributes',{}).get('state')}"
+                           for x in subs) or "(none)"
+        _die(f"No reviewSubmission in UNRESOLVED_ISSUES/READY_FOR_REVIEW. Found: {states}")
+    sid = target["id"]
+    print(f"  PATCH  /v1/reviewSubmissions/{sid}   submitted:true "
+          f"(current state {target['attributes']['state']})")
+    if not do_it:
+        print("\nDRY RUN — pass --yes to re-submit. Nothing was changed.")
+        return
+    s, r = asc.call("PATCH", f"/v1/reviewSubmissions/{sid}", {
+        "data": {"type": "reviewSubmissions", "id": sid, "attributes": {"submitted": True}}
+    })
+    if not _ok(s):
+        _die(f"Re-submit failed → HTTP {s}: {json.dumps(r)[:400]}")
+    print("✓ Re-submitted → state should flip to WAITING_FOR_REVIEW. "
+          "Confirm with `asc-status status`.")
+
+
+def cmd_publish(asc, app_id, args, do_it):
+    s, r = asc.call(
+        "GET", f"/v1/apps/{app_id}/appStoreVersions?limit=10"
+               "&fields[appStoreVersions]=versionString,appVersionState")
+    versions = r.get("data", []) if isinstance(r, dict) else []
+    pending = next((v for v in versions
+                    if v.get("attributes", {}).get("appVersionState")
+                    == "PENDING_DEVELOPER_RELEASE"), None)
+    if not pending:
+        states = ", ".join(f"{v['attributes']['versionString']}:"
+                           f"{v['attributes']['appVersionState']}" for v in versions)
+        _die(f"No version in PENDING_DEVELOPER_RELEASE. Current: {states}")
+    vid = pending["id"]
+    vstr = pending["attributes"]["versionString"]
+    print(f"  POST   /v1/appStoreVersionReleaseRequests   release version {vstr}")
+    if not do_it:
+        print("\nDRY RUN — pass --yes to release. Nothing was changed.")
+        return
+    s, r = asc.call("POST", "/v1/appStoreVersionReleaseRequests", {
+        "data": {"type": "appStoreVersionReleaseRequests",
+                 "relationships": {"appStoreVersion":
+                                   {"data": {"type": "appStoreVersions", "id": vid}}}}
+    })
+    if not _ok(s):
+        _die(f"Release request failed → HTTP {s}: {json.dumps(r)[:400]}")
+    print(f"✓ Version {vstr} is being released. RevenueCat: allow up to 24 h for "
+          "IAP products to propagate to StoreKit before announcing.")
+
+
+COMMANDS = {
+    "screenshot": cmd_screenshot,
+    "review-note": cmd_review_note,
+    "resubmit": cmd_resubmit,
+    "publish": cmd_publish,
+}
+
+
+def main():
+    args = sys.argv[1:]
+    config_path = None
+    if "--config" in args:
+        i = args.index("--config")
+        config_path = args[i + 1]
+        del args[i:i + 2]
+    do_it = "--yes" in args
+    args = [a for a in args if a != "--yes"]
+
+    if not args or args[0] not in COMMANDS:
+        _die(__doc__, 2)
+    cmd = args[0]
+    if len(args) < 2:
+        _die(f"usage: asc-submit {cmd} <bundle_id> ...")
+    bundle_id = args[1]
+    asc = ASC(*_load_creds(config_path))
+    app_id = _app_id(asc, bundle_id)
+    COMMANDS[cmd](asc, app_id, args[2:], do_it)
+
+
+if __name__ == "__main__":
+    main()

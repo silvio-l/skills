@@ -4,8 +4,11 @@ Loaded on demand by Phase 2/Phase 3 when querying App Store Connect directly. Ev
 was learned from an actual rejection-recovery run — the traps here are the ones that produced a
 **false "missing"** report or a wasted submit. Treat this as the truth source over guessed paths.
 
-> **The bundled `scripts/asc-status` already encodes the correct paths below.** Prefer it over raw
-> calls; use this file to understand its output and to do follow-up queries it does not cover.
+> **The bundled `scripts/asc-status` (read-only) already encodes the correct paths below.** Prefer
+> it over raw calls; use this file to understand its output and to do follow-up queries it does not
+> cover. The few **write** actions worth scripting (review-screenshot upload, reviewNote PATCH,
+> re-submit-after-reject, publish) are bundled in `scripts/asc-submit`, which is **dry-run by default**
+> and only mutates with an explicit `--yes` — see §11.
 
 ---
 
@@ -64,12 +67,37 @@ A `404`/`400` on these is **cannot-verify**, not "missing" — classify it as `?
 UI. Never report a screenshot as absent from a non-200. (Shortcut: if a product is already
 `READY_TO_SUBMIT`, a screenshot is implicitly present — Apple won't grant that state without one.)
 
-**Uploading** a screenshot is a 5-call reservation flow (create reservation → PUT each presigned
-chunk → PATCH `uploaded:true`+checksum), with non-consumables using
-`inAppPurchaseAppStoreReviewScreenshots` and subscriptions
-`subscriptionAppStoreReviewScreenshots`. It is a **mutation** — out of scope for the read-only
-bundled script; guide the user through the ASC UI (Monetization → the product → App Review
-Information → upload) unless they explicitly ask the agent to script the upload.
+**Uploading** a screenshot is a 4-step reservation flow (delete existing → reserve → PUT each
+presigned chunk → PATCH `uploaded:true`+checksum). The two product kinds use **different resources
+and a different relationship name** — getting these wrong is the usual cause of a failed upload:
+
+| | Non-consumable (IAP) | Subscription |
+|---|---|---|
+| Reserve `POST` | `/v1/inAppPurchaseAppStoreReviewScreenshots` | `/v1/subscriptionAppStoreReviewScreenshots` |
+| Relationship in body | `inAppPurchaseV2` → `{type:"inAppPurchases", id}` (note: rel **type** is the v1 name `inAppPurchases`, not `inAppPurchasesV2`) | `subscription` → `{type:"subscriptions", id}` |
+| Delete existing | `DELETE /v1/inAppPurchaseAppStoreReviewScreenshots/{id}` | `DELETE /v1/subscriptionAppStoreReviewScreenshots/{id}` |
+
+Reservation body (IAP shown; `attributes` carry `fileName`+`fileSize`):
+
+```json
+{"data":{"type":"inAppPurchaseAppStoreReviewScreenshots",
+  "attributes":{"fileName":"paywall.png","fileSize":123456},
+  "relationships":{"inAppPurchaseV2":{"data":{"type":"inAppPurchases","id":"<iap_id>"}}}}}
+```
+
+The response carries `attributes.uploadOperations` — for each, `PUT` `data[offset:offset+length]`
+to `operation.url` with the operation's `requestHeaders` (no Authorization header — it is presigned).
+Then commit:
+
+```json
+PATCH /v1/inAppPurchaseAppStoreReviewScreenshots/{id}
+{"data":{"type":"inAppPurchaseAppStoreReviewScreenshots","id":"{id}",
+  "attributes":{"sourceFileChecksum":"<md5-hex>","uploaded":true}}}
+```
+
+This is a **mutation**. `scripts/asc-submit screenshot <bundle_id> <product_id> <png>` performs the
+whole flow (auto-detecting IAP vs subscription) — dry-run unless `--yes` is passed. Otherwise guide
+the user through the ASC UI (Monetization → the product → App Review Information → upload).
 
 ---
 
@@ -148,3 +176,58 @@ A 2.1(b) reject email almost always says *"submit your In-App Purchases and uplo
 When the **sole** cause is that the IAPs were not submitted (not a code/binary defect), no new binary
 is needed — attach the IAPs + re-submit with the existing build. Judge the email's instructions
 against the actual blocking condition rather than rebuilding reflexively.
+
+---
+
+## 11. Releasing an approved version is scriptable (no ASC UI needed)
+
+A version in `PENDING_DEVELOPER_RELEASE` (the state after Apple approves a *manual*-release
+submission) does **not** require clicking "Release this version" in the web UI. Release it via:
+
+```
+POST /v1/appStoreVersionReleaseRequests
+{"data":{"type":"appStoreVersionReleaseRequests",
+  "relationships":{"appStoreVersion":{"data":{"type":"appStoreVersions","id":"<version_id>"}}}}}
+```
+
+`scripts/asc-submit publish <bundle_id>` finds the `PENDING_DEVELOPER_RELEASE` version and does this
+(dry-run unless `--yes`). **RevenueCat/StoreKit note:** after release, allow up to ~24 h for newly
+approved IAP products to propagate to StoreKit before announcing — fresh products can briefly read as
+unavailable on device.
+
+---
+
+## 12. The Review-Submission API has no item type for IAPs/subscriptions
+
+`reviewSubmissions` carries an `items` relationship, but the only valid item types are
+`appStoreVersion`, `appEvent`, `customProductPage`, `experiment`, `gameCenter`, and
+`backgroundAsset` — there is **no** IAP/subscription item type (verified against the REST schema).
+This is *why* the very **first** submission of a subscription/IAP must be attached to the version
+**manually in the ASC UI** before submitting (App → Distribution → the version → "In-App Purchases
+and Subscriptions" → select the products). After the first approval, subscriptions submit
+independently and the manual attach disappears. There is no API path that creates the version→IAP
+attachment — confirm it in the UI (§8, item 4).
+
+---
+
+## 13. The MISSING_METADATA → empty-paywall chain (why the screenshot gate is functional, not cosmetic)
+
+A product stuck on `MISSING_METADATA` (most often: no App Review screenshot) is not just a review
+blocker — it is **invisible to StoreKit**. RevenueCat SDK v9 (StoreKit 2) filters out offering
+packages whose store products StoreKit cannot resolve, so `offerings.current` comes back `null` and
+the in-app paywall shows "prices unavailable". So clearing every product to `READY_TO_SUBMIT` (which
+requires the screenshot) fixes both the 2.1(b) reject **and** a broken live paywall. Treat the
+screenshot as functionally required, not optional polish.
+
+---
+
+## 14. fastlane `deliver` traps when submitting with an API key
+
+- **`precheck_include_in_app_purchases: false` is mandatory.** With API-key auth, spaceship cannot
+  inspect IAPs, and `deliver`'s precheck aborts the submit if this is left on. Set it false on any
+  `release`-style lane.
+- **Pin `app_version` + `build_number` from `pubspec.yaml`.** Otherwise `deliver` attaches "whatever
+  is newest" on ASC rather than the exact build you uploaded.
+- **Export-compliance at submit:** pass `submission_information: {export_compliance_uses_encryption:
+  false, export_compliance_is_exempt: true, add_id_info_uses_idfa: false}` for a standard
+  HTTPS-only app so the submit does not stop to ask.

@@ -138,6 +138,45 @@ This field is a heuristic from on-disk facts. If it is `false` but the app
 clearly has premium content, treat that as a contradiction to surface, not a
 silent skip.
 
+### iOS permissions ↔ purpose strings (drives the 5.1.1 / 5.1.5 gate — do NOT ask the user)
+
+`ios_permissions` is the input to pre-submit **Gate E**. `declared_usage_keys` lists the
+`NS*UsageDescription` keys actually present in `ios/Runner/Info.plist`; `expected_from_plugins` lists
+the keys each permission-using plugin requires.
+
+- A key in `expected_from_plugins` but **missing** from `declared_usage_keys` → the app uses a
+  sensitive API with no purpose string → a guaranteed **5.1.1** reject (and a runtime crash on iOS).
+  Flag as a blocker.
+- A key in `declared_usage_keys` that **no** plugin (and no native code) needs → an unused permission
+  declaration → a **5.1.5** reject. Flag for removal — but check native code first (a key may be
+  required by a non-plugin native call), so present it as "verify, likely remove", not a hard delete.
+- Gate E additionally reads the *wording* of each present key — Apple rejects generic strings
+  ("This app needs camera access"). That quality judgment is the gate's, not Phase 0's.
+
+### Social login → Sign in with Apple (drives the 5.1.1(iv) gate — do NOT ask the user)
+
+`social_login.siwa_required` is `true` when a **third-party/social** login provider is detected
+(`third_party_providers`). Guideline 5.1.1(iv): such an app **must** also offer Sign in with Apple.
+
+- `siwa_required: true` + `has_sign_in_with_apple: false` → **blocker**: add Sign in with Apple
+  (Pre-submit Gate F). Cite the detected providers.
+- `siwa_required: false` → state as a fact that SiwA is **not** required (email/password or
+  Supabase-native auth alone does not trigger it). Do not ask.
+
+### User-generated content (drives the 1.2 safety gate — heuristic, verify)
+
+`user_generated_content.likely_present` is a **conservative** heuristic (requires ≥2 distinct
+feature-shaped markers). When true, Guideline 1.2 requires a content filter, an in-app **report**
+mechanism, a **block** mechanism, and a published EULA. `has_report_or_block` indicates whether
+moderation controls were found. Present as "investigate" (Gate L), not an automatic blocker — and if
+it is `false` but the app clearly has UGC, surface that as a contradiction.
+
+### Paywall hints (feeds the 3.1.2 subscription-disclosure gate)
+
+`paywall_hints` lists likely paywall/subscription UI files so Gate G knows where to inspect for the
+required disclosures (price, period, what's included, functional Terms/EULA + Privacy links). Empty
+is normal for an app without subscriptions.
+
 ### Ruby / Bundler environment (prevents the #1 first-run failure)
 
 `ruby_env` exposes the fastlane runtime. The most common first-run failure is `bundle exec`

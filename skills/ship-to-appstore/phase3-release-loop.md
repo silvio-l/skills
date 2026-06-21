@@ -49,6 +49,7 @@ yet confirmed complete. Present the resulting list to the user before starting t
 Marker legend:  ✓ verified done   ? cannot-verify via API (confirm in ASC UI)   □ confirmed open
 
 Remaining steps:
+  □ 0.  Pre-flight gate (toolchain · iOS platform · Podfile.lock · signing)  ← before any 10-min build
   □ 1.  Version bump
   □ 2.  Signing & certificates
   □ 3.  Build & archive  (flutter build ipa)
@@ -219,6 +220,9 @@ When the user says "stuck here: <error>" or pastes error output:
 | Signing — no identity | "No signing certificate" / "provisioning profile" error | Check identity list (`security find-identity -v -p codesigning`); offer to open Xcode |
 | Build number collision | "A build with that number already exists in ASC" | Bump `build_number` in `pubspec.yaml`, retry build |
 | Deployment target mismatch | "requires a higher iOS deployment target" | Edit `ios/Podfile` `platform :ios, 'X.Y'` + Xcode `IPHONEOS_DEPLOYMENT_TARGET`; run `cd ios && pod install` |
+| iOS platform not installed | "iOS X.Y is not installed" during archive (aborts mid-build) | Xcode → Settings → Components → download the named iOS platform. Caught up front by Step 0 |
+| Podfile.lock drift | archive/build fails after a `pubspec.yaml` plugin bump; lockfile lags | `cd ios && pod install --repo-update`, commit `Podfile.lock`. Caught up front by Step 0 (`pod install --deployment` dry check) |
+| Wrong build number on ASC | uploaded build shows a different `+N` than `pubspec.yaml` | `manageAppVersionAndBuildNumber` was `true` in ExportOptions.plist — set it `false` (Step 4) and re-export |
 | CocoaPods conflict | "CocoaPods could not find compatible versions" | `cd ios && pod repo update && pod install` |
 | Build processing stalled | Status "Processing" > 60 min in TestFlight | Check [developer.apple.com/system-status](https://developer.apple.com/system-status/); do not re-upload yet |
 | Invalid binary (ITMS) | "ITMS-90XXX" code in email or ASC | Classify by code (§3.9); fix and re-upload |
@@ -235,6 +239,40 @@ When the user says "stuck here: <error>" or pastes error output:
 ---
 
 ## Release Steps (Detailed)
+
+---
+
+### Step 0 — Pre-flight Gate
+
+**Mode:** Automatable — agent runs read-only checks before any expensive work.
+
+**What:** Catch the failures that otherwise abort a build **after** a 10-minute compile, up front and
+cheaply. The reference project learned this the hard way: a release aborted mid-archive on *"iOS X.Y
+is not installed"*, and another stalled on a `Podfile.lock` that lagged a `pubspec.yaml` plugin bump
+(Sentry 8.58.1 vs 8.58.2). Run these gates before Step 3 so a failure costs seconds, not minutes.
+
+```bash
+# 1. Toolchain present
+command -v xcodebuild && command -v flutter && command -v pod || echo "MISSING toolchain"
+
+# 2. iOS device platform actually installed (not just the SDK). The 'Any iOS Device'
+#    destination is required for an archive; Xcode reports it under 'Ineligible
+#    destinations' as 'iOS X.Y is not installed' when the platform component is missing.
+xcodebuild -workspace ios/Runner.xcworkspace -scheme Runner -showdestinations 2>&1 \
+  | grep -q "is not installed" && echo "BLOCKER: iOS platform not installed (Xcode → Settings → Components)"
+
+# 3. Podfile.lock resolves against the Podfile WITHOUT mutating it (dry check).
+#    --deployment aborts if the lockfile would change — exactly the signal we want.
+( cd ios && pod install --deployment --no-repo-update >/dev/null 2>&1 ) \
+  || echo "BLOCKER: Podfile.lock out of sync — cd ios && pod install --repo-update"
+
+# 4. Signing key present (path only — never print contents)
+ls ~/.appstoreconnect/private_keys/AuthKey_*.p8 >/dev/null 2>&1 || echo "no ASC API key found"
+```
+
+If the project ships a centralized pre-flight script (Phase 0 may surface one, e.g.
+`tools/preflight.sh`), prefer it — it encodes the developer's exact checks. Any BLOCKER line is a hard
+stop: fix it (each check prints its fix) before advancing to Step 1. Then say "done".
 
 ---
 
@@ -319,6 +357,32 @@ The agent runs this command and monitors the output. On success, the IPA is at
 `build/ios/ipa/{AppName}.ipa`. The agent confirms the path and file size — a result under 1 MB
 suggests a misconfigured or empty build and is flagged immediately.
 
+**Crash symbolication (if the app ships Sentry — read Phase 0 `analytics_tracking`).** A plain
+release build strips Dart symbols, so production stack traces arrive obfuscated. To keep them
+readable, build with obfuscation + a split-debug-info dir and upload the symbols afterwards:
+
+```bash
+flutter build ipa --release \
+  --obfuscate --split-debug-info=build/debug-info \
+  --extra-gen-snapshot-options=--save-obfuscation-map=build/debug-info/obfuscation.map.json
+# then (Sentry): dart run sentry_dart_plugin   # reads dSYMs + the obfuscation map
+```
+
+Symbol upload is **non-blocking** — a failure must not abort the release (symbols are nice-to-have).
+Note also: native-asset frameworks compiled outside Xcode (e.g. `objective_c.framework`) get **no
+dSYM** automatically; if Sentry reports missing dSYMs, generate them with `dsymutil <framework-binary>
+-o <name>.dSYM` over the archive's `Frameworks/` before upload. Skip this whole block if no
+crash-reporting SDK was detected.
+
+**Build-number safety net.** Before uploading (Step 4), confirm the archive's `CFBundleVersion`
+matches `pubspec.yaml`'s `+N` — Xcode silently auto-increments it under some settings (see Step 4),
+which makes ASC show a different build than expected:
+
+```bash
+/usr/libexec/PlistBuddy -c "Print :ApplicationProperties:CFBundleVersion" \
+  build/ios/Runner.xcarchive/Info.plist   # must equal pubspec's +N
+```
+
 **Common errors and responses (handled by the stuck handler §3.5):**
 
 | Error signal | Response |
@@ -343,19 +407,59 @@ The upload method depends on the access strategy established in Phase 2:
 
 **Strategy A — ASC API key (`.p8` + Issuer ID + Key ID):**
 
+The reference project's real, working path is a pure-CLI `xcodebuild` archive + export-upload — no
+`altool`, no GUI. It is more robust than `altool` and is what an API-key setup should use:
+
 ```bash
-# altool (check Phase 1 for current deprecation status)
-xcrun altool --upload-app \
-  --type ios \
-  --file "build/ios/ipa/{AppName}.ipa" \
-  --apiKey {KEY_ID} \
-  --apiIssuer {ISSUER_ID}
-# The .p8 file is read from ~/.appstoreconnect/private_keys/AuthKey_{KEY_ID}.p8
-# (or from APPLE_API_KEY_PATH env var) — the agent references the path, never the content
+# Archive (API-key auth — no Apple ID password, no GUI)
+xcodebuild archive \
+  -workspace ios/Runner.xcworkspace -scheme Runner \
+  -destination "generic/platform=iOS" -configuration Release \
+  -archivePath build/ios/Runner.xcarchive \
+  -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_{KEY_ID}.p8 \
+  -authenticationKeyID {KEY_ID} -authenticationKeyIssuerID {ISSUER_ID} \
+  -allowProvisioningUpdates DEVELOPMENT_TEAM={TEAM_ID}
+
+# Export + upload in one step (ExportOptions.plist below)
+xcodebuild -exportArchive \
+  -archivePath build/ios/Runner.xcarchive \
+  -exportOptionsPlist build/ios/ExportOptions.plist \
+  -exportPath build/ios/ipa \
+  -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_{KEY_ID}.p8 \
+  -authenticationKeyID {KEY_ID} -authenticationKeyIssuerID {ISSUER_ID} \
+  -allowProvisioningUpdates
+```
+
+> **⚠️ `manageAppVersionAndBuildNumber` MUST be `false` in `ExportOptions.plist`.** Left at its
+> default (`true`), Xcode **silently auto-increments** `CFBundleVersion` when that build number already
+> exists on ASC — so the uploaded build gets a different number than `pubspec.yaml` says, and the
+> version you later submit attaches the wrong build. This is a silent footgun that wastes a whole
+> upload cycle. The minimal `ExportOptions.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>method</key><string>app-store-connect</string>
+  <key>teamID</key><string>{TEAM_ID}</string>
+  <key>destination</key><string>upload</string>
+  <key>signingStyle</key><string>automatic</string>
+  <key>manageAppVersionAndBuildNumber</key><false/>
+</dict></plist>
+```
+
+**Fallback — `altool`** (only if the `xcodebuild` path is unavailable; check Phase 1 for its current
+deprecation status):
+
+```bash
+xcrun altool --upload-app --type ios --file "build/ios/ipa/{AppName}.ipa" \
+  --apiKey {KEY_ID} --apiIssuer {ISSUER_ID}
+# .p8 read from ~/.appstoreconnect/private_keys/AuthKey_{KEY_ID}.p8 — reference the path, never content
 ```
 
 If Phase 1 indicated that `altool` is deprecated in favor of `notarytool` or Transporter CLI,
-use the current recommended command from the Phase 1 Freshness Report instead.
+use the current recommended command from the Phase 1 Freshness Report instead. If the project ships a
+build script (Phase 0, e.g. `tools/build-ios.sh`), prefer it — it already encodes this exact flow.
 
 **Strategy D fallback — no automated credential available:**
 
@@ -576,6 +680,13 @@ xcrun simctl io booted screenshot ~/Desktop/{screen_name}.png
 Screenshots are taken at logical resolution by the Simulator (the Simulator sets pixel density
 automatically — do not scale manually). Upload via drag-and-drop in the ASC Web UI.
 
+**App-preview videos (optional).** If the project also ships app-preview videos, Apple enforces hard
+client-side specs: the filename must carry the preview-type token (e.g. `IPHONE_67`, `IPAD_PRO_3GEN_129`),
+the resolution must match the device **exactly** (e.g. 886×1920 / 1200×1600), duration 15–30 s, and
+max 3 per type+locale. `fastlane deliver` (or a project `previews` lane) validates these before upload;
+verify a video with `ffprobe` first if hand-uploading, because the ASC UI rejects off-spec files with
+an unhelpful error. Previews are optional metadata — skip this if the app has none.
+
 After uploading all required sizes, tell the agent "done".
 
 ---
@@ -652,9 +763,28 @@ For **every** IAP / subscription product, all of:
   is a member of it).
 - **App Store Localization**: Display Name + Description (at least the primary language).
 - **App Review Screenshot** uploaded — one screenshot per product, **required** to leave
-  `MISSING_METADATA`. This is the single most-missed field.
+  `MISSING_METADATA`. This is the single most-missed field. It is also **functionally** required,
+  not just for review: a product stuck on `MISSING_METADATA` is invisible to StoreKit, so a
+  RevenueCat (StoreKit 2) paywall reads `offerings.current == null` and shows "prices unavailable"
+  on a live device. Clearing it fixes both the 2.1(b) reject and a broken paywall.
 - **Review Notes** (optional but recommended) + a sandbox-test account if the purchase flow
   is non-trivial.
+
+**Optional automation (with explicit confirmation).** The screenshot upload and review-note edit are
+the two most error-prone manual ASC steps, so the skill bundles a dry-run-by-default writer for them.
+After the user confirms, the agent may run:
+
+```bash
+SUBMIT=~/.claude/skills/ship-to-appstore/scripts/asc-submit
+python3 "$SUBMIT" screenshot  {bundle_id} {product_id} path/to/paywall.png   # dry-run; add --yes to upload
+python3 "$SUBMIT" review-note {bundle_id} {product_id} @notes.txt            # dry-run; add --yes to apply
+```
+
+It auto-detects IAP vs subscription (the two use different ASC resources) and prints the exact calls
+before doing anything. Without `--yes` it only previews. A good source for the screenshot is a paywall
+PNG captured by an integration/screenshot test, so it stays reproducible. This stays opt-in — never
+upload without the user saying go. The ASC UI path (Monetization → product → App Review Information →
+upload) remains the manual alternative.
 
 After the per-product fields are complete, **attach** the products to the version:
 
@@ -678,24 +808,32 @@ After every product is ✓ and attached, tell the agent "done" (or "confirmed").
 
 **Mode:** Automatable — the agent runs the scans and reports blockers; the user fixes any hit.
 
-**What:** Two reject reasons are invisible to every API query because they are judgements over text
-and images, not fields. Both are real rejections the API-only gates missed:
+**What:** A whole class of reject reasons is invisible to every API query because they are judgements
+over text, images, and code — not fields. [pre-submit-verification.md](pre-submit-verification.md)
+holds a gate per high-frequency Apple guideline; run the ones **in scope per Phase 0 facts** (the gate
+index there maps each gate to the Phase 0 field that scopes it — skip the rest as facts, don't ask):
 
-- **Guideline 2.3.7** — a **price reference** ("free", "gratis", "kostenlos", a discount, a currency
-  amount) in a **screenshot caption / app name / subtitle / preview / promo text**. A real run was
-  rejected for captions reading *"Kostenlos starten"* / *"Free to start"*.
-- **2.3 accuracy** — the store text or an **IAP review note** claims a feature the **code does not
-  actually implement** (a real run claimed *"Sign in with Apple"* for a removed, dead-dependency
-  feature).
+- **A** (2.3.7) — price reference ("free/gratis/kostenlos", discount, currency) in a screenshot
+  caption / name / subtitle / preview / promo text. *Always.*
+- **B** (2.3) — store text / IAP review note claims a feature the code does not implement (a dead
+  `pubspec.yaml` dependency is **not** an implemented feature). *Always.*
+- **D** (5.1.2) — privacy nutrition label vs the data the code actually collects (mismatch either way).
+- **E** (5.1.1/5.1.5) — Info.plist purpose strings present for each used permission, specific, none
+  unused. *Scoped by `ios_permissions`.*
+- **F** (5.1.1iv) — Sign in with Apple present when a third-party login is. *Scoped by `social_login`.*
+- **G** (3.1.2) — subscription paywall shows price/period/contents + Terms/Privacy links. *Subscriptions.*
+- **H** (3.1.1) — no external/web purchase steering for digital goods. *Scoped by `in_app_purchases`.*
+- **I** — Privacy & Support URLs actually resolve to the right page (`WebFetch`). *Always.*
+- **J** (2.1) — demo credentials in the review notes when login gates content.
+- **K** (5.1.1v) — account deletion really removes the server account, in-app. *Scoped by `account_deletion`.*
+- **L** (1.2) — UGC has report/block/filter/EULA. *Scoped by `user_generated_content`.*
+- **M** (2.1) — no placeholder/lorem-ipsum/broken-screen content (text grep + screenshot vision).
 
-Read [pre-submit-verification.md](pre-submit-verification.md) and run **Gate A** (mechanical price-
-token grep over the screenshot/caption sources, plus a vision pass on the PNGs if a vision model is
-available) and **Gate B** (features-vs-claims: cross-check each concrete store/review-note claim
-against `lib/`/`ios/` call sites — a dead dependency in `pubspec.yaml` is **not** an implemented
-feature). Present the two verdict blocks. Any `⚠` is a **hard blocker** for Step 11 until fixed
-(reword the caption + regenerate screenshots, or correct the store text / PATCH the review note).
+Present a verdict block per gate you ran. Any `⚠` is a **hard blocker** for Step 11 until fixed. Where
+a vision model or `WebFetch` is unavailable, run the mechanical part and tell the user which visual/live
+check was skipped — never silently drop it.
 
-After both gates pass clean, tell the agent "done".
+After all in-scope gates pass clean, tell the agent "done".
 
 ---
 
@@ -720,11 +858,35 @@ version enters the review queue.
 □ Paid Apps Agreement: accepted in ASC → Business (first IAP release)  ← else IAPs unpurchasable → 2.1(b)
 □ Price-reference scan (Step 10c Gate A): no "free/gratis/kostenlos"/currency in captions/name/subtitle/promo  ← else 2.3.7 reject
 □ Features-vs-claims (Step 10c Gate B): every store/review-note claim is actually implemented in code  ← else 2.3 reject
+□ Privacy label vs code (Gate D): declared data types match what the code collects  ← else 5.1.2 reject
+□ Purpose strings (Gate E): each used permission has a specific NS*UsageDescription, none unused  ← else 5.1.1/5.1.5 reject
+□ Sign in with Apple (Gate F): present if a third-party login is  ← else 5.1.1(iv) reject
+□ Subscription disclosure (Gate G): paywall shows price/period/contents + Terms/Privacy links  ← else 3.1.2 reject
+□ No external purchase steering (Gate H): digital goods use Apple IAP only  ← else 3.1.1 reject
+□ Privacy & Support URLs (Gate I): both resolve to the correct live page  ← else reject
+□ Demo account (Gate J): review notes carry working credentials if login gates content  ← else 2.1 reject
+□ Account deletion depth (Gate K): in-app, removes the server account  ← else 5.1.1(v) reject
+□ UGC safety (Gate L): report/block/filter/EULA present if the app has UGC  ← else 1.2 reject
+□ Completeness (Gate M): no placeholder/lorem-ipsum/broken screens in app or screenshots  ← else 2.1 reject
 □ "What's New" text: filled in (for an update release)
 □ Privacy policy URL: reachable from a browser
 □ Support URL: reachable from a browser
 □ Account deletion flow: implemented (Phase 0 account_deletion) — confirmed, not asked
 ```
+
+**Optional automation (with explicit confirmation).** Submission can be scripted two ways — both
+opt-in, never run without the user saying go:
+
+- **A project `release` lane** (Phase 0 `fastlane_lanes`) is the preferred scripted submit — it
+  encodes the developer's exact wiring. Two non-obvious caveats it must satisfy (see
+  [asc-api-reference.md](asc-api-reference.md) §14): `precheck_include_in_app_purchases: false` is
+  **mandatory** with API-key auth (else the submit aborts), and `app_version`/`build_number` must be
+  pinned from `pubspec.yaml` so the exact uploaded build is attached.
+- **Re-submitting after a reject** does **not** use the release lane (it 422s — §9). Use
+  `scripts/asc-submit resubmit {bundle_id}` (dry-run unless `--yes`), which PATCHes the existing
+  `UNRESOLVED_ISSUES`/`READY_FOR_REVIEW` submission to `submitted:true`.
+
+Otherwise, this is a human action in the ASC web UI:
 
 Go to: **App Store Connect → My Apps → {App} → App Store → {Version} → "Submit for Review"**
 
@@ -768,6 +930,11 @@ Phased release becomes valuable once there is a meaningful installed base to pro
 **After Apple's decision:**
 - **Approved:** status changes to "Ready for Sale" (automatic) or "Pending Developer Release"
   (manual). App is live when status is "Ready for Sale".
+  - For the **manual**-release case, releasing is **scriptable** — no need to click "Release this
+    version" in the UI. With confirmation, run `scripts/asc-submit publish {bundle_id}` (dry-run
+    unless `--yes`); it finds the `PENDING_DEVELOPER_RELEASE` version and POSTs the release request
+    ([asc-api-reference.md](asc-api-reference.md) §11). **RevenueCat note:** allow ~24 h for newly
+    approved IAPs to propagate to StoreKit before announcing the release.
 - **Rejected:** see §3.8. Re-invoke the skill — it will read the status note and enter the
   reject handler immediately.
 

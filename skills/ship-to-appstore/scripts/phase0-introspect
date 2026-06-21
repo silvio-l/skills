@@ -40,6 +40,15 @@ Output contract (JSON keys):
     in_app_purchases.likely_present bool       — IAP/subscription usage detected (drives Phase 3 Step 10b gate)
     in_app_purchases.packages       list[str]  — IAP SDK names declared in pubspec.yaml
     in_app_purchases.code_markers   list[str]  — matched IAP API surface strings in lib/
+    ios_permissions.declared_usage_keys   list[str]  — NS*UsageDescription keys in Info.plist (names only)
+    ios_permissions.expected_from_plugins list[{plugin: str, keys: list[str]}]  — purpose strings a plugin requires
+    social_login.third_party_providers    list[str]  — non-Apple social providers detected
+    social_login.has_sign_in_with_apple   bool       — sign_in_with_apple package present
+    social_login.siwa_required            bool       — true when a third-party provider is present (5.1.1iv)
+    user_generated_content.likely_present bool       — conservative UGC heuristic (drives 1.2 gate)
+    user_generated_content.hints          list[str]  — matched UGC marker strings
+    user_generated_content.has_report_or_block  bool — report/block/moderation markers found
+    paywall_hints                   list[str]  — relative paths of likely paywall/subscription UI files
     ruby_env.has_gemfile            bool
     ruby_env.ruby_version_file      str|null   — contents of .ruby-version if present
     ruby_env.bundler_locked         str|null   — "BUNDLED WITH" version from Gemfile.lock
@@ -433,6 +442,166 @@ def detect_in_app_purchases(root: str) -> dict:
     return result
 
 
+# Maps a plugin name to the iOS Info.plist usage-description key(s) Apple requires
+# when that plugin's capability is used. Missing key → 5.1.1 reject at runtime.
+_PERMISSION_PLUGINS = {
+    "image_picker": ["NSCameraUsageDescription", "NSPhotoLibraryUsageDescription"],
+    "camera": ["NSCameraUsageDescription"],
+    "mobile_scanner": ["NSCameraUsageDescription"],
+    "qr_code_scanner": ["NSCameraUsageDescription"],
+    "flutter_barcode_scanner": ["NSCameraUsageDescription"],
+    "photo_manager": ["NSPhotoLibraryUsageDescription"],
+    "image_gallery_saver": ["NSPhotoLibraryAddUsageDescription"],
+    "gal": ["NSPhotoLibraryAddUsageDescription"],
+    "geolocator": ["NSLocationWhenInUseUsageDescription"],
+    "location": ["NSLocationWhenInUseUsageDescription"],
+    "google_maps_flutter": ["NSLocationWhenInUseUsageDescription"],
+    "flutter_background_geolocation": ["NSLocationAlwaysAndWhenInUseUsageDescription"],
+    "record": ["NSMicrophoneUsageDescription"],
+    "flutter_sound": ["NSMicrophoneUsageDescription"],
+    "speech_to_text": ["NSMicrophoneUsageDescription", "NSSpeechRecognitionUsageDescription"],
+    "flutter_contacts": ["NSContactsUsageDescription"],
+    "contacts_service": ["NSContactsUsageDescription"],
+    "app_tracking_transparency": ["NSUserTrackingUsageDescription"],
+    "local_auth": ["NSFaceIDUsageDescription"],
+    "health": ["NSHealthShareUsageDescription", "NSHealthUpdateUsageDescription"],
+    "flutter_blue_plus": ["NSBluetoothAlwaysUsageDescription"],
+    "device_calendar": ["NSCalendarsUsageDescription"],
+}
+
+
+def detect_ios_permissions(root: str) -> dict:
+    """Cross-check iOS purpose strings against permission-using plugins.
+
+    Apple rejects (a) a sensitive-API plugin with NO matching NS*UsageDescription
+    (5.1.1), and (b) a declared usage string for a permission the app never uses
+    (5.1.5). This reports both sides so the pre-submit gate can diff them; the
+    gate itself reads Info.plist for the *wording quality* (generic strings are
+    also rejected). Only key NAMES are emitted — never the string values.
+    """
+    info_plist = _read_file(
+        os.path.join(root, "ios", "Runner", "Info.plist")) or ""
+    declared = sorted(set(re.findall(
+        r"<key>(NS\w*UsageDescription)</key>", info_plist)))
+
+    pubspec = _read_file(os.path.join(root, "pubspec.yaml")) or ""
+    expected: list[dict] = []
+    for plugin, keys in _PERMISSION_PLUGINS.items():
+        if re.search(rf"^\s{{2,}}{re.escape(plugin)}\s*:", pubspec, re.MULTILINE):
+            expected.append({"plugin": plugin, "keys": keys})
+
+    return {"declared_usage_keys": declared, "expected_from_plugins": expected}
+
+
+def detect_social_login(root: str) -> dict:
+    """Detect third-party/social login → drives the Sign in with Apple gate.
+
+    Guideline 5.1.1(iv): an app offering a third-party or social login service
+    MUST also offer Sign in with Apple. Detection from on-disk facts beats asking.
+    Email/password or Supabase-native auth does NOT trigger the requirement —
+    only third-party social providers do.
+    """
+    pubspec = _read_file(os.path.join(root, "pubspec.yaml")) or ""
+    provider_pkgs = {
+        "google_sign_in": "google",
+        "flutter_facebook_auth": "facebook",
+        "flutter_login_facebook": "facebook",
+        "twitter_login": "twitter",
+        "kakao_flutter_sdk": "kakao",
+        "flutter_naver_login": "naver",
+        "flutter_line_sdk": "line",
+    }
+    providers: list[str] = []
+    for pkg, name in provider_pkgs.items():
+        if re.search(rf"^\s{{2,}}{re.escape(pkg)}\s*:", pubspec, re.MULTILINE):
+            providers.append(name)
+
+    # Supabase OAuth to a non-Apple provider also counts.
+    lib_dir = os.path.join(root, "lib")
+    if os.path.isdir(lib_dir):
+        oauth_rx = re.compile(
+            r"OAuthProvider\.(google|facebook|twitter|azure|github|gitlab|discord)"
+            r"|signInWithOAuth", re.IGNORECASE)
+        for dirpath, _dirs, files in os.walk(lib_dir):
+            for fn in files:
+                if not fn.endswith(".dart"):
+                    continue
+                text = _read_file(os.path.join(dirpath, fn)) or ""
+                for m in oauth_rx.finditer(text):
+                    g = (m.group(1) or "oauth").lower()
+                    if g not in providers and g != "apple":
+                        providers.append(g)
+
+    has_siwa = bool(re.search(r"^\s{2,}sign_in_with_apple\s*:", pubspec, re.MULTILINE))
+    providers = sorted(set(providers))
+    return {
+        "third_party_providers": providers,
+        "has_sign_in_with_apple": has_siwa,
+        "siwa_required": bool(providers),
+    }
+
+
+def detect_user_generated_content(root: str) -> dict:
+    """Conservative heuristic for user-generated content → drives the UGC-safety gate.
+
+    Guideline 1.2: apps with UGC need a content filter, a report mechanism, a
+    block mechanism, and a published EULA. This is noisy to detect, so it is
+    deliberately conservative (distinct, content-specific markers only) and the
+    gate treats a hit as "investigate", not an automatic blocker.
+    """
+    lib_dir = os.path.join(root, "lib")
+    result = {"likely_present": False, "hints": [], "has_report_or_block": False}
+    if not os.path.isdir(lib_dir):
+        return result
+    # Compound/feature-shaped markers ONLY — bare words like "post"/"message"
+    # false-positive on "postgres"/"PostgrestException". These name an actual
+    # author-and-share-content feature.
+    ugc_rx = re.compile(
+        r"create(Post|Comment|Thread|Review)|add(Comment|Post|Reply|Review)"
+        r"|submit(Comment|Post|Review)|post(Comment|Message)|(send|new)Message"
+        r"|chatMessage|userPost|feedItem|forumThread|publishPost|sharePost"
+        r"|comment(Controller|Text|Field)|message(Controller|Composer|Input)")
+    # Safety markers must also be UGC-shaped — plain "reportError" (Flutter/Sentry)
+    # is not a content-moderation control.
+    safety_rx = re.compile(
+        r"report(Post|Comment|User|Content|Abuse)|block(User|Author|Account)"
+        r"|flagContent|moderat\w*", re.IGNORECASE)
+    hits: list[str] = []
+    has_safety = False
+    for dirpath, _dirs, files in os.walk(lib_dir):
+        for fn in files:
+            if not fn.endswith(".dart"):
+                continue
+            text = _read_file(os.path.join(dirpath, fn)) or ""
+            for m in ugc_rx.finditer(text):
+                marker = m.group(0).strip()
+                if marker not in hits:
+                    hits.append(marker)
+            if safety_rx.search(text):
+                has_safety = True
+    result["hints"] = hits[:8]
+    # Require >=2 distinct feature markers — a single hit is too weak to act on.
+    result["likely_present"] = len(hits) >= 2
+    result["has_report_or_block"] = has_safety
+    return result
+
+
+def detect_paywall_hints(root: str) -> list[str]:
+    """Locate likely paywall/subscription UI so the subscription-disclosure gate
+    knows where to inspect for price/period/Terms/Privacy disclosures (3.1.2).
+    Returns relative file paths only."""
+    lib_dir = os.path.join(root, "lib")
+    if not os.path.isdir(lib_dir):
+        return []
+    hints: list[str] = []
+    name_rx = re.compile(r"paywall|subscri|premium|upgrade|purchase", re.IGNORECASE)
+    for dirpath, _dirs, files in os.walk(lib_dir):
+        for fn in files:
+            if fn.endswith(".dart") and name_rx.search(fn):
+                hints.append(os.path.relpath(os.path.join(dirpath, fn), root))
+    return sorted(hints)[:12]
+
+
 def detect_ruby_env(root: str) -> dict:
     """Detect the Ruby/Bundler setup that fastlane commands depend on.
 
@@ -502,6 +671,10 @@ def main() -> int:
     report["analytics_tracking"] = detect_analytics_tracking(root)
     report["account_deletion"] = detect_account_deletion(root)
     report["in_app_purchases"] = detect_in_app_purchases(root)
+    report["ios_permissions"] = detect_ios_permissions(root)
+    report["social_login"] = detect_social_login(root)
+    report["user_generated_content"] = detect_user_generated_content(root)
+    report["paywall_hints"] = detect_paywall_hints(root)
     report["ruby_env"] = detect_ruby_env(root)
 
     print(json.dumps(report, indent=2))
