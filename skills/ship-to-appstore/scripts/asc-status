@@ -1,0 +1,320 @@
+#!/usr/bin/env python3
+"""asc-status — read-only App Store Connect release-readiness query.
+
+Bundled with the ship-to-appstore skill. Queries the ASC REST API and prints a
+tri-state readiness report (✓ ready / ⚠ blocked / ? cannot-verify) covering the
+facts that the two real first-release rejections turned on:
+
+  - app record + current version state (catches REJECTED without the web UI)
+  - latest build processing state
+  - open review submission state (the modern reviewSubmissions resource)
+  - EVERY IAP product: non-consumables (inAppPurchasesV2) AND auto-renewable
+    subscriptions (subscriptionGroups → subscriptions) — these live in two
+    SEPARATE namespaces; a query that hits only inAppPurchasesV2 silently
+    misses every subscription.
+  - per-product App Review screenshot presence (the single most-missed field;
+    read via the v2 include — the v1 path lies with a false "none").
+
+This is READ-ONLY. It never POSTs, PATCHes, submits, or mutates anything, and it
+never prints a credential. Mutations (submit, screenshot upload) stay a human/
+guided action per the skill's "never submit autonomously" principle.
+
+Credential discovery order (first hit wins):
+  1. env: ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_PATH (path to the .p8)
+  2. a fastlane-style JSON config (--config PATH, else ./fastlane/api_key.json)
+     with fields: key_id, issuer_id, key_filepath
+  3. Apple's default key location ~/.appstoreconnect/private_keys/AuthKey_<KEY_ID>.p8
+     (only resolves the .p8 path; KEY_ID/ISSUER_ID must come from 1 or 2)
+
+Requires: pyjwt with the cryptography backend (`pip install 'pyjwt[crypto]'`).
+
+Usage:
+  asc-status status <bundle_id> [--config fastlane/api_key.json]
+  asc-status iap    <bundle_id>          # IAP/subscription readiness only
+  asc-status raw    <METHOD> <path> [json-body]   # escape hatch, e.g.
+                                          #   raw GET "/v1/apps?filter[bundleId]=..."
+"""
+import json
+import os
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from typing import NoReturn
+
+BASE = "https://api.appstoreconnect.apple.com"
+
+
+def _die(msg, code=2) -> NoReturn:
+    print(msg, file=sys.stderr)
+    sys.exit(code)
+
+
+def _load_creds(config_path):
+    key_id = os.environ.get("ASC_KEY_ID")
+    issuer = os.environ.get("ASC_ISSUER_ID")
+    p8 = os.environ.get("ASC_KEY_PATH") or os.environ.get("ASC_KEY_FILE")
+
+    if not (key_id and issuer and p8):
+        path = config_path or os.path.join(os.getcwd(), "fastlane", "api_key.json")
+        if os.path.exists(path):
+            cfg = json.load(open(path))
+            key_id = key_id or cfg.get("key_id")
+            issuer = issuer or cfg.get("issuer_id")
+            p8 = p8 or cfg.get("key_filepath")
+
+    if key_id and issuer and not p8:
+        default = os.path.expanduser(
+            f"~/.appstoreconnect/private_keys/AuthKey_{key_id}.p8")
+        if os.path.exists(default):
+            p8 = default
+
+    if not (key_id and issuer and p8):
+        _die("Missing ASC credentials. Provide ASC_KEY_ID / ASC_ISSUER_ID / "
+             "ASC_KEY_PATH in the environment, or a fastlane/api_key.json with "
+             "key_id / issuer_id / key_filepath. (No .p8 content is ever read "
+             "to stdout.)")
+    p8 = os.path.expanduser(p8)
+    if not os.path.exists(p8):
+        _die(f"Private key not found at the resolved path (key_id={key_id}). "
+             "Check key_filepath / ASC_KEY_PATH.")
+    return key_id, issuer, p8
+
+
+def _token(key_id, issuer, p8):
+    try:
+        import jwt
+    except ImportError:
+        _die("PyJWT is required: pip install 'pyjwt[crypto]'")
+    now = int(time.time())
+    payload = {"iss": issuer, "iat": now, "exp": now + 1000,
+               "aud": "appstoreconnect-v1"}
+    return jwt.encode(payload, open(p8).read(), algorithm="ES256",
+                      headers={"kid": key_id, "typ": "JWT"})
+
+
+class ASC:
+    def __init__(self, key_id, issuer, p8):
+        self._auth = "Bearer " + _token(key_id, issuer, p8)
+
+    def call(self, method, path, body=None):
+        url = path if path.startswith("http") else BASE + path
+        data = json.dumps(body).encode() if body is not None else None
+        headers = {"Authorization": self._auth}
+        if data is not None:
+            headers["Content-Type"] = "application/json"
+        req = urllib.request.Request(url, data=data, method=method, headers=headers)
+        try:
+            with urllib.request.urlopen(req) as r:
+                txt = r.read().decode()
+                return r.status, (json.loads(txt) if txt else None)
+        except urllib.error.HTTPError as e:
+            txt = e.read().decode()
+            try:
+                return e.code, json.loads(txt)
+            except Exception:
+                return e.code, txt
+
+    def get_all(self, path):
+        """GET following links.next pagination; returns (status, merged_data)."""
+        status, resp = self.call("GET", path)
+        if status != 200 or not isinstance(resp, dict):
+            return status, resp
+        data = list(resp.get("data", []))
+        nxt = (resp.get("links") or {}).get("next")
+        while nxt:
+            s, r = self.call("GET", nxt)
+            if s != 200 or not isinstance(r, dict):
+                break
+            data.extend(r.get("data", []))
+            nxt = (r.get("links") or {}).get("next")
+        return 200, {"data": data}
+
+
+def _q(bundle_id):
+    return urllib.parse.quote(bundle_id, safe="")
+
+
+def _app_id(asc, bundle_id):
+    status, resp = asc.call(
+        "GET", f"/v1/apps?filter[bundleId]={_q(bundle_id)}&fields[apps]=bundleId")
+    if status != 200 or not isinstance(resp, dict) or not resp.get("data"):
+        return None, status
+    return resp["data"][0]["id"], 200
+
+
+def _iap_screenshot_state(asc, iap_id, kind):
+    """kind: 'iap' (non-consumable) or 'sub' (subscription). v2/v1 path differs;
+    the v1 path on a v2 product silently 404s, so use the right one per kind."""
+    if kind == "iap":
+        path = f"/v2/inAppPurchases/{iap_id}/appStoreReviewScreenshot"
+    else:
+        path = f"/v1/subscriptions/{iap_id}/appStoreReviewScreenshot"
+    status, resp = asc.call("GET", path)
+    if status == 200 and isinstance(resp, dict) and resp.get("data"):
+        return resp["data"].get("attributes", {}).get("assetDeliveryState", {}) \
+            .get("state", "PRESENT")
+    if status in (404, 400):
+        return None  # cannot-verify via this path
+    return "MISSING"
+
+
+def _mark(state):
+    if state in ("READY_TO_SUBMIT", "APPROVED", "READY_FOR_SALE",
+                 "VALID", "DEVELOPER_REJECTED"):
+        return "✓"
+    if state in (None, "?"):
+        return "?"
+    return "⚠"
+
+
+def cmd_iap(asc, app_id, lines):
+    # Non-consumables / consumables
+    lines.append("In-App Purchases (non-consumable / consumable):")
+    status, resp = asc.get_all(
+        f"/v1/apps/{app_id}/inAppPurchasesV2?limit=200")
+    if status != 200:
+        lines.append(f"  ? cannot-verify (HTTP {status}) — confirm in ASC UI")
+    elif not resp["data"]:
+        lines.append("  (none found in inAppPurchasesV2)")
+    else:
+        for p in resp["data"]:
+            a = p.get("attributes", {})
+            st = a.get("state", "?")
+            shot = _iap_screenshot_state(asc, p["id"], "iap")
+            shot_txt = {None: "screenshot:?", "MISSING": "screenshot:MISSING"} \
+                .get(shot, "screenshot:present")
+            warn = "" if shot or st in ("READY_TO_SUBMIT", "APPROVED") \
+                else "  ← MISSING App Review screenshot blocks READY_TO_SUBMIT"
+            lines.append(f"  {_mark(st)} {a.get('productId','?')}: {st}  "
+                         f"({shot_txt}){warn}")
+    # Auto-renewable subscriptions (SEPARATE namespace)
+    lines.append("Subscriptions (auto-renewable — subscriptionGroups):")
+    status, groups = asc.get_all(
+        f"/v1/apps/{app_id}/subscriptionGroups?limit=200")
+    if status != 200:
+        lines.append(f"  ? cannot-verify (HTTP {status})")
+    elif not groups["data"]:
+        lines.append("  (no subscription groups)")
+    else:
+        for g in groups["data"]:
+            gid = g["id"]
+            s2, subs = asc.get_all(
+                f"/v1/subscriptionGroups/{gid}/subscriptions?limit=200")
+            if s2 != 200 or not subs["data"]:
+                lines.append(f"  group {gid}: ? cannot-verify (HTTP {s2})")
+                continue
+            for sub in subs["data"]:
+                a = sub.get("attributes", {})
+                st = a.get("state", "?")
+                shot = _iap_screenshot_state(asc, sub["id"], "sub")
+                shot_txt = {None: "screenshot:?",
+                            "MISSING": "screenshot:MISSING"} \
+                    .get(shot, "screenshot:present")
+                lines.append(f"  {_mark(st)} {a.get('productId','?')}: {st}  "
+                             f"({shot_txt})")
+    lines.append("")
+    lines.append("Note: whether each product is ATTACHED to the version being "
+                 "submitted is NOT readable via the API (the version→IAP endpoint "
+                 "is deprecated/404). Confirm attachment in the ASC UI. After "
+                 "submit, ready+attached products flip READY_TO_SUBMIT → "
+                 "WAITING_FOR_REVIEW; if they don't, they were not submitted "
+                 "(Guideline 2.1(b) reject incoming).")
+
+
+def cmd_status(asc, app_id, lines):
+    lines.append("App Store versions:")
+    status, resp = asc.get_all(
+        f"/v1/apps/{app_id}/appStoreVersions?limit=10"
+        "&fields[appStoreVersions]=versionString,appVersionState,platform")
+    if status != 200:
+        lines.append(f"  ? cannot-verify (HTTP {status})")
+    else:
+        for v in resp["data"][:5]:
+            a = v.get("attributes", {})
+            st = a.get("appVersionState", "?")
+            flag = "  ← REJECTED" if st == "REJECTED" else ""
+            lines.append(f"  {a.get('platform','?')} {a.get('versionString','?')}"
+                         f": {st}{flag}")
+    lines.append("Latest builds:")
+    status, resp = asc.call(
+        "GET", f"/v1/builds?filter[app]={app_id}&sort=-uploadedDate&limit=3"
+               "&fields[builds]=version,processingState,uploadedDate")
+    if status != 200 or not isinstance(resp, dict):
+        lines.append(f"  ? cannot-verify (HTTP {status})")
+    elif not resp.get("data"):
+        lines.append("  (no builds uploaded)")
+    else:
+        for b in resp["data"]:
+            a = b.get("attributes", {})
+            lines.append(f"  {_mark(a.get('processingState'))} build "
+                         f"{a.get('version','?')}: {a.get('processingState','?')}")
+    lines.append("Open review submissions:")
+    status, resp = asc.call(
+        "GET", f"/v1/reviewSubmissions?filter[app]={app_id}&filter[platform]=IOS"
+               "&limit=5&fields[reviewSubmissions]=state,submittedDate")
+    if status != 200 or not isinstance(resp, dict):
+        lines.append(f"  ? cannot-verify (HTTP {status})")
+    elif not resp.get("data"):
+        lines.append("  (none)")
+    else:
+        for s in resp["data"]:
+            a = s.get("attributes", {})
+            lines.append(f"  state={a.get('state','?')} "
+                         f"submitted={a.get('submittedDate') or '—'}")
+    lines.append("")
+    cmd_iap(asc, app_id, lines)
+    lines.append("")
+    lines.append("NOT readable via the API (always confirm in the ASC UI):")
+    lines.append("  - Resolution Center rejection text (needs a 2FA web session)")
+    lines.append("  - Privacy nutrition label publish state")
+    lines.append("  - Paid Apps Agreement status (Business section) — required or "
+                 "IAPs cannot be purchased (2.1(b))")
+    lines.append("  - Whether each IAP is attached to the version")
+
+
+def main():
+    args = sys.argv[1:]
+    config_path = None
+    if "--config" in args:
+        i = args.index("--config")
+        config_path = args[i + 1]
+        del args[i:i + 2]
+    if not args:
+        _die(__doc__, 2)
+    cmd = args[0]
+    creds = _load_creds(config_path)
+    asc = ASC(*creds)
+
+    if cmd == "raw":
+        if len(args) < 3:
+            _die("usage: asc-status raw <METHOD> <path> [json-body]")
+        method, path = args[1].upper(), args[2]
+        body = json.loads(args[3]) if len(args) > 3 else None
+        st, resp = asc.call(method, path, body)
+        print(f"HTTP {st}", file=sys.stderr)
+        print(json.dumps(resp, indent=2, ensure_ascii=False)
+              if resp is not None else "(no body)")
+        return
+
+    if cmd not in ("status", "iap"):
+        _die(f"unknown command: {cmd}\n{__doc__}", 2)
+    if len(args) < 2:
+        _die(f"usage: asc-status {cmd} <bundle_id>")
+    bundle_id = args[1]
+    app_id, st = _app_id(asc, bundle_id)
+    if not app_id:
+        _die(f"No app record for bundle id {bundle_id} (HTTP {st}). "
+             "Check the bundle id and that the API key has access.")
+
+    lines = [f"=== ASC readiness: {bundle_id} (app {app_id}) ===", ""]
+    if cmd == "iap":
+        cmd_iap(asc, app_id, lines)
+    else:
+        cmd_status(asc, app_id, lines)
+    print("\n".join(lines))
+
+
+if __name__ == "__main__":
+    main()
