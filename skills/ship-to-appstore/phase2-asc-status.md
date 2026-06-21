@@ -155,7 +155,28 @@ When all three are available (discovered at Levels 1–2 above), the agent can
 call the ASC REST API directly to query app record, version, build, and metadata
 status.
 
-Endpoints to call (refer to live-researched API docs):
+**Preferred path — the bundled read-only script.** This skill ships
+`scripts/asc-status`, which already encodes the correct endpoints and the v1/v2
+traps below (it queries app record, versions, builds, the modern
+`reviewSubmissions` state, **and** both IAP namespaces with per-product screenshot
+presence, following pagination). Run it first instead of hand-rolling calls:
+
+```bash
+SCRIPT=~/.claude/skills/ship-to-appstore/scripts/asc-status
+# credentials: env (ASC_KEY_ID/ASC_ISSUER_ID/ASC_KEY_PATH) or fastlane/api_key.json
+python3 "$SCRIPT" status "{bundle_id}"     # full readiness report
+python3 "$SCRIPT" iap    "{bundle_id}"     # IAP/subscription readiness only
+python3 "$SCRIPT" raw GET "/v1/…"          # escape hatch for follow-up queries
+```
+
+It is **read-only** — it never submits or mutates. For the exact endpoint paths,
+the two-namespace IAP trap, the screenshot v1/v2 false-negative, the
+`reviewSubmissions` submit path, and what the API genuinely cannot see, read
+[asc-api-reference.md](asc-api-reference.md). Only fall back to the raw endpoints
+below when the script cannot run (e.g. no PyJWT).
+
+Endpoints to call (refer to live-researched API docs and
+[asc-api-reference.md](asc-api-reference.md)):
 1. `GET /v1/apps?filter[bundleId]={bundle_id}` — confirm app record exists
 2. `GET /v1/apps/{id}/appStoreVersions?filter[appStoreState]=PREPARE_FOR_SUBMISSION,WAITING_FOR_REVIEW,IN_REVIEW,READY_FOR_SALE` — current versions
 3. `GET /v1/builds?filter[app]={id}&sort=-uploadedDate&limit=1` — latest build
@@ -167,10 +188,22 @@ Endpoints to call (refer to live-researched API docs):
    gate: any product that is not at least `READY_TO_SUBMIT` (most often because
    the App Review screenshot or another required field is missing → state stays
    `MISSING_METADATA`) will not be submitted with the build and triggers
-   Guideline 2.1(b). For auto-renewable subscriptions the per-product state is
-   nested under a subscription group; if `inAppPurchasesV2` is empty but Phase
-   0 detected IAP usage, classify as `? cannot-verify` (may live in a different
-   group endpoint) and confirm in the UI.
+   Guideline 2.1(b). **`inAppPurchasesV2` returns only non-consumables.**
+   Auto-renewable **subscriptions live in a separate namespace** —
+   `GET /v1/apps/{id}/subscriptionGroups` then, per group,
+   `GET /v1/subscriptionGroups/{group_id}/subscriptions`. A query that hits only
+   `inAppPurchasesV2` silently misses every subscription (observed: 1 of 3
+   products found, app wrongly reported "ready"). Read the **App Review
+   screenshot** per product via `GET /v2/inAppPurchases/{id}/appStoreReviewScreenshot`
+   (non-consumable) / `GET /v1/subscriptions/{id}/appStoreReviewScreenshot` (sub) —
+   the **v1 path on a v2 product returns a false "none"**, so a 404/400 there is
+   `? cannot-verify`, never "missing". The bundled `scripts/asc-status iap` does all
+   of this; see [asc-api-reference.md](asc-api-reference.md) §2–§4.
+6. `GET /v1/reviewSubmissions?filter[app]={id}&filter[platform]=IOS` — the
+   **modern** submission resource (the old `appStoreVersionSubmissions` is
+   read/delete-only). `state` of `REJECTED`/`UNRESOLVED_ISSUES` catches an active
+   rejection **without the web UI**; this is the API signal that the skill should
+   enter the reject handler. See [asc-api-reference.md](asc-api-reference.md) §7.
 
 Parse responses to populate the situation overview (§ 2.5).
 
@@ -269,6 +302,10 @@ Privacy label      : published | not published | ? cannot-verify (confirm in UI)
 In-App Purchases   : {per-product state, e.g. "lifetime=READY_TO_SUBMIT, monthly=MISSING_METADATA"} | none | ? cannot-verify
                        ← if any product is not READY_TO_SUBMIT/APPROVED, Step 10b is a HARD BLOCKER
                          before Step 11 (else Guideline 2.1b reject)
+                       ← non-consumables + subscriptions are SEPARATE namespaces — query both
+Paid Apps Agreement: ? cannot-verify (confirm in ASC → Business)  ← only if IAPs present
+                       ← if NOT accepted, IAPs can't be purchased → reviewer hits "product not
+                         available for purchase" → 2.1(b) reject. Not API-readable.
 
 Access strategy used : A (ASC REST API) | B (fastlane) | C (altool) | D (Web UI)
 

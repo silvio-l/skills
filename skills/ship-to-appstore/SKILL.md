@@ -26,7 +26,10 @@ If `WebSearch` or `WebFetch` is unavailable in the active session, Phase 1 canno
 | Phase 1 — freshness research (current Apple requirements) | [phase1-research.md](phase1-research.md) |
 | Phase 2 — ASC status + credential discovery | [phase2-asc-status.md](phase2-asc-status.md) |
 | Phase 3 — guided release loop | [phase3-release-loop.md](phase3-release-loop.md) |
+| ASC REST API reference (endpoints, v1/v2 traps, what's not queryable) | [asc-api-reference.md](asc-api-reference.md) |
+| Pre-submit LLM/vision gates (2.3.7 price refs, features-vs-claims) | [pre-submit-verification.md](pre-submit-verification.md) |
 | Phase 0 introspection script | [scripts/phase0-introspect](scripts/phase0-introspect) |
+| Read-only ASC readiness query (bundled) | [scripts/asc-status](scripts/asc-status) |
 
 Read the phase file you need when you need it. This SKILL.md is the always-on layer — keep it minimal.
 
@@ -39,6 +42,7 @@ Read the phase file you need when you need it. This SKILL.md is the always-on la
 - **No credentials emitted.** The situation report includes identifiers (bundle ID, team ID) but never secrets.
 - **Verify, don't assume — tri-state.** Every ASC fact is `✓ verified` (HTTP 200 + data), `? cannot-verify` (non-200, or no read endpoint — ask the user to confirm in the UI), or `□ confirmed-open`. Never collapse cannot-verify into open, and never tell the user to redo already-done work. Always check HTTP status explicitly; never swallow errors to an empty result.
 - **Detect, don't interrogate.** Phase 0 reads the repo for tracking SDKs, account-deletion flow, fastlane lanes, and the Ruby/Bundler env. Answer privacy/ATT/deletion questions from those facts instead of asking the user — they often don't know.
+- **Some rejects are judgement, not fields.** Two real first-release rejects were invisible to every API query: a **price reference** in a screenshot caption (Guideline 2.3.7) and a **store/IAP-review-note claim of a feature the code does not implement** (2.3). Phase 3 Step 10c runs LLM/vision gates for these before submit — read [pre-submit-verification.md](pre-submit-verification.md). The Resolution Center rejection text is likewise **not** API-readable; always have the user paste it.
 
 ## Entry point
 

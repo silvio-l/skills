@@ -61,6 +61,7 @@ Remaining steps:
   □ 10. Screenshots
   □ 10a Pricing & availability        ← first-release blocker if unset
   □ 10b IAPs/submissions ready+attached ← first-release only; each product must be READY_TO_SUBMIT (screenshot!) + attached or 2.1(b) reject
+  □ 10c Pre-submit verification (LLM)  ← price-reference scan (2.3.7) + features-vs-claims audit
   □ 11. Submit for Review     ← this is on you in ASC
   □ 12. Review period + release options
 
@@ -227,6 +228,9 @@ When the user says "stuck here: <error>" or pastes error output:
 | Missing pricing | "App is missing required pricing. … not eligible for submission until pricing has been set" | Set a price tier (Free/0 or paid) in ASC → Pricing and Availability; then re-run submit (Step 10a) |
 | Bundler/Ruby mismatch | "Could not find 'bundler' (X) required by your Gemfile.lock" | System Ruby is active instead of the pinned one — re-run with `PATH="$HOME/.rbenv/shims:$PATH"` prefix (Phase 2 §2.0); not a fastlane bug |
 | Version "not in valid state" | "appStoreVersions … is not in valid state … check associated errors" | A precondition (pricing, privacy, missing metadata) is unmet — read the *associated* error line; it names the real blocker |
+| Re-submit after reject fails | fastlane `deliver`: "version number has been previously used" / "cannot create a new version" when re-submitting a fixed reject | Do **not** re-run the release lane to re-submit. The `READY_FOR_REVIEW` version already exists; fastlane tries to POST a new one (422). Re-submit via `PATCH /v1/reviewSubmissions/{id}` `{submitted:true}` ([asc-api-reference.md](asc-api-reference.md) §7,§9) — with user confirmation |
+| Submit endpoint 403 | `POST /v1/appStoreVersionSubmissions` → "Allowed operation is: DELETE" | Old resource is read/delete-only; use the `reviewSubmissions` resource instead (reference §7) |
+| Subscriptions invisible | IAP query shows fewer products than the app has | The query hit only `inAppPurchasesV2` (non-consumables); auto-renewables live under `subscriptionGroups → subscriptions`. Use `scripts/asc-status iap` which queries both (reference §2) |
 
 ---
 
@@ -670,6 +674,31 @@ After every product is ✓ and attached, tell the agent "done" (or "confirmed").
 
 ---
 
+### Step 10c — Pre-Submit Verification (LLM/vision-assisted)
+
+**Mode:** Automatable — the agent runs the scans and reports blockers; the user fixes any hit.
+
+**What:** Two reject reasons are invisible to every API query because they are judgements over text
+and images, not fields. Both are real rejections the API-only gates missed:
+
+- **Guideline 2.3.7** — a **price reference** ("free", "gratis", "kostenlos", a discount, a currency
+  amount) in a **screenshot caption / app name / subtitle / preview / promo text**. A real run was
+  rejected for captions reading *"Kostenlos starten"* / *"Free to start"*.
+- **2.3 accuracy** — the store text or an **IAP review note** claims a feature the **code does not
+  actually implement** (a real run claimed *"Sign in with Apple"* for a removed, dead-dependency
+  feature).
+
+Read [pre-submit-verification.md](pre-submit-verification.md) and run **Gate A** (mechanical price-
+token grep over the screenshot/caption sources, plus a vision pass on the PNGs if a vision model is
+available) and **Gate B** (features-vs-claims: cross-check each concrete store/review-note claim
+against `lib/`/`ios/` call sites — a dead dependency in `pubspec.yaml` is **not** an implemented
+feature). Present the two verdict blocks. Any `⚠` is a **hard blocker** for Step 11 until fixed
+(reword the caption + regenerate screenshots, or correct the store text / PATCH the review note).
+
+After both gates pass clean, tell the agent "done".
+
+---
+
 ### Step 11 — Submit for Review
 
 **Mode:** Manual — THIS IS ON YOU. The agent does not and cannot press this button.
@@ -688,6 +717,9 @@ version enters the review queue.
 □ Export compliance: answered
 □ Pricing & availability: a price tier is set (Free or paid)   ← else submit fails
 □ IAPs/subscriptions: each product state READY_TO_SUBMIT (screenshot + metadata complete) + attached to the version (first release)  ← else 2.1(b) reject
+□ Paid Apps Agreement: accepted in ASC → Business (first IAP release)  ← else IAPs unpurchasable → 2.1(b)
+□ Price-reference scan (Step 10c Gate A): no "free/gratis/kostenlos"/currency in captions/name/subtitle/promo  ← else 2.3.7 reject
+□ Features-vs-claims (Step 10c Gate B): every store/review-note claim is actually implemented in code  ← else 2.3 reject
 □ "What's New" text: filled in (for an update release)
 □ Privacy policy URL: reachable from a browser
 □ Support URL: reachable from a browser
@@ -804,13 +836,24 @@ Please paste the full rejection message here so I can classify the reason(s) and
 build a correction plan.
 ```
 
+The Resolution Center text is **not retrievable via the ASC API** — the `iris` backend returns
+`401`/`404` to an API-key token (it needs a 2FA web session). Pasting it is mandatory; never claim
+to have "fetched" the rejection. The API *can* tell you a rejection **exists** —
+`GET /v1/reviewSubmissions?filter[app]={id}` → `state` `REJECTED`/`UNRESOLVED_ISSUES`
+([asc-api-reference.md](asc-api-reference.md) §7) — which is what should trigger this handler. Once
+the text is pasted, apply [pre-submit-verification.md](pre-submit-verification.md) **Gate C** to
+classify it, separate actionable causes from boilerplate (e.g. "upload a new binary" in a 2.1(b) IAP
+reject is usually boilerplate — §10 of the reference), and avoid asserting a root cause from
+telemetry timing alone.
+
 ### 3.8.2 — Classify the reject reason
 
 | Reject category | Common causes | Typical correction |
 |---|---|---|
 | **2.1 — Performance: App Completeness** | Crash on launch, broken flows, placeholder content | Fix the crash/content; rebuild (Step 3) and re-upload (Step 4) |
 | **2.1(b) — App Completeness (IAP not submitted)** | *"one or more of the In-App Purchase products have not been submitted for review"*; app references premium but the IAPs went to review alone | Per-IAP: complete metadata + **App Review screenshot** → state `READY_TO_SUBMIT`; attach to version; **upload a new binary**; re-submit (Step 10b → Step 3 → Step 11) |
-| **2.3 — Accurate Metadata** | Screenshots don't match the app; misleading description | Update screenshots (Step 10) or description (Step 6) |
+| **2.3 — Accurate Metadata** | Screenshots don't match the app; misleading description; store text claims a feature the code does not implement | Update screenshots (Step 10) or description (Step 6); run Step 10c Gate B (features-vs-claims) and fix the false claim / PATCH the IAP review note |
+| **2.3.7 — Accurate Metadata (price references)** | A screenshot caption / app name / subtitle / preview / promo text contains a price reference — incl. *free / gratis / kostenlos*, a discount, or a currency amount | Reword the offending text (e.g. "Kostenlos starten" → "Jetzt loslegen"); regenerate + re-upload screenshots (Step 10). Prevent via Step 10c Gate A |
 | **3.1.1 — In-App Purchase** | Offers paid features without Apple IAP | Add Apple IAP or remove paid features |
 | **4.0 — Design** | Non-standard UI patterns; private API usage | Remove private API calls; follow Apple Human Interface Guidelines |
 | **5.1.1 — Privacy: Data Collection and Storage** | Missing privacy policy; inaccurate nutrition labels; ATT prompt missing | Update privacy policy URL (Step 6); correct nutrition labels (Step 7); add ATT prompt if required |
