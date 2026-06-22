@@ -1,0 +1,1024 @@
+#!/usr/bin/env python3
+"""play-submit — opt-in AAB upload, track release, and commit via the Play edits transaction.
+
+Dry-run by default: opens an edit to read existing state and reports intended
+mutations WITHOUT executing them. Only mutates when the matching --yes flag is
+passed explicitly. Each distinct mutation kind requires its own --yes:
+
+  --yes upload   → edits.bundles.upload (upload the AAB into the open edit)
+  --yes release  → edits.tracks.update (assign the bundle to the target track)
+  --yes commit   → edits.commit (publish all staged mutations atomically)
+
+Nothing is live until edits.commit. An uncommitted edit changes nothing. The
+edit expires automatically if not committed; the script also discards it on
+dry-run exit.
+
+Secret hygiene (HARD): the service-account JSON contains a private key. This
+script NEVER prints, logs, or writes: the JSON file contents, the private key,
+the unsigned JWT assertion, or the OAuth access token. --debug emits only
+non-sensitive diagnostics (request labels + HTTP status codes) to stderr.
+Keystore passwords are never read or logged.
+
+Prerequisites: Python 3 (stdlib only) + `openssl` on PATH (RS256 signing).
+
+Usage:
+    play-submit <package> --aab <path> --track <track>
+                [--rollout <fraction>]
+                [--yes upload] [--yes release] [--yes commit]
+                [--version-code <int>]
+                [--report <phase0.json>]
+                [--service-account <path>]
+                [--debug]
+    play-submit --help
+
+Arguments:
+    package            Application ID / package name (e.g. com.example.app).
+    --aab <path>       Path to the signed .aab file to upload.
+    --track <track>    Target track: internal | alpha | beta | production.
+                       REQUIRED with no default — "oops I shipped to prod" must
+                       be structurally hard.
+    --rollout <f>      Staged rollout fraction (0.0–1.0). REQUIRED when
+                       --track production. Conventional first value: 0.01 (1%).
+                       Recommend Internal Testing first, then promote up the
+                       track ladder.
+    --yes <kind>       Approve a specific mutation: upload | release | commit.
+                       Each kind is a SEPARATE checkpoint, never batched.
+                       Without any --yes the script is a read-only dry-run.
+    --version-code <n> Expected versionCode (for collision check). Falls back
+                       to the Phase 0 report's version_code field.
+    --report <path>    Phase 0 situation-report JSON (optional).
+    --service-account  Override path to the service-account JSON.
+    --debug            Non-sensitive diagnostics to stderr (no secrets at any
+                       verbosity).
+
+Exit codes:
+    0  Success (dry-run plan printed, or mutations executed as approved).
+    2  Usage error (missing required arg, versionCode collision, signing blocker,
+       missing credentials, or API error during execution).
+"""
+
+import argparse
+import base64
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+import uuid
+
+sys.dont_write_bytecode = True
+
+API_BASE = "https://androidpublisher.googleapis.com/androidpublisher/v3"
+UPLOAD_BASE = "https://androidpublisher.googleapis.com/upload/androidpublisher/v3"
+TOKEN_URL = "https://oauth2.googleapis.com/token"
+PUBLISHER_SCOPE = "https://www.googleapis.com/auth/androidpublisher"
+
+# Env var NAMES whose presence hints at a Play service-account credential source.
+# Only NAMES are ever surfaced — VALUES are read solely to resolve a file path
+# and are never printed/logged/emitted.
+_SA_ENV_VARS = (
+    "ANDROID_PUBLISHER_SERVICE_ACCOUNT",
+    "GOOGLE_APPLICATION_CREDENTIALS",
+    "PLAY_STORE_SERVICE_ACCOUNT",
+    "PLAY_CONFIG_JSON",
+)
+
+_OUT_OF_REPO_SA = "~/.config/play/play-service-account.json"
+
+VALID_YES_FLAGS = frozenset({"upload", "release", "commit"})
+VALID_TRACKS = frozenset({"internal", "alpha", "beta", "production"})
+
+
+# ---------------------------------------------------------------------------
+# Pure functions (importable + unit-tested). No I/O, no global state.
+# ---------------------------------------------------------------------------
+
+def _b64url(data: bytes) -> str:
+    """Base64url encode without padding."""
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+
+def build_jwt_assertion_segments(client_email: str, scope: str, audience: str,
+                                 iat: int, exp: int) -> str:
+    """Build the unsigned JWS assertion (header.payload) for the Google
+    service-account OAuth2 JWT flow (mirrors play-status §auth)."""
+    header = {"alg": "RS256", "typ": "JWT"}
+    payload = {
+        "iss": client_email,
+        "scope": scope,
+        "aud": audience,
+        "iat": iat,
+        "exp": exp,
+    }
+    h = _b64url(json.dumps(header, separators=(",", ":")).encode("utf-8"))
+    p = _b64url(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+    return f"{h}.{p}"
+
+
+def parse_yes_flags(yes_list: list | None) -> frozenset:
+    """Parse --yes flag values into a frozenset of approved mutation kinds.
+
+    Valid kinds: upload | release | commit. Unknown values are warned and
+    ignored — they are not a usage error (forward-compat posture). Unknown
+    kinds cannot unlock any mutation.
+    """
+    known: set = set()
+    for y in (yes_list or []):
+        if y in VALID_YES_FLAGS:
+            known.add(y)
+        else:
+            print(
+                f"WARNING: unknown --yes value {y!r} (ignored). "
+                f"Valid values: {', '.join(sorted(VALID_YES_FLAGS))}",
+                file=sys.stderr,
+            )
+    return frozenset(known)
+
+
+def validate_args(package: str, aab: str, track: str | None,
+                  rollout: float | None) -> list:
+    """Validate required args. Returns a list of error strings (empty = valid).
+
+    Hard rules (exit 2 on any):
+    - package must be non-empty
+    - aab must be non-empty
+    - --track is required with no default
+    - --rollout is required when --track production (no safe default)
+    - --track must be a known track value
+    """
+    errors = []
+    if not package:
+        errors.append("package (application ID) is required")
+    if not aab:
+        errors.append("--aab <path> is required")
+    if not track:
+        errors.append(
+            "--track is required (choices: internal | alpha | beta | production); "
+            "there is no default — 'oops I shipped to prod' must be structurally hard"
+        )
+    elif track == "production" and rollout is None:
+        errors.append(
+            "--rollout <fraction> is required when --track production; "
+            "conventional first fraction: 0.01 (1%); no safe default exists. "
+            "Recommend: release to internal first, then promote to production."
+        )
+    elif track not in VALID_TRACKS:
+        errors.append(
+            f"--track {track!r} is not valid. "
+            f"Valid tracks: {', '.join(sorted(VALID_TRACKS))}"
+        )
+    return errors
+
+
+def check_version_collision(existing_codes: list, new_code: int) -> tuple:
+    """Check whether new_code collides with any code on the target track.
+
+    A versionCode must be strictly greater than every existing code on the
+    target track. Equality is a collision — Play rejects it.
+
+    Returns (collision: bool, message: str).
+    """
+    if not existing_codes:
+        return False, f"versionCode {new_code}: no existing codes on track — no collision"
+    max_existing = max(existing_codes)
+    if new_code <= max_existing:
+        return True, (
+            f"versionCode {new_code} COLLIDES: target track already has codes "
+            f"{sorted(existing_codes)} (max={max_existing}). "
+            f"Increment versionCode to at least {max_existing + 1}."
+        )
+    return False, f"versionCode {new_code}: OK (max on track = {max_existing})"
+
+
+def check_signing_from_report(report: dict) -> dict:
+    """Determine signing posture from Phase 0 situation report.
+
+    Returns a dict with:
+      first_release: True = first release (Play App Signing enrolment needed),
+                    False = subsequent (upload key suffices),
+                    None = cannot determine from Phase 0 alone.
+      blocker: True = signing not configured (hard stop before build/upload).
+      message: human-readable summary (no secrets — paths and booleans only).
+
+    Never logs or returns keystore passwords. Only paths + booleans.
+    OQ4 (locked): first-release enrolment guidance inline, one-time irrevocable.
+    """
+    signing = report.get("signing") or {}
+    configured = signing.get("signing_config_set") or bool(signing.get("keystore_hints"))
+    hints = signing.get("keystore_hints") or []
+
+    if not configured:
+        return {
+            "first_release": None,
+            "blocker": True,
+            "message": (
+                "BLOCKER: signing_config_set is false and no keystore_hints detected.\n"
+                "Add a signingConfig to android/app/build.gradle before building:\n"
+                "  android {\n"
+                "    signingConfigs {\n"
+                "      release {\n"
+                "        keyAlias     keystoreProperties['keyAlias']\n"
+                "        keyPassword  keystoreProperties['keyPassword']   // never log\n"
+                "        storeFile    file(keystoreProperties['storeFile'])\n"
+                "        storePassword keystoreProperties['storePassword'] // never log\n"
+                "      }\n"
+                "    }\n"
+                "    buildTypes { release { signingConfig signingConfigs.release } }\n"
+                "  }"
+            ),
+        }
+
+    enrollable = signing.get("play_app_signing_enrollable_from_repo")
+    hint_path = hints[0] if hints else "(signingConfig wired)"
+
+    if enrollable is True:
+        # Phase 0 heuristic: no Play App Signing artifact detected → likely first release.
+        # First-release enrolment is one-time and irrevocable (PRD §5.2, OQ4).
+        return {
+            "first_release": True,
+            "blocker": False,
+            "message": (
+                f"Signing configured ({hint_path}).\n"
+                "FIRST RELEASE — Play App Signing enrolment (one-time, irrevocable):\n"
+                "  Step 2a: In Play Console → Setup → App signing, choose\n"
+                "           'Let Google manage and protect your app signing key.'\n"
+                "  Step 2b: Google re-signs APKs delivered to users with their key.\n"
+                "           Your upload key only signs the AAB (can be reset if lost).\n"
+                "  Step 2c: This decision cannot be undone. Confirm in Play Console\n"
+                "           before running --yes upload on this first release."
+            ),
+        }
+
+    return {
+        "first_release": False,
+        "blocker": False,
+        "message": (
+            f"Signing configured ({hint_path}). "
+            "Subsequent release — upload key suffices (resettable via Play Console if lost)."
+        ),
+    }
+
+
+def parse_track_existing_codes(tracks_body: dict, track: str) -> list:
+    """Extract existing versionCodes for `track` from an edits.tracks response.
+
+    Returns an empty list if the track is not found or has no releases.
+    """
+    for t in (tracks_body.get("tracks") or []):
+        if t.get("track") == track:
+            codes = []
+            for release in (t.get("releases") or []):
+                for vc in (release.get("versionCodes") or []):
+                    try:
+                        codes.append(int(vc))
+                    except (TypeError, ValueError):
+                        pass
+            return codes
+    return []
+
+
+def build_edits_insert_url(package: str) -> str:
+    """URL for edits.insert (POST — creates a new transactional edit)."""
+    q = urllib.parse.quote(package, safe="")
+    return f"{API_BASE}/applications/{q}/edits"
+
+
+def build_edits_tracks_get_url(package: str, edit_id: str) -> str:
+    """URL for edits.tracks.list (GET — reads all tracks within an edit)."""
+    q = urllib.parse.quote(package, safe="")
+    ei = urllib.parse.quote(edit_id, safe="")
+    return f"{API_BASE}/applications/{q}/edits/{ei}/tracks"
+
+
+def build_edits_bundles_upload_url(package: str, edit_id: str) -> str:
+    """URL for edits.bundles.upload (multipart POST via upload base — uploads the AAB)."""
+    q = urllib.parse.quote(package, safe="")
+    ei = urllib.parse.quote(edit_id, safe="")
+    return f"{UPLOAD_BASE}/applications/{q}/edits/{ei}/bundles?uploadType=multipart"
+
+
+def build_edits_tracks_update_url(package: str, edit_id: str, track: str) -> str:
+    """URL for edits.tracks.update (PUT — assigns bundle to track with rollout)."""
+    q = urllib.parse.quote(package, safe="")
+    ei = urllib.parse.quote(edit_id, safe="")
+    t = urllib.parse.quote(track, safe="")
+    return f"{API_BASE}/applications/{q}/edits/{ei}/tracks/{t}"
+
+
+def build_edits_commit_url(package: str, edit_id: str) -> str:
+    """URL for edits.commit (POST — publishes all staged mutations atomically)."""
+    q = urllib.parse.quote(package, safe="")
+    ei = urllib.parse.quote(edit_id, safe="")
+    return f"{API_BASE}/applications/{q}/edits/{ei}:commit"
+
+
+def build_edits_delete_url(package: str, edit_id: str) -> str:
+    """URL for edits.delete (DELETE — discards an uncommitted edit)."""
+    q = urllib.parse.quote(package, safe="")
+    ei = urllib.parse.quote(edit_id, safe="")
+    return f"{API_BASE}/applications/{q}/edits/{ei}"
+
+
+def build_track_release_payload(track: str, version_codes: list,
+                                 rollout: float | None) -> dict:
+    """Build the edits.tracks.update request body.
+
+    Production with rollout < 1.0 → status inProgress (staged rollout).
+    Other tracks or rollout == 1.0 → status completed.
+    OQ3 (locked): 0.01 (1%) is the conventional first fraction; no default here —
+    the caller is required to supply an explicit fraction for production.
+    """
+    if track == "production" and rollout is not None and rollout < 1.0:
+        release: dict = {
+            "versionCodes": [str(vc) for vc in version_codes],
+            "status": "inProgress",
+            "userFraction": rollout,
+        }
+    else:
+        release = {
+            "versionCodes": [str(vc) for vc in version_codes],
+            "status": "completed",
+        }
+        if rollout is not None:
+            release["userFraction"] = rollout
+    return {"track": track, "releases": [release]}
+
+
+def describe_dry_run_plan(package: str, aab_path: str, track: str,
+                          rollout: float | None, version_code: int | None,
+                          existing_codes: list, collision: bool,
+                          collision_msg: str, yes_flags: frozenset) -> str:
+    """Return a human-readable dry-run plan description (no secrets, no mutations)."""
+    vc_label = (
+        str(version_code) if version_code is not None
+        else "? (unknown — provide --version-code or --report)"
+    )
+    rollout_label = (
+        f"{rollout} ({int(rollout * 100)}%)" if rollout is not None else "n/a"
+    )
+    collision_label = f"COLLISION — {collision_msg}" if collision else f"OK — {collision_msg}"
+    collision_marker = "⚠" if collision else "✓"
+
+    stages = []
+    for kind, desc in [
+        (
+            "upload",
+            f"edits.bundles.upload — upload {aab_path!r} "
+            f"(versionCode {vc_label}) into the open edit",
+        ),
+        (
+            "release",
+            f"edits.tracks.update — assign versionCode {vc_label} to track "
+            f"'{track}'"
+            + (f" with rollout {rollout_label}" if rollout is not None else ""),
+        ),
+        (
+            "commit",
+            "edits.commit — publish all staged mutations atomically "
+            "(irreversible; staged rollout is haltable/promotable via Step 12)",
+        ),
+    ]:
+        if kind in yes_flags:
+            gate = f"APPROVED (--yes {kind} passed)"
+            marker = "✓"
+        else:
+            gate = f"BLOCKED  (add --yes {kind} to approve)"
+            marker = "□"
+        stages.append(f"  {marker} {kind:8s}: {gate}\n             {desc}")
+
+    lines = [
+        "=== play-submit: dry-run plan ===",
+        f"",
+        f"Package     : {package}",
+        f"AAB         : {aab_path}",
+        f"Track       : {track}",
+        f"Rollout     : {rollout_label}",
+        f"versionCode : {vc_label}",
+        f"Collision   : {collision_marker} {collision_label}",
+        f"",
+        "Mutation stages (each requires its own --yes — never batched):",
+    ] + stages + [
+        "",
+        "Dry-run complete — edit opened to read state, NOT committed.",
+        "Nothing has changed in Play Console.",
+        "",
+        "Tip: release to 'internal' first (instant, no review), then promote to production.",
+        "     Conventional first production rollout fraction: 0.01 (1%).",
+    ]
+    return "\n".join(lines)
+
+
+def format_status_note_entry(timestamp: str, step_id: str, details: str) -> str:
+    """Format an append-only status note entry. Never contains secrets.
+
+    Status note holds only step ids, version strings, track names, fractions,
+    and timestamps — never keystore passwords, service-account JSON, or tokens.
+    Raises ValueError if any known secret marker is detected in the content.
+    """
+    secret_markers = (
+        "BEGIN RSA PRIVATE KEY", "BEGIN PRIVATE KEY",
+        "private_key", "client_secret", "access_token",
+        "storePassword", "keyPassword", "keyAliasPassword",
+    )
+    combined = f"{step_id} {details}"
+    for marker in secret_markers:
+        if marker.lower() in combined.lower():
+            raise ValueError(
+                f"status note entry contains secret marker {marker!r}; "
+                "the status note must never hold credentials."
+            )
+    return f"{timestamp} {step_id} — {details}"
+
+
+def verify_commit_result(tracks_body: dict, track: str,
+                         expected_version_code: int) -> dict:
+    """Verify the committed release by re-reading the target track.
+
+    Returns {"ok": bool, "status": str|None, "message": str}.
+    Never trusts the commit response alone — always re-reads the track
+    (PRD §10.2 Step 11).
+    """
+    for t in (tracks_body.get("tracks") or []):
+        if t.get("track") != track:
+            continue
+        for release in (t.get("releases") or []):
+            try:
+                vcs = [int(v) for v in (release.get("versionCodes") or [])]
+            except (TypeError, ValueError):
+                vcs = []
+            if expected_version_code in vcs:
+                status = release.get("status")
+                frac = release.get("userFraction")
+                frac_label = f" (rollout {int(frac * 100)}%)" if frac else ""
+                return {
+                    "ok": True,
+                    "status": status,
+                    "message": (
+                        f"✓ versionCode {expected_version_code} confirmed on track "
+                        f"'{track}' — status: {status}{frac_label}"
+                    ),
+                }
+
+    all_codes = parse_track_existing_codes(tracks_body, track)
+    return {
+        "ok": False,
+        "status": None,
+        "message": (
+            f"⚠ versionCode {expected_version_code} NOT found on track '{track}' "
+            f"after commit. Present codes: {sorted(all_codes)}. "
+            "Verify manually in Play Console → Release → dashboard."
+        ),
+    }
+
+
+def classify_http(status: int, body: object) -> dict:
+    """Tri-state classifier for a Play Developer API response (mirrors play-status)."""
+    if status == 200:
+        return {"marker": "✓", "likely_cause": None}
+    causes = {
+        401: "token mint failed or service-account JSON invalid",
+        403: "wrong scope or service account not linked in Play Console",
+        404: "app not found / package name mismatch / Play Developer API not enabled",
+    }
+    if status in causes:
+        return {"marker": "?", "likely_cause": causes[status]}
+    if status == 0:
+        return {"marker": "?", "likely_cause": "network/transport error"}
+    return {"marker": "?", "likely_cause": f"HTTP {status}"}
+
+
+def discover_service_account(report: dict, env: dict) -> dict:
+    """Pure credential discovery from Phase 0 report + env. Env var NAMES only."""
+    sa_list = ((report.get("credentials") or {}).get("service_account_json")) or []
+    path = None
+    if sa_list and sa_list[0].get("path"):
+        path = sa_list[0]["path"]
+    env_names = [name for name in _SA_ENV_VARS if env.get(name)]
+    if path or env_names:
+        missing_cause = None
+    else:
+        missing_cause = (
+            "no service-account JSON path in the Phase 0 report and no known "
+            "Play service-account env var set"
+        )
+    return {"path": path, "env_names": env_names, "missing_cause": missing_cause}
+
+
+# ---------------------------------------------------------------------------
+# Thin wrappers (NOT unit-tested — touch the network / openssl / the key).
+# ---------------------------------------------------------------------------
+
+def sign_rs256(signing_input: bytes, private_key_pem: bytes) -> bytes:
+    """RS256-sign via openssl. Key is fed on stdin — never written to disk."""
+    with tempfile.NamedTemporaryFile(prefix="play-submit-jwt-", delete=True) as tf:
+        tf.write(signing_input)
+        tf.flush()
+        proc = subprocess.run(
+            ["openssl", "dgst", "-sha256", "-sign", "/dev/stdin", tf.name],
+            input=private_key_pem,
+            capture_output=True,
+        )
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"openssl RS256 signing failed (exit {proc.returncode}); "
+            "is openssl on PATH?"
+        )
+    return proc.stdout
+
+
+def mint_access_token(client_email: str, private_key_pem: bytes,
+                      scope: str = PUBLISHER_SCOPE,
+                      audience: str = TOKEN_URL) -> tuple:
+    """Mint a Google OAuth2 access token. Returns (status, token|None). Never logs."""
+    now = int(time.time())
+    signing_input = build_jwt_assertion_segments(
+        client_email, scope, audience, now, now + 3600
+    ).encode("ascii")
+    signature = sign_rs256(signing_input, private_key_pem)
+    assertion = signing_input.decode("ascii") + "." + _b64url(signature)
+    body = urllib.parse.urlencode({
+        "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+        "assertion": assertion,
+    }).encode("ascii")
+    req = urllib.request.Request(
+        TOKEN_URL, data=body, method="POST",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            payload = json.loads(r.read().decode("utf-8"))
+            return r.status, payload.get("access_token")
+    except urllib.error.HTTPError as e:
+        return e.code, None
+    except urllib.error.URLError:
+        return 0, None
+
+
+def http_get(url: str, token: str, debug: bool = False,
+             label: str = "") -> tuple:
+    """GET url with bearer token. Auth header never logged."""
+    req = urllib.request.Request(
+        url, method="GET",
+        headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            txt = r.read().decode("utf-8", errors="replace")
+            if debug:
+                print(f"{label}: HTTP {r.status}", file=sys.stderr)
+            try:
+                return r.status, json.loads(txt) if txt else {}
+            except json.JSONDecodeError:
+                return r.status, {}
+    except urllib.error.HTTPError as e:
+        if debug:
+            print(f"{label}: HTTP {e.code}", file=sys.stderr)
+        return e.code, {}
+    except urllib.error.URLError:
+        if debug:
+            print(f"{label}: network error", file=sys.stderr)
+        return 0, {}
+
+
+def http_post_json(url: str, token: str, body: dict,
+                   debug: bool = False, label: str = "") -> tuple:
+    """POST JSON to url. Auth header never logged."""
+    data = json.dumps(body).encode("utf-8")
+    req = urllib.request.Request(
+        url, data=data, method="POST",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            txt = r.read().decode("utf-8", errors="replace")
+            if debug:
+                print(f"{label}: HTTP {r.status}", file=sys.stderr)
+            try:
+                return r.status, json.loads(txt) if txt else {}
+            except json.JSONDecodeError:
+                return r.status, {}
+    except urllib.error.HTTPError as e:
+        body_txt = e.read().decode("utf-8", errors="replace") if e.fp else ""
+        if debug:
+            print(f"{label}: HTTP {e.code}", file=sys.stderr)
+        try:
+            return e.code, json.loads(body_txt) if body_txt else {}
+        except json.JSONDecodeError:
+            return e.code, {}
+    except urllib.error.URLError:
+        if debug:
+            print(f"{label}: network error", file=sys.stderr)
+        return 0, {}
+
+
+def http_put_json(url: str, token: str, body: dict,
+                  debug: bool = False, label: str = "") -> tuple:
+    """PUT JSON to url. Auth header never logged."""
+    data = json.dumps(body).encode("utf-8")
+    req = urllib.request.Request(
+        url, data=data, method="PUT",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            txt = r.read().decode("utf-8", errors="replace")
+            if debug:
+                print(f"{label}: HTTP {r.status}", file=sys.stderr)
+            try:
+                return r.status, json.loads(txt) if txt else {}
+            except json.JSONDecodeError:
+                return r.status, {}
+    except urllib.error.HTTPError as e:
+        body_txt = e.read().decode("utf-8", errors="replace") if e.fp else ""
+        if debug:
+            print(f"{label}: HTTP {e.code}", file=sys.stderr)
+        try:
+            return e.code, json.loads(body_txt) if body_txt else {}
+        except json.JSONDecodeError:
+            return e.code, {}
+    except urllib.error.URLError:
+        if debug:
+            print(f"{label}: network error", file=sys.stderr)
+        return 0, {}
+
+
+def upload_aab_multipart(url: str, token: str, aab_path: str,
+                          debug: bool = False) -> tuple:
+    """Multipart upload of the AAB file (uploadType=multipart). Token never logged."""
+    boundary = uuid.uuid4().hex
+    with open(aab_path, "rb") as fh:
+        aab_data = fh.read()
+    parts = [
+        f"--{boundary}\r\n".encode(),
+        b"Content-Type: application/json; charset=UTF-8\r\n\r\n{}\r\n",
+        f"--{boundary}\r\n".encode(),
+        b"Content-Type: application/octet-stream\r\n\r\n",
+        aab_data,
+        b"\r\n",
+        f"--{boundary}--\r\n".encode(),
+    ]
+    body = b"".join(parts)
+    req = urllib.request.Request(
+        url, data=body, method="POST",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": f"multipart/related; boundary={boundary}",
+            "Accept": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=300) as r:
+            txt = r.read().decode("utf-8", errors="replace")
+            if debug:
+                print(f"bundles.upload: HTTP {r.status}", file=sys.stderr)
+            try:
+                return r.status, json.loads(txt) if txt else {}
+            except json.JSONDecodeError:
+                return r.status, {}
+    except urllib.error.HTTPError as e:
+        body_txt = e.read().decode("utf-8", errors="replace") if e.fp else ""
+        if debug:
+            print(f"bundles.upload: HTTP {e.code}", file=sys.stderr)
+        try:
+            return e.code, json.loads(body_txt) if body_txt else {}
+        except json.JSONDecodeError:
+            return e.code, {}
+    except urllib.error.URLError:
+        if debug:
+            print("bundles.upload: network error", file=sys.stderr)
+        return 0, {}
+
+
+def _load_service_account_json(path: str) -> tuple:
+    """Read SA JSON; return (client_email, private_key_pem). Contents never logged."""
+    with open(path, encoding="utf-8") as fh:
+        data = json.load(fh)
+    client_email = data.get("client_email")
+    private_key = data.get("private_key")
+    if not client_email or not private_key:
+        raise ValueError(
+            "service-account JSON missing client_email or private_key — "
+            "is this a service-account key (not an API key)?"
+        )
+    return client_email, private_key.encode("utf-8")
+
+
+def _resolve_sa_from_env() -> str | None:
+    """Resolve SA path from GOOGLE_APPLICATION_CREDENTIALS / PLAY_CONFIG_JSON. Value never printed."""
+    val = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    if val and os.path.isfile(val):
+        return val
+    val = os.environ.get("PLAY_CONFIG_JSON")
+    if val and os.path.isfile(val):
+        return val
+    return None
+
+
+def _discard_edit(package: str, edit_id: str, token: str, debug: bool) -> None:
+    """Discard an uncommitted edit (DELETE). Non-fatal on error (edit auto-expires)."""
+    if not edit_id:
+        return
+    url = build_edits_delete_url(package, edit_id)
+    req = urllib.request.Request(
+        url, method="DELETE",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10):
+            if debug:
+                print("edit: discarded (DELETE)", file=sys.stderr)
+    except (urllib.error.URLError, urllib.error.HTTPError):
+        if debug:
+            print("edit: discard failed (non-fatal; edit expires automatically)", file=sys.stderr)
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+def main(argv: list | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="play-submit",
+        description=(
+            "Opt-in AAB upload, track release, and commit via the Play edits "
+            "transaction. Dry-run by default — mutates only on explicit --yes."
+        ),
+    )
+    parser.add_argument("package", help="Application ID / package name.")
+    parser.add_argument("--aab", required=True, help="Path to the signed .aab file.")
+    parser.add_argument(
+        "--track", required=True,
+        help="Target track: internal | alpha | beta | production. Required, no default.",
+    )
+    parser.add_argument(
+        "--rollout", type=float, default=None,
+        help="Staged rollout fraction 0.0-1.0. Required for --track production. "
+             "Conventional first value: 0.01 = 1%%. Recommend internal first.",
+    )
+    parser.add_argument(
+        "--yes", action="append", dest="yes", metavar="KIND",
+        help="Approve a mutation: upload | release | commit. Repeat per kind. "
+             "Without any --yes, dry-run only.",
+    )
+    parser.add_argument(
+        "--version-code", dest="version_code", type=int, default=None,
+        help="Expected versionCode for collision check. "
+             "Falls back to Phase 0 report's version_code field.",
+    )
+    parser.add_argument("--report", help="Phase 0 situation-report JSON path.")
+    parser.add_argument(
+        "--service-account", dest="service_account",
+        help="Override path to the service-account JSON.",
+    )
+    parser.add_argument(
+        "--debug", action="store_true",
+        help="Non-sensitive diagnostics to stderr (no secrets logged).",
+    )
+    args = parser.parse_args(argv)
+
+    # --- Validate required args (exit 2 on any error) ---
+    errors = validate_args(args.package, args.aab, args.track, args.rollout)
+    if errors:
+        for e in errors:
+            print(f"ERROR: {e}", file=sys.stderr)
+        return 2
+
+    yes_flags = parse_yes_flags(args.yes or [])
+
+    # --- Load Phase 0 report (optional; used for signing check + versionCode) ---
+    report: dict = {}
+    if args.report:
+        try:
+            with open(args.report, encoding="utf-8") as fh:
+                report = json.load(fh)
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"WARNING: could not read Phase 0 report: {exc}", file=sys.stderr)
+
+    # --- Signing check (blocker before any network call) ---
+    signing_check = check_signing_from_report(report)
+    if signing_check["blocker"]:
+        print(signing_check["message"], file=sys.stderr)
+        return 2
+    print(f"Signing: {signing_check['message']}")
+
+    # --- Resolve versionCode for collision check ---
+    version_code = args.version_code if args.version_code is not None else report.get("version_code")
+
+    # --- Discover service account ---
+    discovery = discover_service_account(report, dict(os.environ))
+    resolved_sa = args.service_account or discovery["path"] or _resolve_sa_from_env()
+    if resolved_sa is None:
+        fallback = os.path.expanduser(_OUT_OF_REPO_SA)
+        if os.path.isfile(fallback):
+            resolved_sa = fallback
+
+    if resolved_sa is None:
+        cause = discovery["missing_cause"] or "service-account JSON not found"
+        print(f"ERROR: {cause}", file=sys.stderr)
+        print(
+            "Provide a service-account JSON via:\n"
+            "  --service-account <path>\n"
+            "  GOOGLE_APPLICATION_CREDENTIALS env var (path to the JSON file)\n"
+            f"  {_OUT_OF_REPO_SA}\n"
+            "  In-repo: android/api/play-service-account.json (gitignored)",
+            file=sys.stderr,
+        )
+        return 2
+
+    try:
+        client_email, private_key_pem = _load_service_account_json(resolved_sa)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        print(f"ERROR: service-account JSON unreadable: {exc}", file=sys.stderr)
+        return 2
+
+    token_status, token = mint_access_token(client_email, private_key_pem)
+    if token_status != 200 or not token:
+        cause = classify_http(token_status, {})["likely_cause"]
+        print(f"ERROR: token mint failed: {cause}", file=sys.stderr)
+        return 2
+
+    # --- Open edit (needed to read existing track state) ---
+    ins_status, ins_body = http_post_json(
+        build_edits_insert_url(args.package), token, {}, args.debug, "edits.insert"
+    )
+    if ins_status != 200:
+        cause = classify_http(ins_status, ins_body)["likely_cause"]
+        print(f"ERROR: edits.insert failed: {cause} (HTTP {ins_status})", file=sys.stderr)
+        return 2
+
+    edit_id = ins_body.get("id")
+    if not edit_id:
+        print("ERROR: edits.insert response missing 'id'", file=sys.stderr)
+        return 2
+
+    # --- Read existing track state + versionCode collision check ---
+    tr_status, tr_body = http_get(
+        build_edits_tracks_get_url(args.package, edit_id),
+        token, args.debug, "edits.tracks.list",
+    )
+    existing_codes: list = []
+    collision = False
+    collision_msg = "? cannot-verify (could not read existing track state)"
+
+    if tr_status == 200 and version_code is not None:
+        existing_codes = parse_track_existing_codes(tr_body, args.track)
+        collision, collision_msg = check_version_collision(existing_codes, version_code)
+    elif version_code is None:
+        collision_msg = (
+            "? cannot-verify (no versionCode known — provide --version-code or --report)"
+        )
+    else:
+        cause = classify_http(tr_status, tr_body)["likely_cause"]
+        collision_msg = f"? cannot-verify ({cause})"
+
+    if collision:
+        print(f"ERROR: {collision_msg}", file=sys.stderr)
+        _discard_edit(args.package, edit_id, token, args.debug)
+        return 2
+
+    # --- Dry-run: describe plan and exit if no --yes flags ---
+    if not yes_flags:
+        plan = describe_dry_run_plan(
+            args.package, args.aab, args.track, args.rollout,
+            version_code, existing_codes, collision, collision_msg, yes_flags,
+        )
+        print(plan)
+        _discard_edit(args.package, edit_id, token, args.debug)
+        return 0
+
+    # --- Execute approved mutations in order ---
+    uploaded_vc = version_code  # may be overridden by the actual upload response
+
+    # Mutation 1 — Upload
+    if "upload" in yes_flags:
+        if not os.path.isfile(args.aab):
+            print(f"ERROR: AAB file not found: {args.aab!r}", file=sys.stderr)
+            _discard_edit(args.package, edit_id, token, args.debug)
+            return 2
+        print(f"Uploading {args.aab!r} (bundles.upload)…")
+        up_status, up_body = upload_aab_multipart(
+            build_edits_bundles_upload_url(args.package, edit_id),
+            token, args.aab, args.debug,
+        )
+        if up_status != 200:
+            cause = classify_http(up_status, up_body)["likely_cause"]
+            print(f"ERROR: bundles.upload failed: {cause} (HTTP {up_status})", file=sys.stderr)
+            _discard_edit(args.package, edit_id, token, args.debug)
+            return 2
+        raw_vc = up_body.get("versionCode")
+        if raw_vc is not None:
+            uploaded_vc = int(raw_vc)
+        print(f"Upload complete. versionCode: {uploaded_vc}")
+    else:
+        print("  [upload]: SKIPPED — add --yes upload to approve")
+
+    # Mutation 2 — Release to track
+    if "release" in yes_flags:
+        if "upload" not in yes_flags:
+            print(
+                "WARNING: --yes release without --yes upload — edit has no uploaded bundle; "
+                "this may fail or commit a stale bundle.",
+                file=sys.stderr,
+            )
+        if uploaded_vc is None:
+            print(
+                "ERROR: cannot release — versionCode unknown. "
+                "Run with --yes upload first, or provide --version-code.",
+                file=sys.stderr,
+            )
+            _discard_edit(args.package, edit_id, token, args.debug)
+            return 2
+        payload = build_track_release_payload(args.track, [uploaded_vc], args.rollout)
+        tr_up_status, tr_up_body = http_put_json(
+            build_edits_tracks_update_url(args.package, edit_id, args.track),
+            token, payload, args.debug, "edits.tracks.update",
+        )
+        if tr_up_status != 200:
+            cause = classify_http(tr_up_status, tr_up_body)["likely_cause"]
+            print(
+                f"ERROR: edits.tracks.update failed: {cause} (HTTP {tr_up_status})",
+                file=sys.stderr,
+            )
+            _discard_edit(args.package, edit_id, token, args.debug)
+            return 2
+        print(f"Track '{args.track}' updated with versionCode {uploaded_vc}")
+    else:
+        print("  [release]: SKIPPED — add --yes release to approve")
+
+    # Mutation 3 — Commit
+    if "commit" in yes_flags:
+        if "release" not in yes_flags:
+            print(
+                "WARNING: --yes commit without --yes release — committing without a "
+                "track update; this may publish a stale state.",
+                file=sys.stderr,
+            )
+        print("Committing edit (edits.commit — publishes to Play Console)…")
+        cm_status, cm_body = http_post_json(
+            build_edits_commit_url(args.package, edit_id),
+            token, {}, args.debug, "edits.commit",
+        )
+        if cm_status != 200:
+            cause = classify_http(cm_status, cm_body)["likely_cause"]
+            print(f"ERROR: edits.commit failed: {cause} (HTTP {cm_status})", file=sys.stderr)
+            return 2
+        print("Edit committed.")
+
+        # Post-commit verification: open a fresh read-only edit to re-read tracks.
+        if uploaded_vc is not None:
+            print("Verifying via tracks re-read…")
+            ver_ins_status, ver_ins_body = http_post_json(
+                build_edits_insert_url(args.package),
+                token, {}, args.debug, "verify.edits.insert",
+            )
+            if ver_ins_status == 200:
+                ver_edit_id = ver_ins_body.get("id", "")
+                ver_tr_status, ver_tr_body = http_get(
+                    build_edits_tracks_get_url(args.package, ver_edit_id),
+                    token, args.debug, "verify.tracks.list",
+                )
+                if ver_tr_status == 200:
+                    result = verify_commit_result(ver_tr_body, args.track, uploaded_vc)
+                    print(result["message"])
+                    if not result["ok"]:
+                        print(
+                            "Verify inconclusive — confirm in Play Console > Release.",
+                            file=sys.stderr,
+                        )
+                else:
+                    print(
+                        f"? cannot-verify post-commit (tracks read HTTP {ver_tr_status}); "
+                        "confirm in Play Console.",
+                        file=sys.stderr,
+                    )
+                _discard_edit(args.package, ver_edit_id, token, args.debug)
+            else:
+                print(
+                    "? cannot-verify post-commit (could not open verification edit); "
+                    "confirm in Play Console.",
+                    file=sys.stderr,
+                )
+    else:
+        print(
+            f"  [commit]: SKIPPED — add --yes commit to approve. "
+            f"Edit NOT committed; nothing is live in Play Console."
+        )
+        _discard_edit(args.package, edit_id, token, args.debug)
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
