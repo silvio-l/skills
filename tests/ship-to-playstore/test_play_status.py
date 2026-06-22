@@ -424,6 +424,213 @@ class SecretHygieneInvariant(unittest.TestCase):
                     )
 
 
+class TestClassifyIapProduct(unittest.TestCase):
+    """AC1: classify_iap_product covers both namespaces with correct publishability rules."""
+
+    # --- inappproducts (one-time) ---
+
+    def test_active_status_is_publishable(self):
+        p = PS.classify_iap_product({"sku": "coins_100", "status": "active"}, "inappproducts")
+        self.assertEqual(p["id"], "coins_100")
+        self.assertEqual(p["status"], "active")
+        self.assertTrue(p["publishable"])
+
+    def test_published_status_is_publishable(self):
+        p = PS.classify_iap_product({"sku": "pro", "status": "published"}, "inappproducts")
+        self.assertTrue(p["publishable"])
+
+    def test_draft_status_is_not_publishable(self):
+        p = PS.classify_iap_product({"sku": "old_feat", "status": "draft"}, "inappproducts")
+        self.assertFalse(p["publishable"])
+        self.assertEqual(p["status"], "draft")
+
+    def test_inactive_status_is_not_publishable(self):
+        p = PS.classify_iap_product({"sku": "sku1", "status": "inactive"}, "inappproducts")
+        self.assertFalse(p["publishable"])
+
+    def test_inappproduct_uses_sku_field(self):
+        p = PS.classify_iap_product({"sku": "my_sku"}, "inappproducts")
+        self.assertEqual(p["id"], "my_sku")
+
+    def test_inappproduct_falls_back_to_productId(self):
+        p = PS.classify_iap_product({"productId": "pid_123", "status": "active"}, "inappproducts")
+        self.assertEqual(p["id"], "pid_123")
+
+    def test_no_base_plans_key_for_inappproducts(self):
+        p = PS.classify_iap_product({"sku": "x", "status": "active"}, "inappproducts")
+        self.assertNotIn("base_plans", p)
+
+    # --- subscriptions ---
+
+    def test_active_subscription_with_active_base_plan_is_publishable(self):
+        item = {
+            "productId": "monthly_sub",
+            "state": "ACTIVE",
+            "basePlans": [{"basePlanId": "p1", "state": "ACTIVE"}],
+        }
+        p = PS.classify_iap_product(item, "subscriptions")
+        self.assertEqual(p["id"], "monthly_sub")
+        self.assertEqual(p["state"], "ACTIVE")
+        self.assertTrue(p["publishable"])
+        self.assertTrue(p["has_active_base_plan"])
+        self.assertEqual(len(p["base_plans"]), 1)
+        self.assertTrue(p["base_plans"][0]["active"])
+
+    def test_active_subscription_without_active_base_plan_is_not_publishable(self):
+        item = {
+            "productId": "annual_sub",
+            "state": "ACTIVE",
+            "basePlans": [{"basePlanId": "p1", "state": "INACTIVE"}],
+        }
+        p = PS.classify_iap_product(item, "subscriptions")
+        self.assertFalse(p["publishable"])
+        self.assertFalse(p["has_active_base_plan"])
+
+    def test_active_subscription_with_no_base_plans_is_not_publishable(self):
+        item = {"productId": "new_sub", "state": "ACTIVE", "basePlans": []}
+        p = PS.classify_iap_product(item, "subscriptions")
+        self.assertFalse(p["publishable"])
+        self.assertEqual(p["base_plans"], [])
+
+    def test_inactive_subscription_with_active_base_plan_is_not_publishable(self):
+        item = {
+            "productId": "old_sub",
+            "state": "INACTIVE",
+            "basePlans": [{"basePlanId": "p1", "state": "ACTIVE"}],
+        }
+        p = PS.classify_iap_product(item, "subscriptions")
+        self.assertFalse(p["publishable"])
+
+    def test_subscription_base_plan_offers_counted(self):
+        item = {
+            "productId": "sub1",
+            "state": "ACTIVE",
+            "basePlans": [{
+                "basePlanId": "annual",
+                "state": "ACTIVE",
+                "offers": [{}, {}],
+            }],
+        }
+        p = PS.classify_iap_product(item, "subscriptions")
+        self.assertEqual(p["base_plans"][0]["offers_count"], 2)
+
+    def test_subscription_multiple_base_plans_any_active_is_publishable(self):
+        item = {
+            "productId": "sub2",
+            "state": "ACTIVE",
+            "basePlans": [
+                {"basePlanId": "monthly", "state": "INACTIVE"},
+                {"basePlanId": "annual", "state": "ACTIVE"},
+            ],
+        }
+        p = PS.classify_iap_product(item, "subscriptions")
+        self.assertTrue(p["publishable"])
+        self.assertTrue(p["has_active_base_plan"])
+
+
+class TestIapFactsDeepened(unittest.TestCase):
+    """AC1: _iap_facts deepened to use classify_iap_product and emit has_blocker."""
+
+    def _ok_body_inapp(self, products):
+        return {"kind": "androidpublisher#inappproductsListResponse",
+                "inappproducts": products}
+
+    def _ok_body_subs(self, products):
+        return {"subscriptions": products}
+
+    def test_publishable_inapp_no_blocker(self):
+        body = self._ok_body_inapp([{"sku": "coin", "status": "active"}])
+        result = PS._iap_facts(200, body, "inappproducts")
+        self.assertEqual(result["marker"], "✓")
+        self.assertFalse(result["has_blocker"])
+        self.assertTrue(result["products"][0]["publishable"])
+
+    def test_draft_inapp_sets_has_blocker(self):
+        body = self._ok_body_inapp([{"sku": "coin", "status": "draft"}])
+        result = PS._iap_facts(200, body, "inappproducts")
+        self.assertEqual(result["marker"], "✓")
+        self.assertTrue(result["has_blocker"])
+        self.assertFalse(result["products"][0]["publishable"])
+
+    def test_subscription_no_active_base_plan_sets_has_blocker(self):
+        body = self._ok_body_subs([{
+            "productId": "sub1",
+            "state": "ACTIVE",
+            "basePlans": [{"basePlanId": "p1", "state": "INACTIVE"}],
+        }])
+        result = PS._iap_facts(200, body, "subscriptions")
+        self.assertTrue(result["has_blocker"])
+        self.assertFalse(result["products"][0]["publishable"])
+
+    def test_error_response_returns_cannot_verify_no_blocker(self):
+        result = PS._iap_facts(403, {"error": {"message": "forbidden"}}, "inappproducts")
+        self.assertEqual(result["marker"], "?")
+        self.assertFalse(result["has_blocker"])
+        self.assertEqual(result["products"], [])
+
+    def test_has_blocker_false_for_empty_catalog(self):
+        body = self._ok_body_inapp([])
+        result = PS._iap_facts(200, body, "inappproducts")
+        self.assertFalse(result["has_blocker"])
+        self.assertEqual(result["products"], [])
+
+
+class TestSituationOverviewBlockers(unittest.TestCase):
+    """AC1: _iap_block renders BLOCKER tags for non-publishable products."""
+
+    def _facts_with_iap(self, iap_ot, iap_sub):
+        return {
+            "package": "com.x",
+            "iap_one_time": iap_ot,
+            "iap_subscriptions": iap_sub,
+        }
+
+    def test_draft_inapp_shows_blocker_tag(self):
+        facts = self._facts_with_iap(
+            iap_ot={"marker": "✓", "has_blocker": True, "cause": None,
+                    "products": [{"id": "old_feat", "status": "draft", "publishable": False}]},
+            iap_sub=None,
+        )
+        out = PS.render_situation_overview(facts)
+        self.assertIn("old_feat=draft ← BLOCKER", out)
+
+    def test_publishable_inapp_no_blocker_tag(self):
+        facts = self._facts_with_iap(
+            iap_ot={"marker": "✓", "has_blocker": False, "cause": None,
+                    "products": [{"id": "coin", "status": "active", "publishable": True}]},
+            iap_sub=None,
+        )
+        out = PS.render_situation_overview(facts)
+        self.assertIn("coin=active", out)
+        self.assertNotIn("BLOCKER", out)
+
+    def test_subscription_no_active_bp_shows_blocker(self):
+        facts = self._facts_with_iap(
+            iap_ot=None,
+            iap_sub={"marker": "✓", "has_blocker": True, "cause": None, "products": [{
+                "id": "monthly", "state": "ACTIVE",
+                "publishable": False,
+                "base_plans": [{"id": "p1", "state": "INACTIVE", "active": False, "offers_count": 0}],
+                "has_active_base_plan": False,
+            }]},
+        )
+        out = PS.render_situation_overview(facts)
+        self.assertIn("monthly", out)
+        self.assertIn("BLOCKER", out)
+        self.assertIn("0/1 base plan(s)", out)
+
+    def test_old_format_no_publishable_key_no_blocker_tag(self):
+        # Old fixture format without "publishable" key must not show BLOCKER (backward compat)
+        facts = self._facts_with_iap(
+            iap_ot={"marker": "✓", "cause": None,
+                    "products": [{"id": "pro_unlock", "status": "published"}]},
+            iap_sub=None,
+        )
+        out = PS.render_situation_overview(facts)
+        self.assertIn("pro_unlock=published", out)
+        self.assertNotIn("BLOCKER", out)
+
+
 class NoBytecodeInSkills(unittest.TestCase):
     """Guard: importing the script must not leave __pycache__ in skills/."""
 

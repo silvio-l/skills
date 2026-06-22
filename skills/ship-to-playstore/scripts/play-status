@@ -247,6 +247,57 @@ def discover_service_account(report: dict, env: dict) -> dict:
     return {"path": path, "env_names": env_names, "missing_cause": missing_cause}
 
 
+def classify_iap_product(item: dict, kind: str) -> dict:
+    """Classify a single IAP catalog product for the situation overview (pure, AC1).
+
+    Returns a product dict for the `_iap_facts` products list:
+      id                  : product identifier (sku or productId)
+      status              : raw status string (inappproducts only)
+      state               : raw state string (subscriptions only)
+      publishable         : True iff the product can currently be purchased by users
+      base_plans          : (subscriptions only) list of {id, state, active, offers_count}
+      has_active_base_plan: (subscriptions only) True iff at least one base plan is ACTIVE
+
+    Publishability rules (stable structural facts — exact enum values are Play API contract):
+      inappproducts : status in ("active", "published") → publishable
+      subscriptions : state == "ACTIVE" AND at least one base plan with state == "ACTIVE"
+
+    A subscription without an active base plan is not purchasable regardless of its own
+    state — this is the base-plan requirement (play-api-reference.md §5.1).
+    """
+    if kind == "inappproducts":
+        product_id = item.get("sku") or item.get("productId") or "?"
+        status = item.get("status") or "?"
+        publishable = status.lower() in ("active", "published")
+        return {"id": product_id, "status": status, "publishable": publishable}
+
+    # subscriptions (monetization.subscriptions namespace; v3 path token /subscriptions)
+    product_id = item.get("productId") or "?"
+    state = item.get("state") or "?"
+    raw_bps = item.get("basePlans") or []
+    base_plans = []
+    for bp in raw_bps:
+        bp_id = bp.get("basePlanId") or "?"
+        bp_state = bp.get("state") or "?"
+        bp_active = bp_state.upper() == "ACTIVE"
+        offers_count = len(bp.get("offers") or [])
+        base_plans.append({
+            "id": bp_id,
+            "state": bp_state,
+            "active": bp_active,
+            "offers_count": offers_count,
+        })
+    has_active_base_plan = any(bp["active"] for bp in base_plans)
+    publishable = state.upper() == "ACTIVE" and has_active_base_plan
+    return {
+        "id": product_id,
+        "state": state,
+        "publishable": publishable,
+        "base_plans": base_plans,
+        "has_active_base_plan": has_active_base_plan,
+    }
+
+
 def render_situation_overview(facts: dict) -> str:
     """Render the compact situation-overview block (PRD §9.5) from structured
     facts. Every cell is tri-state: a rendered string carrying ✓ / ? / □.
@@ -255,7 +306,8 @@ def render_situation_overview(facts: dict) -> str:
       package, app_exists ("yes"|"no"|"?"), live_prod,
       tracks {internal,closed,open,production},
       signing_enrolled ("yes"|"no"|"?"), upload_keystore,
-      iap_one_time, iap_subscriptions  (None | {"marker","products":[{id,status}],"cause"}),
+      iap_one_time, iap_subscriptions  (None | {"marker","products":[...],"has_blocker",
+                                                  "cause"}),
       listing, feature_graphic, screenshots, privacy_policy,
       data_safety, content_rating, pricing,
       fcm_used (bool), firebase_in_manifest_only (bool),
@@ -273,10 +325,27 @@ def render_situation_overview(facts: dict) -> str:
         products = entry.get("products") or []
         if not products:
             return f"  {label:17s}: none"
-        rendered = ", ".join(
-            f"{p.get('id', '?')}={p.get('status', '?')}" for p in products
-        )
-        return f"  {label:17s}: {rendered}"
+        rendered_parts = []
+        for p in products:
+            pid = p.get("id", "?")
+            if "base_plans" in p:
+                # Subscription product (classify_iap_product format): show state + base plans
+                bp_list = p.get("base_plans") or []
+                active_bp = sum(1 for bp in bp_list if bp.get("active"))
+                total_bp = len(bp_list)
+                state = p.get("state", "?")
+                not_pub = "publishable" in p and not p["publishable"]
+                tag = " ← BLOCKER" if not_pub else ""
+                rendered_parts.append(
+                    f"{pid} [state={state}, {active_bp}/{total_bp} base plan(s)]{tag}"
+                )
+            else:
+                # One-time IAP (status-based; supports both old format and classify_iap_product)
+                status_val = p.get("status", "?")
+                not_pub = "publishable" in p and not p["publishable"]
+                tag = " ← BLOCKER" if not_pub else ""
+                rendered_parts.append(f"{pid}={status_val}{tag}")
+        return f"  {label:17s}: {', '.join(rendered_parts)}"
 
     fcm_used = bool(facts.get("fcm_used"))
     firebase_manifest_only = bool(facts.get("firebase_in_manifest_only"))
@@ -555,17 +624,24 @@ def _signing_cell(report: dict) -> str:
 
 
 def _iap_facts(status: int, body: dict, kind: str) -> dict:
-    """Classify an IAP namespace response into the overview facts entry."""
+    """Classify an IAP namespace response into the overview facts entry.
+
+    Deepened (AC1): uses classify_iap_product for per-product publishable state and
+    subscription base-plan/offer presence. has_blocker=True when any product is not in
+    a publishable state — the Step 10b gate signal for the situation overview.
+    """
     verdict = classify_http(status, body)
     if verdict["marker"] == "✓":
         items = body.get(kind, []) or []
-        products = [
-            {"id": (it.get("sku") or it.get("productId") or "?"),
-             "status": (it.get("status") or "?")}
-            for it in items
-        ]
-        return {"marker": "✓", "products": products, "cause": None}
-    return {"marker": "?", "products": [], "cause": verdict["likely_cause"]}
+        products = [classify_iap_product(it, kind) for it in items]
+        has_blocker = any(not p.get("publishable", True) for p in products)
+        return {
+            "marker": "✓",
+            "products": products,
+            "has_blocker": has_blocker,
+            "cause": None,
+        }
+    return {"marker": "?", "products": [], "has_blocker": False, "cause": verdict["likely_cause"]}
 
 
 def _tracks_facts(result: tuple[int, dict]) -> dict:

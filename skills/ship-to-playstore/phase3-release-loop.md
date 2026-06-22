@@ -55,8 +55,8 @@ Remaining steps (slice 4 — binary→track→commit spine):
   □ 8.  Privacy Policy URL              ← slice 05
   □ 9.  Pricing / availability          ← slice 05
   □ 10a Choose track + staged rollout fraction
-  □ 10b Play Billing catalog ready      ← slice 05 (if play_billing.likely_present)
-  □ 10c Pre-submit verification gates   ← slice 05
+  □ 10b Play Billing catalog ready      (if play_billing.likely_present — HARD BLOCKER before Step 11)
+  □ 10c Pre-submit verification gates
   □ 11. Release to track + commit (scripts/play-submit --yes release --yes commit)
   □ 12. Rollout monitoring + halt/promote
 
@@ -693,6 +693,91 @@ The agent confirms the track and rollout fraction with the user before Step 11.
 
 ---
 
+### Step 10b — Play Billing Catalog Ready (Hard Blocker)
+
+**Mode:** Automatable — agent queries both IAP namespaces; user publishes products.
+
+**What:** Verify that every IAP product in both Play Billing namespaces is in a
+publishable state before the release commits. This is the direct Play analogue of
+the iOS `inAppPurchasesV2` / `subscriptionGroups` trap: reporting only one namespace
+silently misses the other. The two namespaces are:
+
+- **`inappproducts`** — one-time (consumable / non-consumable) products. Each must have
+  `status = active` (not `draft` or `inactive`).
+- **`monetization.subscriptions`** — auto-renewing subscriptions. Each must have
+  `state = ACTIVE` AND at least one base plan in `state = ACTIVE`. A subscription with
+  no active base plan cannot be purchased and blocks the release.
+
+**Scope:** Only runs when `play_billing.likely_present = true` (Phase 0 field). Skip if false.
+
+**Hard-blocker rule (PRD §10.2 Step 10b):** If any product is not publishable, Step 11
+(release + commit) is blocked. The `play-submit --yes commit` gate enforces this mechanically
+via the pre-commit IAP check — it queries both namespaces and returns exit 2 if any product
+is non-publishable.
+
+**Agent executes:**
+
+```bash
+SCRIPT_STATUS=~/.claude/skills/ship-to-playstore/scripts/play-status
+SCRIPT_SUBMIT=~/.claude/skills/ship-to-playstore/scripts/play-submit
+
+# Step 1: Read IAP catalog state (read-only)
+python3 "$SCRIPT_STATUS" {application_id} \
+  --report .scratch/ship-to-playstore/phase0-report.json
+
+# Review the "Play Billing (one-time)" and "Play Billing (subs)" lines.
+# Any product showing "← BLOCKER" must be published before Step 11.
+
+# Step 2: Publish non-publishable products (if any)
+python3 "$SCRIPT_SUBMIT" {application_id} \
+  --aab build/app/outputs/bundle/release/app-release.aab \
+  --track {track} \
+  [--rollout {fraction}] \
+  --report .scratch/ship-to-playstore/phase0-report.json \
+  --yes publish-iap
+
+# Step 3: Confirm (re-run play-status to verify all products publishable)
+python3 "$SCRIPT_STATUS" {application_id} \
+  --report .scratch/ship-to-playstore/phase0-report.json
+```
+
+**What `--yes publish-iap` does:**
+
+- Queries `inappproducts` and `monetization.subscriptions` (edit-free GETs).
+- For each draft/inactive one-time product: `PATCH inappproducts/{sku}` with
+  `{"status": "active"}` — takes effect immediately (outside the edit transaction).
+- For each subscription with inactive base plans:
+  `POST subscriptions/{productId}/basePlans/{basePlanId}:activate` — takes effect
+  immediately.
+- Reports success or failure per product.
+
+**Pre-commit guard (enforced by play-submit):**
+
+When `--yes commit` is requested and `play_billing.likely_present = true` (from Phase 0
+report), `play-submit` automatically re-queries both IAP namespaces and blocks the commit
+if any product is non-publishable:
+
+```
+⚠ STEP 10b HARD BLOCKER — IAP catalog blocks commit:
+  one-time IAP 'coins_100': status=draft — must be active/published before committing
+Run --yes publish-iap to publish, or resolve in Play Console before --yes commit.
+```
+
+Exit code 2 on any confirmed blocker. Cannot-verify (API 403 / network error) surfaces
+as a loud warning but does not hard-block (verify in Play Console).
+
+**iOS delta:** The iOS skill traps `inAppPurchasesV2` vs `subscriptionGroups` separately
+(the v2/subscriptions trap). This step is the Play equivalent: two namespaces, both must
+be clear. Play adds the base-plan layer — a subscription without an active base plan is
+an additional trap not present in iOS.
+
+---
+
+Let me know when all IAP products are publishable (✓ from play-status), or "stuck here:
+Step 10b — <product>" if a product fails to publish.
+
+---
+
 ### Step 10c — Pre-Submit Verification Gates
 
 **Mode:** Automatable — agent loads `pre-submit-verification.md` and runs all in-scope gates.
@@ -875,7 +960,20 @@ confirm:
 - versionCode is present on the target track.
 - Release `status` is `inProgress` (staged rollout), `completed` (fully rolled out), or
   `draft` (internal — visible to testers immediately).
-- For a first release with IAP (checked in slice 05): every product is `published`.
+- **If `play_billing.likely_present = true` (Step 10b):** re-run `play-status` and verify
+  that every product in both IAP namespaces shows no `← BLOCKER` tag. If any product is
+  still draft or has no active base plan after the release committed, warn loudly:
+
+  ```
+  ⚠ WARNING: IAP product(s) still non-publishable after release commit.
+     Users cannot purchase these products until they are activated.
+     Run: play-submit ... --yes publish-iap
+     Or: activate in Play Console → Monetize → Products
+  ```
+
+  The pre-commit guard in `play-submit --yes commit` blocks on confirmed non-publishable
+  products; this post-commit check catches any edge cases (cannot-verify during commit,
+  products added after the check, etc.).
 
 Then print:
 

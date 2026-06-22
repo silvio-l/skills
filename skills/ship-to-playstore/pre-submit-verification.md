@@ -283,6 +283,13 @@ Inspect the paywall file(s) in `lib/` for:
   - **Privacy Policy** (`privacyPolicy` URL from store metadata or `fastlane/metadata/android/`).
   - **Terms of Service / EULA** (a custom EULA or a link to one).
 
+**Base-plan publishability prerequisite (Step 10b):** For each subscription product shown on the
+paywall, confirm it has at least one active base plan via `play-status` (or the IAP catalog in
+`play-submit --yes publish-iap`). A subscription with no active base plan is not purchasable
+regardless of the subscription-level state — users land on a valid paywall but cannot buy.
+This check is the _catalog_ gate (Step 10b); this gate (G) is the _disclosure_ gate (Step 10c).
+Both must pass before Step 11.
+
 ```bash
 grep -rniE 'subscription|terms|privacy|TermsOfService|PrivacyPolicy|EulaUrl|\
 price|period|monthly|yearly|annual' lib/ 2>/dev/null

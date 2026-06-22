@@ -168,6 +168,56 @@ First-release readiness = every subscription has at least one base plan in a pub
 is Phase-1-researched detail (base-plan rules evolve); the structural fact that the catalog is
 two-namespace and subscriptions need base plans is stable.
 
+### 5.2 Per-product publishable-state rules (Step 10b gate)
+
+For the Step 10b hard-blocker check (`play-status` reporting + `play-submit` pre-commit guard),
+"publishable" means the product can be purchased by end users. The rules by namespace:
+
+**`inappproducts` (one-time products)**
+
+| `status` field value | Purchasable? | Step 10b |
+|---|---|---|
+| `active` | Yes | ✓ clear |
+| `published` | Yes (alternate value seen in some API versions) | ✓ clear |
+| `draft` | No — product not yet activated | □ BLOCKER |
+| `inactive` | No — product deactivated | □ BLOCKER |
+| `developerUnavailable` | No — hidden but was published | □ BLOCKER (confirm intent) |
+
+Activate a draft one-time product: `PATCH .../inappproducts/{sku}` with `{"status": "active"}`.
+This is edit-free and takes effect immediately.
+
+**`monetization.subscriptions` (auto-renewing subscriptions)**
+
+A subscription has two levels of state:
+
+1. Subscription-level `state`:
+   - `ACTIVE` — subscription is enabled.
+   - `INACTIVE` — subscription is archived/disabled.
+
+2. Base-plan-level `state` (each base plan under `basePlans[]`):
+   - `ACTIVE` — base plan is available for purchase.
+   - `INACTIVE` — base plan is deactivated.
+
+**Publishability rule:** a subscription is purchasable iff its `state == "ACTIVE"` AND at least
+one of its `basePlans[].state == "ACTIVE"`. A subscription with `state = ACTIVE` but zero active
+base plans is **not purchasable** and is a Step 10b blocker — the base-plan layer is the actual
+purchase surface.
+
+| Subscription `state` | Base plan `state` | Purchasable? |
+|---|---|---|
+| ACTIVE | ≥1 ACTIVE | ✓ |
+| ACTIVE | all INACTIVE | □ BLOCKER |
+| ACTIVE | (empty — no base plans) | □ BLOCKER |
+| INACTIVE | any | □ BLOCKER |
+
+Activate a base plan: `POST .../subscriptions/{productId}/basePlans/{basePlanId}:activate`.
+Edit-free — takes effect immediately. To create a new base plan, use the Play Console
+(`Monetize → Products → Subscriptions`) before activating via the API.
+
+**`scripts/play-submit --yes publish-iap`** performs these mutations automatically for
+non-publishable products detected in the catalog. The pre-commit check in `--yes commit`
+re-reads both namespaces and blocks if any product is still non-publishable.
+
 ---
 
 ## 6. Listings, images, appDetails

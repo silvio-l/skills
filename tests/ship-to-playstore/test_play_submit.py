@@ -1112,5 +1112,273 @@ class TestMetadataURLBuilders(unittest.TestCase):
         self.assertNotEqual(l_url, d_url)
 
 
+class TestIapPublishURLBuilders(unittest.TestCase):
+    """AC2: IAP publish URL builders produce correct, encoded Play API URLs (Step 10b)."""
+
+    PKG = "com.example.app"
+
+    def test_inappproducts_patch_url_structure(self):
+        url = PS.build_inappproducts_patch_url(self.PKG, "coins_100")
+        self.assertIn(PS.API_BASE, url)
+        self.assertIn(self.PKG, url)
+        self.assertIn("/inappproducts/coins_100", url)
+
+    def test_inappproducts_patch_url_encodes_sku(self):
+        url = PS.build_inappproducts_patch_url(self.PKG, "my sku")
+        self.assertIn("my%20sku", url)
+        self.assertNotIn(" ", url)
+
+    def test_subscription_baseplans_activate_url_structure(self):
+        url = PS.build_subscription_baseplans_activate_url(self.PKG, "monthly_sub", "p1")
+        self.assertIn(PS.API_BASE, url)
+        self.assertIn(self.PKG, url)
+        self.assertIn("/subscriptions/monthly_sub", url)
+        self.assertIn("/basePlans/p1:activate", url)
+
+    def test_subscription_baseplans_activate_url_encodes_components(self):
+        url = PS.build_subscription_baseplans_activate_url("com.ex", "sub/id", "plan id")
+        self.assertIn("sub%2Fid", url)
+        self.assertIn("plan%20id", url)
+
+    def test_iap_urls_differ_from_edit_urls(self):
+        iap_url = PS.build_inappproducts_patch_url(self.PKG, "sku")
+        edit_url = PS.build_edits_insert_url(self.PKG)
+        self.assertNotIn("/edits", iap_url)
+        self.assertIn("/edits", edit_url)
+
+
+class TestPublishIapYesFlag(unittest.TestCase):
+    """AC2: 'publish-iap' is a recognised --yes kind (dry-run by default, never batched)."""
+
+    def test_publish_iap_in_valid_yes_flags(self):
+        self.assertIn("publish-iap", PS.VALID_YES_FLAGS)
+
+    def test_parse_yes_flags_accepts_publish_iap(self):
+        flags = PS.parse_yes_flags(["--yes", "publish-iap"])
+        self.assertIn("publish-iap", flags)
+
+    def test_parse_yes_flags_ignores_unknown_with_warning(self):
+        # parse_yes_flags warns about unknown values and ignores them (does not exit)
+        flags = PS.parse_yes_flags(["--yes", "totally-invalid"])
+        self.assertNotIn("totally-invalid", flags)
+
+    def test_publish_iap_independent_of_upload(self):
+        # publish-iap is a distinct kind — it must not be inferred or bundled with upload
+        flags = PS.parse_yes_flags(["--yes", "upload"])
+        self.assertNotIn("publish-iap", flags)
+
+    def test_publish_iap_independent_of_commit(self):
+        flags = PS.parse_yes_flags(["--yes", "commit"])
+        self.assertNotIn("publish-iap", flags)
+
+    def test_publish_iap_combined_with_commit(self):
+        flags = PS.parse_yes_flags(["--yes", "publish-iap", "--yes", "commit"])
+        self.assertIn("publish-iap", flags)
+        self.assertIn("commit", flags)
+
+
+class TestIapCatalogBlocker(unittest.TestCase):
+    """AC3: check_iap_catalog_blocker correctly identifies Step 10b hard blockers."""
+
+    def _publishable_inapp(self, pid, status="active"):
+        return {"id": pid, "status": status, "publishable": True}
+
+    def _draft_inapp(self, pid):
+        return {"id": pid, "status": "draft", "publishable": False}
+
+    def _publishable_sub(self, pid):
+        return {
+            "id": pid, "state": "ACTIVE", "publishable": True,
+            "base_plans": [{"id": "p1", "state": "ACTIVE", "active": True, "offers_count": 0}],
+            "has_active_base_plan": True,
+        }
+
+    def _no_active_bp_sub(self, pid):
+        return {
+            "id": pid, "state": "ACTIVE", "publishable": False,
+            "base_plans": [{"id": "p1", "state": "INACTIVE", "active": False, "offers_count": 0}],
+            "has_active_base_plan": False,
+        }
+
+    def _ok_entry(self, products):
+        return {"marker": "✓", "products": products, "cause": None}
+
+    def _err_entry(self, cause="wrong scope"):
+        return {"marker": "?", "products": [], "cause": cause}
+
+    def test_all_publishable_no_blocker(self):
+        result = PS.check_iap_catalog_blocker(
+            self._ok_entry([self._publishable_inapp("coin")]),
+            self._ok_entry([self._publishable_sub("sub1")]),
+        )
+        self.assertFalse(result["has_blocker"])
+        self.assertEqual(result["non_publishable"], [])
+        self.assertIn("clear", result["message"])
+
+    def test_draft_inapp_is_a_blocker(self):
+        result = PS.check_iap_catalog_blocker(
+            self._ok_entry([self._draft_inapp("old_feat")]),
+            None,
+        )
+        self.assertTrue(result["has_blocker"])
+        self.assertEqual(len(result["non_publishable"]), 1)
+        self.assertIn("old_feat", result["non_publishable"][0])
+        self.assertIn("draft", result["non_publishable"][0])
+        self.assertIn("BLOCKER", result["message"])
+
+    def test_subscription_no_active_bp_is_a_blocker(self):
+        result = PS.check_iap_catalog_blocker(
+            None,
+            self._ok_entry([self._no_active_bp_sub("annual")]),
+        )
+        self.assertTrue(result["has_blocker"])
+        self.assertIn("annual", result["non_publishable"][0])
+        self.assertIn("base plan", result["non_publishable"][0])
+
+    def test_cannot_verify_entry_is_non_blocking_warning(self):
+        # API error: warn loudly but do not hard-block commit
+        result = PS.check_iap_catalog_blocker(
+            self._err_entry("wrong scope"),
+            None,
+        )
+        self.assertFalse(result["has_blocker"])
+        self.assertEqual(len(result["cannot_verify_warnings"]), 1)
+        self.assertIn("cannot-verify", result["cannot_verify_warnings"][0])
+
+    def test_none_entries_are_skipped(self):
+        result = PS.check_iap_catalog_blocker(None, None)
+        self.assertFalse(result["has_blocker"])
+        self.assertEqual(result["non_publishable"], [])
+
+    def test_empty_catalog_clears_blocker(self):
+        result = PS.check_iap_catalog_blocker(
+            self._ok_entry([]),
+            self._ok_entry([]),
+        )
+        self.assertFalse(result["has_blocker"])
+
+    def test_mixed_publishable_and_blocker(self):
+        result = PS.check_iap_catalog_blocker(
+            self._ok_entry([
+                self._publishable_inapp("coin"),
+                self._draft_inapp("old_feat"),
+            ]),
+            self._ok_entry([self._publishable_sub("sub1")]),
+        )
+        self.assertTrue(result["has_blocker"])
+        # Only the draft product is listed, not the publishable ones
+        self.assertEqual(len(result["non_publishable"]), 1)
+        self.assertIn("old_feat", result["non_publishable"][0])
+
+    def test_message_contains_publish_iap_hint_on_blocker(self):
+        result = PS.check_iap_catalog_blocker(
+            self._ok_entry([self._draft_inapp("coin")]),
+            None,
+        )
+        self.assertIn("publish-iap", result["message"])
+
+
+class TestIapPublishPlan(unittest.TestCase):
+    """AC2/AC3: describe_iap_publish_plan renders correctly in both dry-run and approved modes."""
+
+    PKG = "com.example.myapp"
+
+    def _ok_entry_ot(self):
+        return {"marker": "✓", "products": [
+            {"id": "coins_100", "status": "active", "publishable": True},
+            {"id": "old_feat", "status": "draft", "publishable": False},
+        ], "cause": None}
+
+    def _ok_entry_sub(self):
+        return {"marker": "✓", "products": [{
+            "id": "monthly", "state": "ACTIVE", "publishable": True,
+            "base_plans": [{"id": "p1", "state": "ACTIVE", "active": True, "offers_count": 2}],
+            "has_active_base_plan": True,
+        }], "cause": None}
+
+    def test_dry_run_shows_blocked_gate(self):
+        out = PS.describe_iap_publish_plan(self.PKG, None, None, frozenset())
+        self.assertIn("BLOCKED", out)
+        self.assertIn("publish-iap", out)
+
+    def test_approved_shows_approved_gate(self):
+        out = PS.describe_iap_publish_plan(
+            self.PKG, None, None, frozenset({"publish-iap"})
+        )
+        self.assertIn("APPROVED", out)
+
+    def test_not_queried_when_entries_are_none(self):
+        out = PS.describe_iap_publish_plan(self.PKG, None, None, frozenset())
+        self.assertIn("not queried", out)
+
+    def test_renders_one_time_products(self):
+        out = PS.describe_iap_publish_plan(
+            self.PKG, self._ok_entry_ot(), None, frozenset()
+        )
+        self.assertIn("coins_100", out)
+        self.assertIn("old_feat", out)
+        self.assertIn("NOT publishable", out)
+        self.assertIn("✓ publishable", out)
+
+    def test_renders_subscription_with_base_plan_info(self):
+        out = PS.describe_iap_publish_plan(
+            self.PKG, None, self._ok_entry_sub(), frozenset()
+        )
+        self.assertIn("monthly", out)
+        self.assertIn("1/1 active base plan(s)", out)
+
+    def test_cannot_verify_entry_shown(self):
+        err_entry = {"marker": "?", "products": [], "cause": "forbidden"}
+        out = PS.describe_iap_publish_plan(self.PKG, err_entry, None, frozenset())
+        self.assertIn("cannot-verify", out)
+        self.assertIn("forbidden", out)
+
+    def test_package_in_plan_header(self):
+        out = PS.describe_iap_publish_plan(self.PKG, None, None, frozenset())
+        self.assertIn(self.PKG, out)
+
+    def test_hard_rule_note_in_plan(self):
+        out = PS.describe_iap_publish_plan(self.PKG, None, None, frozenset())
+        self.assertIn("HARD RULE", out)
+        self.assertIn("Step 10b", out)
+
+
+class TestIapPreCommitGuard(unittest.TestCase):
+    """AC3: play-submit source contains the Step 10b pre-commit IAP guard."""
+
+    def setUp(self):
+        self._script = str(
+            pathlib.Path(__file__).resolve().parents[2]
+            / "skills" / "ship-to-playstore" / "scripts" / "play-submit"
+        )
+        with open(self._script, encoding="utf-8") as f:
+            self.src = f.read()
+
+    def test_step_10b_hard_blocker_comment_present(self):
+        self.assertIn("Step 10b HARD BLOCKER", self.src)
+
+    def test_iap_blocker_check_inside_commit_block(self):
+        # The pre-commit check must call check_iap_catalog_blocker inside main()
+        # (i.e. in the --yes commit guard, not just at definition site).
+        # Verify both the billing_likely guard and blocker call exist in the
+        # commit-gated section by checking they appear after "Step 10b HARD BLOCKER".
+        blocker_comment_idx = self.src.index("Step 10b HARD BLOCKER")
+        billing_likely_idx = self.src.index("billing_likely")
+        # billing_likely usage must precede the blocker comment (it's the guard condition)
+        self.assertLess(billing_likely_idx, blocker_comment_idx)
+
+    def test_exit_2_on_blocker(self):
+        # The guard must return exit code 2 on a confirmed blocker
+        self.assertIn("return 2", self.src)
+
+    def test_publish_iap_checkpoint_present(self):
+        self.assertIn("publish-iap\" in yes_flags", self.src)
+
+    def test_dry_run_shows_iap_plan_when_billing_present(self):
+        # The dry-run section must call describe_iap_publish_plan
+        self.assertIn("describe_iap_publish_plan", self.src)
+        self.assertIn("billing_likely", self.src)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

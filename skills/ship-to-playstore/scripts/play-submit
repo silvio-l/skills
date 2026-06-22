@@ -91,7 +91,7 @@ _SA_ENV_VARS = (
 
 _OUT_OF_REPO_SA = "~/.config/play/play-service-account.json"
 
-VALID_YES_FLAGS = frozenset({"upload", "release", "commit", "listing", "data-safety"})
+VALID_YES_FLAGS = frozenset({"upload", "release", "commit", "listing", "data-safety", "publish-iap"})
 VALID_TRACKS = frozenset({"internal", "alpha", "beta", "production"})
 
 
@@ -352,6 +352,31 @@ def build_edits_details_url(package: str, edit_id: str) -> str:
     q = urllib.parse.quote(package, safe="")
     ei = urllib.parse.quote(edit_id, safe="")
     return f"{API_BASE}/applications/{q}/edits/{ei}/details"
+
+
+def build_inappproducts_patch_url(package: str, sku: str) -> str:
+    """URL for inappproducts.patch (PATCH — activate/update a one-time IAP product, Step 10b).
+
+    Edit-free: takes effect immediately outside the edits transaction.
+    Pass `{"status": "active"}` as the request body to activate a draft product.
+    """
+    q = urllib.parse.quote(package, safe="")
+    s = urllib.parse.quote(sku, safe="")
+    return f"{API_BASE}/applications/{q}/inappproducts/{s}"
+
+
+def build_subscription_baseplans_activate_url(package: str, product_id: str,
+                                               base_plan_id: str) -> str:
+    """URL for monetization.subscriptions.basePlans.activate (POST — Step 10b).
+
+    Edit-free: takes effect immediately. A subscription with no active base plan
+    cannot be purchased regardless of the subscription-level state
+    (play-api-reference.md §5.1 / §5.2).
+    """
+    q = urllib.parse.quote(package, safe="")
+    p = urllib.parse.quote(product_id, safe="")
+    b = urllib.parse.quote(base_plan_id, safe="")
+    return f"{API_BASE}/applications/{q}/subscriptions/{p}/basePlans/{b}:activate"
 
 
 def build_track_release_payload(track: str, version_codes: list,
@@ -632,6 +657,148 @@ def check_pricing_blocker(billing_likely_present: bool,
         ),
         "console_path": CONSOLE_PATH,
     }
+
+
+def check_iap_catalog_blocker(
+    iap_one_time: dict | None,
+    iap_subscriptions: dict | None,
+) -> dict:
+    """Check the IAP catalog for Step 10b publishability blockers (pure, unit-tested).
+
+    Accepts IAP fact dicts produced by _classify_iap_response (or the same format from
+    play-status._iap_facts):
+      {"marker": "✓"|"?", "products": [...], "cause": str|None}
+    Each product dict carries:
+      {"id": str, "publishable": bool, "status": str}  (inappproducts)
+      {"id": str, "publishable": bool, "state": str, "base_plans": [...]}  (subscriptions)
+
+    Returns:
+      has_blocker:            True iff any confirmed non-publishable product detected.
+      non_publishable:        list of human-readable problem strings (one per blocker).
+      cannot_verify_warnings: list of cannot-verify strings (non-blocking; logged loudly).
+      message:                human-readable summary for printing.
+
+    Hard-blocker rule (Step 10b): confirmed non-publishable products block edits.commit.
+    Cannot-verify entries (API error / 403) are loud warnings, not hard blockers —
+    the user must verify in Play Console. PRD §10.2 Step 10b.
+    """
+    non_publishable: list = []
+    cannot_verify_warnings: list = []
+
+    for label, entry in [("one-time IAP", iap_one_time),
+                          ("subscription", iap_subscriptions)]:
+        if entry is None:
+            continue
+        if entry.get("marker") == "?":
+            cause = entry.get("cause") or "cannot-verify"
+            cannot_verify_warnings.append(
+                f"{label}: ? cannot-verify ({cause}) — verify in Play Console"
+            )
+            continue
+        for p in (entry.get("products") or []):
+            if not p.get("publishable", True):
+                pid = p.get("id", "?")
+                if "base_plans" in p:
+                    bp_active = sum(
+                        1 for bp in (p.get("base_plans") or []) if bp.get("active")
+                    )
+                    bp_total = len(p.get("base_plans") or [])
+                    state = p.get("state", "?")
+                    non_publishable.append(
+                        f"subscription {pid!r}: state={state}, "
+                        f"{bp_active}/{bp_total} active base plan(s) — "
+                        "needs at least one ACTIVE base plan to be purchasable"
+                    )
+                else:
+                    status = p.get("status", "?")
+                    non_publishable.append(
+                        f"one-time IAP {pid!r}: status={status} — "
+                        "must be active/published before committing"
+                    )
+
+    has_blocker = bool(non_publishable)
+    if not has_blocker and not cannot_verify_warnings:
+        message = "✓ IAP catalog: all products publishable — Step 10b clear."
+    elif not has_blocker:
+        warning_text = "; ".join(cannot_verify_warnings)
+        message = f"? IAP catalog: cannot fully verify — {warning_text}"
+    else:
+        blockers_text = "\n  ".join(non_publishable)
+        message = (
+            f"⚠ STEP 10b BLOCKER — non-publishable IAP products detected:\n  {blockers_text}\n"
+            "Run --yes publish-iap to publish, or resolve in Play Console before --yes commit."
+        )
+
+    return {
+        "has_blocker": has_blocker,
+        "non_publishable": non_publishable,
+        "cannot_verify_warnings": cannot_verify_warnings,
+        "message": message,
+    }
+
+
+def describe_iap_publish_plan(
+    package: str,
+    iap_one_time: dict | None,
+    iap_subscriptions: dict | None,
+    yes_flags: frozenset,
+) -> str:
+    """Return the dry-run plan for the IAP publish checkpoint (Step 10b) — pure, tested.
+
+    Shows current IAP catalog state and whether --yes publish-iap is approved.
+    Dry-run by default. iap_one_time / iap_subscriptions may be None when called
+    from dry-run mode (namespaces not queried yet).
+    """
+    def _render_entry(label, entry):
+        if entry is None:
+            return f"  {label}: ? cannot-verify (not queried)"
+        if entry.get("marker") == "?":
+            cause = entry.get("cause") or "cannot-verify"
+            return f"  {label}: ? cannot-verify ({cause})"
+        products = entry.get("products") or []
+        if not products:
+            return f"  {label}: (no products in catalog)"
+        lines = []
+        for p in products:
+            pid = p.get("id", "?")
+            if "base_plans" in p:
+                state = p.get("state", "?")
+                active_bp = sum(
+                    1 for bp in (p.get("base_plans") or []) if bp.get("active")
+                )
+                total_bp = len(p.get("base_plans") or [])
+                pub = "✓ publishable" if p.get("publishable") else "□ NOT publishable"
+                lines.append(
+                    f"    {pid}: state={state}, "
+                    f"{active_bp}/{total_bp} active base plan(s) — {pub}"
+                )
+            else:
+                status = p.get("status", "?")
+                pub = "✓ publishable" if p.get("publishable") else "□ NOT publishable"
+                lines.append(f"    {pid}: status={status} — {pub}")
+        return f"  {label}:\n" + "\n".join(lines)
+
+    gate = ("APPROVED (--yes publish-iap passed)" if "publish-iap" in yes_flags
+            else "BLOCKED  (add --yes publish-iap to approve)")
+    marker = "✓" if "publish-iap" in yes_flags else "□"
+
+    return "\n".join([
+        "=== play-submit: IAP catalog (Step 10b) ===",
+        "",
+        f"Package      : {package}",
+        "",
+        "IAP catalog state (edit-free GETs, read-only):",
+        _render_entry("One-time (inappproducts)", iap_one_time),
+        _render_entry("Subscriptions (monetization.subscriptions)", iap_subscriptions),
+        "",
+        "IAP publish checkpoint:",
+        f"  {marker} publish-iap: {gate}",
+        "             Publishes draft one-time products (inappproducts.patch → active)",
+        "             and activates inactive subscription base plans (basePlans.activate).",
+        "             Edit-free mutations — take effect immediately, not inside the edit.",
+        "",
+        "HARD RULE (Step 10b): any non-publishable product blocks --yes commit.",
+    ])
 
 
 def describe_metadata_plan(package: str, report: dict, yes_flags: frozenset) -> str:
@@ -934,6 +1101,41 @@ def http_put_json(url: str, token: str, body: dict,
         return 0, {}
 
 
+def http_patch_json(url: str, token: str, body: dict,
+                    debug: bool = False, label: str = "") -> tuple:
+    """PATCH JSON to url. Auth header never logged. Used by IAP publish (Step 10b)."""
+    data = json.dumps(body).encode("utf-8")
+    req = urllib.request.Request(
+        url, data=data, method="PATCH",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            txt = r.read().decode("utf-8", errors="replace")
+            if debug:
+                print(f"{label}: HTTP {r.status}", file=sys.stderr)
+            try:
+                return r.status, json.loads(txt) if txt else {}
+            except json.JSONDecodeError:
+                return r.status, {}
+    except urllib.error.HTTPError as e:
+        body_txt = e.read().decode("utf-8", errors="replace") if e.fp else ""
+        if debug:
+            print(f"{label}: HTTP {e.code}", file=sys.stderr)
+        try:
+            return e.code, json.loads(body_txt) if body_txt else {}
+        except json.JSONDecodeError:
+            return e.code, {}
+    except urllib.error.URLError:
+        if debug:
+            print(f"{label}: network error", file=sys.stderr)
+        return 0, {}
+
+
 def upload_aab_multipart(url: str, token: str, aab_path: str,
                           debug: bool = False) -> tuple:
     """Multipart upload of the AAB file (uploadType=multipart). Token never logged."""
@@ -1004,6 +1206,53 @@ def _resolve_sa_from_env() -> str | None:
     if val and os.path.isfile(val):
         return val
     return None
+
+
+def _classify_iap_item(item: dict, kind: str) -> dict:
+    """Classify a single IAP product from a Play API response body (mirrors play-status.classify_iap_product).
+
+    Returns {"id", "publishable", "status"|"state", optionally "base_plans", "has_active_base_plan"}.
+    Not unit-tested here — the pure check_iap_catalog_blocker covers observable behaviour.
+    """
+    if kind == "inappproducts":
+        pid = item.get("sku") or item.get("productId") or "?"
+        status = item.get("status") or "?"
+        publishable = status.lower() in ("active", "published")
+        return {"id": pid, "status": status, "publishable": publishable}
+    # subscriptions (monetization.subscriptions namespace)
+    pid = item.get("productId") or "?"
+    state = item.get("state") or "?"
+    bps = []
+    for bp in (item.get("basePlans") or []):
+        bp_state = bp.get("state") or "?"
+        bps.append({
+            "id": bp.get("basePlanId") or "?",
+            "state": bp_state,
+            "active": bp_state.upper() == "ACTIVE",
+            "offers_count": len(bp.get("offers") or []),
+        })
+    has_active = any(b["active"] for b in bps)
+    publishable = state.upper() == "ACTIVE" and has_active
+    return {
+        "id": pid,
+        "state": state,
+        "publishable": publishable,
+        "base_plans": bps,
+        "has_active_base_plan": has_active,
+    }
+
+
+def _classify_iap_response(http_status: int, body: dict, kind: str) -> dict:
+    """Wrap a Play API IAP namespace GET response into the fact dict consumed by
+    check_iap_catalog_blocker and describe_iap_publish_plan.
+    """
+    verdict = classify_http(http_status, body)
+    if verdict["marker"] == "✓":
+        items = body.get(kind, []) or []
+        products = [_classify_iap_item(it, kind) for it in items]
+        has_blocker = any(not p.get("publishable", True) for p in products)
+        return {"marker": "✓", "products": products, "has_blocker": has_blocker, "cause": None}
+    return {"marker": "?", "products": [], "has_blocker": False, "cause": verdict["likely_cause"]}
 
 
 def _discard_edit(package: str, edit_id: str, token: str, debug: bool) -> None:
@@ -1178,11 +1427,80 @@ def main(argv: list | None = None) -> int:
         print()
         metadata_plan = describe_metadata_plan(args.package, report, yes_flags)
         print(metadata_plan)
+        billing_likely = bool((report.get("play_billing") or {}).get("likely_present"))
+        if billing_likely:
+            print()
+            # Dry-run: IAP namespaces not queried yet — show plan skeleton only
+            print(describe_iap_publish_plan(args.package, None, None, yes_flags))
         _discard_edit(args.package, edit_id, token, args.debug)
         return 0
 
     # --- Execute approved mutations in order ---
     uploaded_vc = version_code  # may be overridden by the actual upload response
+
+    # IAP publish checkpoint (Step 10b) — edit-free; runs before upload/release/commit
+    if "publish-iap" in yes_flags:
+        pkg_q = urllib.parse.quote(args.package, safe="")
+        ot_s, ot_b = http_get(
+            f"{API_BASE}/applications/{pkg_q}/inappproducts",
+            token, args.debug, "iap.inappproducts",
+        )
+        sub_s, sub_b = http_get(
+            f"{API_BASE}/applications/{pkg_q}/subscriptions",
+            token, args.debug, "iap.subscriptions",
+        )
+        iap_ot = _classify_iap_response(ot_s, ot_b, "inappproducts")
+        iap_sub = _classify_iap_response(sub_s, sub_b, "subscriptions")
+        print(describe_iap_publish_plan(args.package, iap_ot, iap_sub, yes_flags))
+
+        # Publish non-publishable one-time products
+        if iap_ot.get("marker") == "✓":
+            for p in (iap_ot.get("products") or []):
+                if not p.get("publishable", True):
+                    pid = p.get("id", "?")
+                    print(f"Publishing one-time IAP {pid!r}…")
+                    p_status, p_body = http_patch_json(
+                        build_inappproducts_patch_url(args.package, pid),
+                        token, {"status": "active"}, args.debug,
+                        f"inappproducts.patch({pid})",
+                    )
+                    if p_status == 200:
+                        print(f"  ✓ {pid!r}: published (status → active).")
+                    else:
+                        cause = classify_http(p_status, p_body)["likely_cause"]
+                        print(
+                            f"  ⚠ {pid!r}: publish failed — {cause} (HTTP {p_status}). "
+                            "Resolve in Play Console before committing.",
+                            file=sys.stderr,
+                        )
+
+        # Activate inactive subscription base plans
+        if iap_sub.get("marker") == "✓":
+            for p in (iap_sub.get("products") or []):
+                if not p.get("publishable", True):
+                    pid = p.get("id", "?")
+                    for bp in (p.get("base_plans") or []):
+                        if not bp.get("active"):
+                            bp_id = bp.get("id", "?")
+                            print(f"Activating subscription {pid!r} base plan {bp_id!r}…")
+                            a_status, a_body = http_post_json(
+                                build_subscription_baseplans_activate_url(
+                                    args.package, pid, bp_id
+                                ),
+                                token, {}, args.debug,
+                                f"basePlans.activate({pid}/{bp_id})",
+                            )
+                            if a_status == 200:
+                                print(f"  ✓ {pid!r}/{bp_id!r}: base plan activated.")
+                            else:
+                                cause = classify_http(a_status, a_body)["likely_cause"]
+                                print(
+                                    f"  ⚠ {pid!r}/{bp_id!r}: activation failed — "
+                                    f"{cause} (HTTP {a_status}). Resolve in Play Console.",
+                                    file=sys.stderr,
+                                )
+    else:
+        print("  [publish-iap]: SKIPPED — add --yes publish-iap to approve IAP publish (Step 10b)")
 
     # Mutation 1 — Upload
     if "upload" in yes_flags:
@@ -1288,6 +1606,35 @@ def main(argv: list | None = None) -> int:
                 "track update; this may publish a stale state.",
                 file=sys.stderr,
             )
+
+        # Step 10b HARD BLOCKER — verify IAP catalog before committing (PRD §10.2 Step 10b)
+        billing_likely = bool((report.get("play_billing") or {}).get("likely_present"))
+        if billing_likely:
+            pkg_q = urllib.parse.quote(args.package, safe="")
+            ot_s, ot_b = http_get(
+                f"{API_BASE}/applications/{pkg_q}/inappproducts",
+                token, args.debug, "step10b.inappproducts",
+            )
+            sub_s, sub_b = http_get(
+                f"{API_BASE}/applications/{pkg_q}/subscriptions",
+                token, args.debug, "step10b.subscriptions",
+            )
+            iap_blocker = check_iap_catalog_blocker(
+                _classify_iap_response(ot_s, ot_b, "inappproducts"),
+                _classify_iap_response(sub_s, sub_b, "subscriptions"),
+            )
+            if iap_blocker["has_blocker"]:
+                print(
+                    "\n⚠ STEP 10b HARD BLOCKER — IAP catalog blocks commit:",
+                    file=sys.stderr,
+                )
+                print(iap_blocker["message"], file=sys.stderr)
+                _discard_edit(args.package, edit_id, token, args.debug)
+                return 2
+            for w in (iap_blocker.get("cannot_verify_warnings") or []):
+                print(f"  ⚠ Step 10b warning: {w}", file=sys.stderr)
+            print(iap_blocker["message"])
+
         print("Committing edit (edits.commit — publishes to Play Console)…")
         cm_status, cm_body = http_post_json(
             build_edits_commit_url(args.package, edit_id),
