@@ -74,6 +74,44 @@ one *primitive* collection + one *semantic* collection aliased onto it.)
   approximate.
 - Components with character: the signature element as a real component.
 
+## Building premium UI in Figma via `use_figma` (hard-won)
+
+These are *execution* learnings for when you actually build the design in Figma (the
+official `figma-use` skill covers the raw API; this is what we keep ourselves so it
+survives plugin updates).
+
+- **Container fills default to opaque white — the #1 trap.** Every `createFrame()` /
+  `createAutoLayout()` starts with a white fill. A layout-only container (row, column,
+  text block, spacer, icon-row wrapper) **must** get `fills = []`, or it paints a stray
+  white box and makes light/white text on coloured/photo backgrounds invisible. The bug
+  *compounds* (greeting column + header row + text block inside a coloured hero each add
+  one). Audit every container before finishing: real surface (card, nav, pill, badge,
+  avatar) → keep fill; pure layout → clear it. Verify with a **2× export against a
+  non-white background**, where stray boxes are obvious.
+- **Vector over stock photos.** Default to `figma.createNodeFromSvg(svg)` for icons,
+  illustrations, and the mascot — scalable, on-brand, no licensing/management. Hand-bake
+  the colour into the SVG string per context. (Stock photos read generic and the user
+  generally does **not** want them.) `figma.createImageAsync(url)` is **not supported**
+  in `use_figma`; if raster is genuinely needed, use the `upload_assets` MCP tool
+  (request upload URLs → `curl -F file=@…` POST the bytes; with `nodeId` it sets the
+  image as a fill on an existing node).
+- **Personality via a mascot is the strongest "this is *my* app" signature.** Pattern
+  from the HellerIO project (`hellerio/assets/images/Helo.svg`): a rounded blob character
+  with kawaii eyes + a soft gradient + a small accessory, shipped as a clean **SVG** and
+  later animated in **Rive** (idle / hint / wave states). Make the character harmonize
+  with the product **name**. A clean flat-but-warm design without a distinctive
+  centerpiece reads "safe/boring"; a mascot or a bold signature visual is what delivers
+  the wow.
+- **Tokens first, always.** Build Primitive + Semantic variable collections + Text Styles
+  before screens; bind fills/text with `setBoundVariableForPaint` (returns a **new**
+  paint — capture and reassign). Set `variable.scopes` explicitly.
+- **Review at 2×.** `get_screenshot` renders at 1× native (no upscale); use
+  `download_assets` with `defaultScale: 2` to actually judge padding, edges, and
+  alignment.
+- **Spacing rhythm = premium.** 8pt grid, generous padding (20–24 screen, 14–16 cards),
+  deliberately *varied* radii (not a uniform 16 everywhere), soft shadows for depth.
+  Flat single-colour blocks read cheap; depth + one bold signature read premium.
+
 ## Brief Template (Phase 0, Step 2)
 
 ```
