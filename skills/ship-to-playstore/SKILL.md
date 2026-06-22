@@ -10,9 +10,10 @@ You are the **orchestrator** for a Google Play Store release. You inspect, resea
 to production autonomously. Every mutation (AAB upload, track release, staged rollout, production commit, IAP publish,
 Data Safety publish) is a discrete opt-in checkpoint the user must explicitly approve. This is a guided, one-step-at-a-time loop.
 
-> **Slice 3 status.** This skill delivers Phase 0 (repo introspection), Phase 1 (freshness research), and Phase 2
-> (Play Console status + credential discovery). Phases 3, pre-submit gates, and `play-submit` land in later slices.
-> After Phase 2, **halt** — do not improvise Phase 3+ behaviour from training memory.
+> **Slice 4 status.** This skill delivers Phase 0 (repo introspection), Phase 1 (freshness research), Phase 2
+> (Play Console status + credential discovery), and Phase 3 (guided release loop: upload → track → commit).
+> Pre-submit gates (`pre-submit-verification.md`) and metadata steps (listing/Data Safety/IAP) land in later slices.
+> After Phase 3, **halt** — do not improvise Phase 4+ behaviour from training memory.
 
 ## Prerequisites
 
@@ -41,9 +42,10 @@ The user invokes this skill with `/ship-to-playstore`, or it auto-invokes on Ger
 | Phase 2 — Play Console status + credential discovery | [phase2-play-status.md](phase2-play-status.md) | ✅ this slice |
 | Play Developer API reference | [play-api-reference.md](play-api-reference.md) | ✅ this slice |
 | Read-only Play Console readiness query | [scripts/play-status](scripts/play-status) | ✅ this slice |
-| Phase 3 — guided release loop | `phase3-release-loop.md` | ⏳ later slice — halt here |
+| Phase 3 — guided release loop (upload → track → commit) | [phase3-release-loop.md](phase3-release-loop.md) | ✅ this slice |
+| Opt-in Play mutations (upload / release / commit) | [scripts/play-submit](scripts/play-submit) | ✅ this slice |
 | Pre-submit Play Policy gates | `pre-submit-verification.md` | ⏳ later slice |
-| Opt-in Play mutations (upload / release / commit / IAP / Data Safety) | `scripts/play-submit` | ⏳ later slice |
+| Metadata: listing / Data Safety / IAP / pricing | (slice 05) | ⏳ later slice |
 
 Read the phase file you need when you need it. This SKILL.md is the always-on layer — keep it minimal. (The full
 orchestrator polish is completed in slice 09.)
@@ -103,7 +105,11 @@ When invoked:
      research protocol. Present the Freshness Report and the Phase 0 cross-reference (blockers / warnings).
 5. **Phase 2 — Play Console status.** Read [phase2-play-status.md](phase2-play-status.md). Run the toolchain
    precheck (§1), discover credentials (§2), select the strategy (§3), run `scripts/play-status`, and present
-   the situation overview (§5) to the user. After Phase 2, **halt** — Phase 3 lands in a later slice.
+   the situation overview (§5) to the user.
+6. **Phase 3 — Guided release loop.** Read [phase3-release-loop.md](phase3-release-loop.md). Build the ordered
+   release checklist (§3.1), confirm with the user, then work through steps 0–4, 10a, 11, 12 one at a time
+   using the loop mechanic (§3.2) and `scripts/play-submit` for all mutations. After Phase 3 Step 12, **halt** —
+   metadata steps (listing/Data Safety/IAP) land in a later slice. Do not improvise metadata steps from training memory.
 
 ```bash
 SCRIPT=~/.claude/skills/ship-to-playstore/scripts/phase0-introspect
