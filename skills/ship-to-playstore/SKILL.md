@@ -10,11 +10,6 @@ You are the **orchestrator** for a Google Play Store release. You inspect, resea
 to production autonomously. Every mutation (AAB upload, track release, staged rollout, production commit, IAP publish,
 Data Safety publish) is a discrete opt-in checkpoint the user must explicitly approve. This is a guided, one-step-at-a-time loop.
 
-> **Slice 4 status.** This skill delivers Phase 0 (repo introspection), Phase 1 (freshness research), Phase 2
-> (Play Console status + credential discovery), and Phase 3 (guided release loop: upload → track → commit).
-> Pre-submit gates (`pre-submit-verification.md`) and metadata steps (listing/Data Safety/IAP) land in later slices.
-> After Phase 3, **halt** — do not improvise Phase 4+ behaviour from training memory.
-
 ## Prerequisites
 
 | Tool | Required for |
@@ -25,9 +20,9 @@ Data Safety publish) is a discrete opt-in checkpoint the user must explicitly ap
 | `openssl` | Phase 2 — RS256-signs the OAuth2 JWT assertion for `scripts/play-status` |
 | `flutter`, `java`, `gradle` | Phase 2 toolchain precheck; Phase 3+ build steps |
 
-Phase 1 (freshness research) is wired in this slice. It requires `WebSearch` and `WebFetch` — if either is
-unavailable in the session, the skill halts after Phase 0 and tells the user live web access is required (training-memory
-Play requirements must never be substituted). Phase 2+ lands later; until then, halt after Phase 1.
+Phase 1 (freshness research) requires `WebSearch` and `WebFetch` — if either is unavailable in the session,
+the skill halts after Phase 0 and tells the user live web access is required (training-memory Play requirements
+must never be substituted).
 
 The user invokes this skill with `/ship-to-playstore`, or it auto-invokes on German triggers like
 *"Play Store Release"*, *"App einreichen"*, *"Play-Status"*, *"Play Billing prüfen"*.
@@ -44,11 +39,11 @@ The user invokes this skill with `/ship-to-playstore`, or it auto-invokes on Ger
 | Read-only Play Console readiness query | [scripts/play-status](scripts/play-status) | ✅ this slice |
 | Phase 3 — guided release loop (upload → track → commit) | [phase3-release-loop.md](phase3-release-loop.md) | ✅ this slice |
 | Opt-in Play mutations (upload / release / commit) | [scripts/play-submit](scripts/play-submit) | ✅ this slice |
-| Pre-submit Play Policy gates | `pre-submit-verification.md` | ⏳ later slice |
-| Metadata: listing / Data Safety / IAP / pricing | (slice 05) | ⏳ later slice |
+| Pre-submit Play Policy gates | [pre-submit-verification.md](pre-submit-verification.md) | ✅ done |
+| Metadata: listing / Data Safety / rating / privacy / pricing (Steps 5–9) | [phase3-release-loop.md](phase3-release-loop.md) | ✅ done |
+| IAP / Play Billing catalog readiness (Step 10b) | [phase3-release-loop.md](phase3-release-loop.md) + [scripts/play-submit](scripts/play-submit) | ✅ done |
 
-Read the phase file you need when you need it. This SKILL.md is the always-on layer — keep it minimal. (The full
-orchestrator polish is completed in slice 09.)
+Read the phase file you need when you need it. This SKILL.md is the always-on layer — keep it minimal.
 
 ## Core principles
 
@@ -79,7 +74,7 @@ Inherited from `ship-to-appstore`, with the Play deltas marked **(Play delta)**:
 - **Many rejects are judgement, not fields — gate them proactively.** A class of Play rejects is invisible to every
   API query because they are judgements over text, images, and code (Store Listing claims, Data Safety mismatches,
   permission discipline, subscription disclosures, UGC safety, minimum functionality). Phase 3 Step 10c runs a gate
-  per Play policy before submit, scoped by Phase 0 facts (later slice). Policy decision text is not API-readable —
+  per Play policy before submit, scoped by Phase 0 facts. Policy decision text is not API-readable —
   always have the user paste it.
 
 ### Status note + security (Play delta, PRD §4.3)
@@ -107,9 +102,11 @@ When invoked:
    precheck (§1), discover credentials (§2), select the strategy (§3), run `scripts/play-status`, and present
    the situation overview (§5) to the user.
 6. **Phase 3 — Guided release loop.** Read [phase3-release-loop.md](phase3-release-loop.md). Build the ordered
-   release checklist (§3.1), confirm with the user, then work through steps 0–4, 10a, 11, 12 one at a time
+   release checklist (§3.1), confirm with the user, then work through steps 0–4, 5–9 (listing / Data Safety /
+   rating / privacy / pricing), 10a (track + rollout), 10b (IAP catalog gate — `scripts/play-submit --yes publish-iap`),
+   10c (pre-submit gates from [pre-submit-verification.md](pre-submit-verification.md)), 11, 12 one at a time
    using the loop mechanic (§3.2) and `scripts/play-submit` for all mutations. After Phase 3 Step 12, **halt** —
-   metadata steps (listing/Data Safety/IAP) land in a later slice. Do not improvise metadata steps from training memory.
+   do not improvise any Phase 4+ steps from training memory.
 
 ```bash
 SCRIPT=~/.claude/skills/ship-to-playstore/scripts/phase0-introspect
