@@ -1,6 +1,7 @@
 ---
 name: ship-to-playstore
 description: "Guide a Flutter solo-dev through a Google Play Store release and manage Play Console via bundled scripts: status, IAP/billing readiness, upload, release-to-track, submit. Use for: Play Store Release, App einreichen, Play-Status, Play Billing prüfen."
+disable-model-invocation: true
 ---
 
 # Ship to Play Store
@@ -9,9 +10,9 @@ You are the **orchestrator** for a Google Play Store release. You inspect, resea
 to production autonomously. Every mutation (AAB upload, track release, staged rollout, production commit, IAP publish,
 Data Safety publish) is a discrete opt-in checkpoint the user must explicitly approve. This is a guided, one-step-at-a-time loop.
 
-> **Slice 2 status.** This skill delivers Phase 0 (repo introspection) and Phase 1 (freshness research). Phases 2–3,
-> the Play API scripts, and pre-submit gates land in later slices. After Phase 1, **halt** — do not improvise Phase 2+
-> behaviour from training memory.
+> **Slice 3 status.** This skill delivers Phase 0 (repo introspection), Phase 1 (freshness research), and Phase 2
+> (Play Console status + credential discovery). Phases 3, pre-submit gates, and `play-submit` land in later slices.
+> After Phase 2, **halt** — do not improvise Phase 3+ behaviour from training memory.
 
 ## Prerequisites
 
@@ -20,7 +21,8 @@ Data Safety publish) is a discrete opt-in checkpoint the user must explicitly ap
 | `WebSearch` | Phase 1 — live search for current Play requirements |
 | `WebFetch` | Phase 1 — fetching canonical developer.android.com / play.google.com pages |
 | Python 3 | Phase 0 — runs `scripts/phase0-introspect` (stdlib only) |
-| `flutter`, `java`, `gradle` | Phase 2+ build steps (later slice) |
+| `openssl` | Phase 2 — RS256-signs the OAuth2 JWT assertion for `scripts/play-status` |
+| `flutter`, `java`, `gradle` | Phase 2 toolchain precheck; Phase 3+ build steps |
 
 Phase 1 (freshness research) is wired in this slice. It requires `WebSearch` and `WebFetch` — if either is
 unavailable in the session, the skill halts after Phase 0 and tells the user live web access is required (training-memory
@@ -36,11 +38,11 @@ The user invokes this skill with `/ship-to-playstore`, or it auto-invokes on Ger
 | Phase 0 — repo introspection (report interpretation) | [phase0-introspect.md](phase0-introspect.md) | ✅ this slice |
 | Phase 0 introspection script | [scripts/phase0-introspect](scripts/phase0-introspect) | ✅ this slice |
 | Phase 1 — freshness research (current Play requirements) | [phase1-research.md](phase1-research.md) | ✅ this slice |
-| Phase 2 — Play Console status + credential discovery | `phase2-play-status.md` | ⏳ later slice — halt here |
+| Phase 2 — Play Console status + credential discovery | [phase2-play-status.md](phase2-play-status.md) | ✅ this slice |
+| Play Developer API reference | [play-api-reference.md](play-api-reference.md) | ✅ this slice |
+| Read-only Play Console readiness query | [scripts/play-status](scripts/play-status) | ✅ this slice |
 | Phase 3 — guided release loop | `phase3-release-loop.md` | ⏳ later slice — halt here |
-| Play Developer API reference | `play-api-reference.md` | ⏳ later slice |
 | Pre-submit Play Policy gates | `pre-submit-verification.md` | ⏳ later slice |
-| Read-only Play Console readiness query | `scripts/play-status` | ⏳ later slice |
 | Opt-in Play mutations (upload / release / commit / IAP / Data Safety) | `scripts/play-submit` | ⏳ later slice |
 
 Read the phase file you need when you need it. This SKILL.md is the always-on layer — keep it minimal. (The full
@@ -98,8 +100,10 @@ When invoked:
      Training-memory Google Play requirements must not be substituted — please re-run this skill in a session with
      web search enabled." Do not proceed, do not recite Play requirements from memory.
    - If both are available: read [phase1-research.md](phase1-research.md) and execute the nine-domain freshness
-     research protocol. Present the Freshness Report and the Phase 0 cross-reference (blockers / warnings), then
-     **halt** — Phase 2 lands in a later slice.
+     research protocol. Present the Freshness Report and the Phase 0 cross-reference (blockers / warnings).
+5. **Phase 2 — Play Console status.** Read [phase2-play-status.md](phase2-play-status.md). Run the toolchain
+   precheck (§1), discover credentials (§2), select the strategy (§3), run `scripts/play-status`, and present
+   the situation overview (§5) to the user. After Phase 2, **halt** — Phase 3 lands in a later slice.
 
 ```bash
 SCRIPT=~/.claude/skills/ship-to-playstore/scripts/phase0-introspect

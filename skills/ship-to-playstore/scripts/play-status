@@ -1,0 +1,671 @@
+#!/usr/bin/env python3
+"""play-status — read-only Google Play Console release-readiness query.
+
+Bundled with the ship-to-playstore skill. Mints a Google OAuth2 access token
+from a service-account JSON (RS256 JWT signed with the service-account private
+key, scope `androidpublisher`), then issues **GET-only** reads against the Play
+Developer API and prints a tri-state situation overview (PRD §9.5).
+
+This script is READ-ONLY. It has no `--yes` flag and invokes NO Play Developer
+API mutation endpoint (no `edits.insert`, `edits.commit`, `tracks.update`,
+`bundles.upload`, `inappproducts`/`subscriptions` write, listing/image write).
+The only POST it makes is to the Google OAuth2 token endpoint to mint the access
+token — that is authentication, not a Play mutation. Tracks/listings/appDetails
+are edit-scoped in the Play API; this script reads them only when an explicit
+`--edit-id` is supplied (an edit id obtained out-of-band). Without `--edit-id`
+those sections classify as `? cannot-verify` rather than creating an edit —
+edit creation is reserved for slice 04's `play-submit`.
+
+Secret hygiene (HARD): the service-account JSON contains a private key. This
+script NEVER prints, logs, or writes: the JSON file contents, the private key,
+the unsigned JWT assertion, or the OAuth access token. `--debug` emits only
+non-sensitive diagnostics (request labels + HTTP status codes) to stderr; the
+Authorization header, token, and key are never logged at any verbosity.
+
+Prerequisites: Python 3 (stdlib only) + `openssl` on PATH (used for the RS256
+signature — Python stdlib has no RS256 signer; see phase2-play-status.md).
+
+Usage:
+    play-status <package> [--report <phase0.json>] [--edit-id <id>]
+                         [--service-account <path>] [--debug]
+    play-status --help
+
+Arguments:
+    package            Application ID / package name to query (e.g. com.example.app).
+    --report <path>    Phase 0 situation-report JSON (default: read from stdin).
+    --edit-id <id>     An active Play edit id; enables the edit-scoped GET reads
+                       (tracks / listings / appDetails). Never created here.
+    --service-account <path>
+                       Override path to the service-account JSON.
+    --debug            Print request labels + HTTP status codes to stderr.
+                       Tokens/keys are still masked at this verbosity.
+
+Exit codes:
+    0  Report printed (includes the cannot-verify case when credentials are absent).
+    2  Usage error / missing Phase 0 report.
+"""
+
+import argparse
+import base64
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+sys.dont_write_bytecode = True
+
+API_BASE = "https://androidpublisher.googleapis.com/androidpublisher/v3"
+TOKEN_URL = "https://oauth2.googleapis.com/token"
+PUBLISHER_SCOPE = "https://www.googleapis.com/auth/androidpublisher"
+
+# Env var NAMES whose presence hints at a Play service-account credential source.
+# Only NAMES are ever surfaced — VALUES are read solely by the thin CLI layer to
+# resolve a file path, and are never printed/logged/emitted.
+_SA_ENV_VARS = (
+    "ANDROID_PUBLISHER_SERVICE_ACCOUNT",
+    "GOOGLE_APPLICATION_CREDENTIALS",
+    "PLAY_STORE_SERVICE_ACCOUNT",
+    "PLAY_CONFIG_JSON",
+)
+
+# Out-of-repo fallback location for the service-account JSON (OQ1).
+_OUT_OF_REPO_SA = "~/.config/play/play-service-account.json"
+
+
+# ---------------------------------------------------------------------------
+# Pure functions (importable + unit-tested). No I/O, no global state.
+# ---------------------------------------------------------------------------
+
+def _b64url(data: bytes) -> str:
+    """Base64url encode without padding (JWT/JWS segment encoding)."""
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+
+def build_jwt_assertion_segments(client_email: str, scope: str, audience: str,
+                                 iat: int, exp: int) -> str:
+    """Build the unsigned JWS assertion (header.payload) for the Google
+    service-account OAuth2 JWT flow.
+
+    RS256 JWT: header {"alg":"RS256","typ":"JWT"} + claim set
+    {iss, scope, aud, iat, exp}. Returns the two base64url segments joined by
+    '.' — the signing input. The private key is NEVER needed here (that is the
+    signer's job), so this function is pure and unit-testable in isolation.
+
+    See play-api-reference.md §1 (Auth) for the flow.
+    """
+    header = {"alg": "RS256", "typ": "JWT"}
+    payload = {
+        "iss": client_email,
+        "scope": scope,
+        "aud": audience,
+        "iat": iat,
+        "exp": exp,
+    }
+    h = _b64url(json.dumps(header, separators=(",", ":")).encode("utf-8"))
+    p = _b64url(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+    return f"{h}.{p}"
+
+
+def build_read_requests(package: str, edit_id: str | None = None) -> list[dict]:
+    """Construct the GET-only read requests the read path issues.
+
+    Always queries BOTH IAP namespaces (the iOS v2/subscriptions trap ported to
+    Play — AC3): `inappproducts` (one-time/consumable/non-consumable) and
+    `subscriptions` (the monetization.subscriptions namespace: auto-renewing,
+    base plans + offers). Both are edit-free GETs.
+
+    Tracks/listings/appDetails are edit-scoped in the Play API and are only
+    added when an `edit_id` is supplied — this script never creates an edit.
+    Every request is a GET; this is the read-only invariant (AC2).
+    """
+    q = urllib.parse.quote(package, safe="")
+    reqs = [
+        {
+            "label": "iap_one_time",
+            "method": "GET",
+            "url": f"{API_BASE}/applications/{q}/inappproducts",
+        },
+        {
+            "label": "iap_subscriptions",
+            "method": "GET",
+            "url": f"{API_BASE}/applications/{q}/subscriptions",
+        },
+    ]
+    if edit_id:
+        ei = urllib.parse.quote(edit_id, safe="")
+        reqs.extend([
+            {
+                "label": "tracks",
+                "method": "GET",
+                "url": f"{API_BASE}/applications/{q}/edits/{ei}/tracks",
+            },
+            {
+                "label": "listings",
+                "method": "GET",
+                "url": f"{API_BASE}/applications/{q}/edits/{ei}/listings",
+            },
+            {
+                "label": "appDetails",
+                "method": "GET",
+                "url": f"{API_BASE}/applications/{q}/edits/{ei}/details",
+            },
+        ])
+    return reqs
+
+
+# Endpoints this script MUST NOT issue (mutation surface — AC2). The read-only
+# invariant test asserts no constructed request matches these.
+_FORBIDDEN_MUTATION_MARKERS = (
+    "/edits/",            # any edit sub-resource write (insert/commit/tracks.update/...)
+    "/bundles:upload",
+    "/bundles/upload",
+    "inappproducts",      # write variants — note: list GET path contains this token;
+                          # the read-only check uses METHOD, not path, so GET is allowed.
+)
+
+
+def is_read_only_request_set(reqs: list[dict]) -> bool:
+    """True iff every request is a GET (no Play Developer API mutation method).
+
+    The OAuth token POST (auth, not a Play mutation) is not part of this set —
+    only the Play API requests returned by build_read_requests are checked.
+    """
+    return all(r.get("method") == "GET" for r in reqs)
+
+
+def select_strategy(fastlane_lanes: list[str] | None) -> tuple[str, str]:
+    """Lane-first strategy selection (PRD §9.3, OQ2).
+
+    Returns (letter, label). If the project's Fastfile declares a `supply` or
+    `play_*` lane, Fastlane `supply` is preferred (mirrors the iOS lane-first
+    posture). Otherwise the raw Play Developer API (this tool) is the strategy.
+    """
+    lanes = set(fastlane_lanes or [])
+    if any(l == "supply" or l.startswith("play_") for l in lanes):
+        return "B", "Fastlane supply/play_* lane (lane-first)"
+    return "A", "Play Developer API (raw)"
+
+
+def classify_http(status: int, body: object) -> dict:
+    """Tri-state classifier for a Play Developer API response (PRD §9.4).
+
+    Returns {"marker", "likely_cause"}. `marker` is one of:
+      "✓"  verified      — HTTP 200, real data.
+      "?"  cannot-verify — non-200 or network error; ALWAYS carries a cause.
+      "□"  confirmed-open — reserved (HTTP 200 + data confirming genuinely empty).
+
+    A non-200 is NEVER swallowed to an empty result — it always surfaces as
+    cannot-verify with the likely cause (the cardinal error, PRD §9.4).
+    `status == 0` is the sentinel for a network/transport error.
+    """
+    if status == 200:
+        return {"marker": "✓", "likely_cause": None}
+    causes = {
+        401: "token mint failed or service-account JSON invalid",
+        403: "wrong scope or service account not linked in Play Console",
+        404: "app not found / package name mismatch / Play Developer API not enabled",
+    }
+    if status in causes:
+        return {"marker": "?", "likely_cause": causes[status]}
+    if status == 0:
+        return {"marker": "?", "likely_cause": "network/transport error"}
+    return {"marker": "?", "likely_cause": f"HTTP {status}"}
+
+
+def discover_service_account(report: dict, env: dict) -> dict:
+    """Pure credential discovery from a Phase 0 report + env mapping.
+
+    Returns the service-account JSON PATH (from the report's in-repo detection)
+    and the NAMES of known Play service-account env vars that are set. Env var
+    VALUES are NEVER inspected or emitted — only whether a known NAME is truthy
+    in `env`. The thin CLI layer resolves an env var's value to a file path at
+    runtime; this pure function carries names only.
+
+    `report` is the Phase 0 situation-report dict (credentials.service_account_json,
+    credentials.env_hints). `env` is a plain name→value mapping (only truthiness
+    is tested; values are never copied into the result).
+    """
+    sa_list = ((report.get("credentials") or {}).get("service_account_json")) or []
+    path = None
+    if sa_list and sa_list[0].get("path"):
+        path = sa_list[0]["path"]
+
+    env_names = [name for name in _SA_ENV_VARS if env.get(name)]
+
+    if path or env_names:
+        missing_cause = None
+    else:
+        missing_cause = (
+            "no service-account JSON path in the Phase 0 report and no known "
+            "Play service-account env var set"
+        )
+    return {"path": path, "env_names": env_names, "missing_cause": missing_cause}
+
+
+def render_situation_overview(facts: dict) -> str:
+    """Render the compact situation-overview block (PRD §9.5) from structured
+    facts. Every cell is tri-state: a rendered string carrying ✓ / ? / □.
+
+    `facts` schema (all optional; missing → "unknown" / "?"):
+      package, app_exists ("yes"|"no"|"?"), live_prod,
+      tracks {internal,closed,open,production},
+      signing_enrolled ("yes"|"no"|"?"), upload_keystore,
+      iap_one_time, iap_subscriptions  (None | {"marker","products":[{id,status}],"cause"}),
+      listing, feature_graphic, screenshots, privacy_policy,
+      data_safety, content_rating, pricing,
+      fcm_used (bool), firebase_in_manifest_only (bool),
+      strategy ("A"|"B"|"C"|"D"), strategy_note.
+    """
+    def _cell(key, default="unknown"):
+        return facts.get(key, default)
+
+    def _iap_block(label, entry):
+        if entry is None:
+            return f"  {label:17s}: ? cannot-verify (not queried)"
+        if entry.get("marker") == "?":
+            cause = entry.get("cause") or "confirm in Play Console"
+            return f"  {label:17s}: ? cannot-verify ({cause})"
+        products = entry.get("products") or []
+        if not products:
+            return f"  {label:17s}: none"
+        rendered = ", ".join(
+            f"{p.get('id', '?')}={p.get('status', '?')}" for p in products
+        )
+        return f"  {label:17s}: {rendered}"
+
+    fcm_used = bool(facts.get("fcm_used"))
+    firebase_manifest_only = bool(facts.get("firebase_in_manifest_only"))
+    if not fcm_used:
+        stack = "no FCM detected"
+    elif firebase_manifest_only:
+        stack = "FCM transport-only ✓ (no broad Firebase SDK)"
+    else:
+        stack = "⚠ Firebase SDK beyond push detected — stack-fidelity flag (PRD §4.2)"
+
+    lines = [
+        "=== Google Play Console: Situation Overview ===",
+        "",
+        "App record",
+        f"  Application ID  : {_cell('package', '?')}",
+        f"  App exists      : {_cell('app_exists', '?')}",
+        f"  Live prod ver   : {_cell('live_prod', 'unknown')}",
+        "",
+        "Tracks",
+        f"  Internal        : {facts.get('tracks', {}).get('internal', 'unknown')}",
+        f"  Closed          : {facts.get('tracks', {}).get('closed', 'unknown')}",
+        f"  Open            : {facts.get('tracks', {}).get('open', 'unknown')}",
+        f"  Production      : {facts.get('tracks', {}).get('production', 'unknown')}",
+        "",
+        "Signing",
+        f"  Play App Signing enrolled : {_cell('signing_enrolled', '?')} confirm in Console",
+        f"  Upload keystore configured: {_cell('upload_keystore', 'unknown')}",
+        "",
+        "Listing & metadata",
+        f"  Store listing   : {_cell('listing', 'unknown')}",
+        f"  Feature graphic : {_cell('feature_graphic', 'unknown')}",
+        f"  Screenshots     : {_cell('screenshots', 'unknown')}",
+        f"  Privacy Policy  : {_cell('privacy_policy', 'unknown')}",
+        "",
+        f"  Data Safety form : {_cell('data_safety', '? cannot-verify')}",
+        f"  Content rating   : {_cell('content_rating', '? cannot-verify')}",
+        f"  Pricing          : {_cell('pricing', '? cannot-verify')}",
+        _iap_block("Play Billing (one-time)", facts.get("iap_one_time")),
+        _iap_block("Play Billing (subs)", facts.get("iap_subscriptions")),
+        "                   ← any product not publishable → Step 10b hard blocker",
+        "",
+        f"  Stack fidelity   : {stack}",
+        "",
+        f"  Access strategy  : {facts.get('strategy', '?')} "
+        f"({facts.get('strategy_note', '')})".rstrip(),
+    ]
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Thin wrappers (NOT unit-tested — they touch the network / openssl / the key).
+# ---------------------------------------------------------------------------
+
+def sign_rs256(signing_input: bytes, private_key_pem: bytes) -> bytes:
+    """RS256-sign `signing_input` with the PEM private key via openssl.
+
+    The private key is fed to openssl on stdin (it is NEVER written to disk);
+    the non-secret signing input (base64url header.payload) goes through a
+    short-lived tempfile. openssl is on PATH per phase2-play-status.md.
+    """
+    with tempfile.NamedTemporaryFile(prefix="play-jwt-input-", delete=True) as tf:
+        tf.write(signing_input)
+        tf.flush()
+        proc = subprocess.run(
+            ["openssl", "dgst", "-sha256", "-sign", "/dev/stdin", tf.name],
+            input=private_key_pem,
+            capture_output=True,
+        )
+    if proc.returncode != 0:
+        raise RuntimeError(
+            "openssl RS256 signing failed "
+            f"(exit {proc.returncode}); is openssl on PATH?"
+        )
+    return proc.stdout
+
+
+def mint_access_token(client_email: str, private_key_pem: bytes,
+                      scope: str = PUBLISHER_SCOPE,
+                      audience: str = TOKEN_URL) -> tuple[int, str | None]:
+    """Mint a Google OAuth2 access token via the service-account JWT flow.
+
+    Returns (http_status, access_token). (200, token) on success. The token and
+    the signed assertion are kept local and never returned beyond this pair —
+    no intermediates are logged.
+    """
+    now = int(time.time())
+    signing_input = build_jwt_assertion_segments(
+        client_email, scope, audience, now, now + 3600
+    ).encode("ascii")
+    signature = sign_rs256(signing_input, private_key_pem)
+    assertion = signing_input.decode("ascii") + "." + _b64url(signature)
+
+    body = urllib.parse.urlencode({
+        "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+        "assertion": assertion,
+    }).encode("ascii")
+    req = urllib.request.Request(
+        TOKEN_URL, data=body, method="POST",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            payload = json.loads(r.read().decode("utf-8"))
+            return r.status, payload.get("access_token")
+    except urllib.error.HTTPError as e:
+        return e.code, None
+    except urllib.error.URLError:
+        return 0, None
+
+
+def http_get(url: str, token: str, debug: bool = False, label: str = "") -> tuple[int, dict]:
+    """GET `url` with the bearer token; return (status, parsed_body_or_empty).
+
+    The Authorization header and token are NEVER logged. With debug=True, only
+    `{label}: HTTP {status}` is written to stderr.
+    """
+    req = urllib.request.Request(
+        url, method="GET",
+        headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            txt = r.read().decode("utf-8", errors="replace")
+            if debug:
+                print(f"{label}: HTTP {r.status}", file=sys.stderr)
+            try:
+                return r.status, json.loads(txt) if txt else {}
+            except json.JSONDecodeError:
+                return r.status, {}
+    except urllib.error.HTTPError as e:
+        if debug:
+            print(f"{label}: HTTP {e.code}", file=sys.stderr)
+        return e.code, {}
+    except urllib.error.URLError:
+        if debug:
+            print(f"{label}: network error", file=sys.stderr)
+        return 0, {}
+
+
+def _load_service_account_json(path: str) -> tuple[str, bytes]:
+    """Read the service-account JSON; return (client_email, private_key_pem).
+
+    The file contents (including the private key) stay inside this function
+    except for the returned PEM, which goes straight to the signer. Never logs.
+    """
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    client_email = data.get("client_email")
+    private_key = data.get("private_key")
+    if not client_email or not private_key:
+        raise ValueError(
+            "service-account JSON missing client_email or private_key — "
+            "is this a service-account key (not an API key)?"
+        )
+    return client_email, private_key.encode("utf-8")
+
+
+# ---------------------------------------------------------------------------
+# Read path (orchestrates the pure functions + thin wrappers).
+# ---------------------------------------------------------------------------
+
+def _collect_facts(report: dict, package: str, edit_id: str | None,
+                   debug: bool, sa_path: str | None) -> dict:
+    """Run the read path and assemble the facts dict for the overview.
+
+    Keeps the token/key local; only non-sensitive facts reach the return value.
+    """
+    discovery = discover_service_account(report, os.environ)
+    facts: dict = {
+        "package": package,
+        "app_exists": "?",
+        "live_prod": "unknown",
+        "tracks": {"internal": "unknown", "closed": "unknown",
+                   "open": "unknown", "production": "unknown"},
+        "signing_enrolled": "?",
+        "upload_keystore": _signing_cell(report),
+        "listing": "unknown",
+        "feature_graphic": "unknown",
+        "screenshots": "unknown",
+        "privacy_policy": "unknown",
+        "data_safety": "? cannot-verify (confirm in Console)",
+        "content_rating": "? cannot-verify",
+        "pricing": "? cannot-verify",
+        "iap_one_time": None,
+        "iap_subscriptions": None,
+        "fcm_used": bool(report.get("push_notifications", {}).get("fcm_used")),
+        "firebase_in_manifest_only": bool(
+            report.get("push_notifications", {}).get("firebase_in_manifest_only")),
+        "strategy": "A",
+        "strategy_note": "",
+    }
+
+    strat_letter, strat_note = select_strategy(report.get("fastlane_lanes"))
+    facts["strategy"] = strat_letter
+    facts["strategy_note"] = strat_note
+
+    resolved_sa = sa_path or discovery["path"] or _resolve_sa_from_env()
+    if resolved_sa is None and os.path.isfile(os.path.expanduser(_OUT_OF_REPO_SA)):
+        resolved_sa = os.path.expanduser(_OUT_OF_REPO_SA)
+
+    if resolved_sa is None:
+        facts["app_exists"] = "?"
+        facts["iap_one_time"] = {
+            "marker": "?",
+            "cause": discovery["missing_cause"] or "no service-account JSON",
+        }
+        facts["iap_subscriptions"] = {
+            "marker": "?",
+            "cause": discovery["missing_cause"] or "no service-account JSON",
+        }
+        return facts
+
+    try:
+        client_email, private_key_pem = _load_service_account_json(resolved_sa)
+    except (OSError, ValueError, json.JSONDecodeError) as e:
+        facts["iap_one_time"] = {"marker": "?", "cause": f"service-account JSON unreadable: {e}"}
+        facts["iap_subscriptions"] = {"marker": "?", "cause": f"service-account JSON unreadable: {e}"}
+        return facts
+
+    status, token = mint_access_token(client_email, private_key_pem)
+    if status != 200 or not token:
+        cause = classify_http(status, {})["likely_cause"]
+        facts["iap_one_time"] = {"marker": "?", "cause": f"token mint failed: {cause}"}
+        facts["iap_subscriptions"] = {"marker": "?", "cause": f"token mint failed: {cause}"}
+        facts["app_exists"] = "?"
+        return facts
+
+    results: dict[str, tuple[int, dict]] = {}
+    for req in build_read_requests(package, edit_id):
+        results[req["label"]] = http_get(
+            req["url"], token, debug=debug, label=req["label"]
+        )
+
+    # App existence: a 200 on either IAP namespace means the app record exists
+    # and the service account is linked. A 404 ⇒ app not found. 403/401 ⇒
+    # cannot-verify (the cardinal error — never swallow to "no").
+    one_time_status, one_time_body = results["iap_one_time"]
+    sub_status, _sub_body = results["iap_subscriptions"]
+    if one_time_status == 200 or sub_status == 200:
+        facts["app_exists"] = "yes"
+    elif one_time_status == 404 and sub_status == 404:
+        facts["app_exists"] = "no"
+    else:
+        facts["app_exists"] = "?"
+
+    facts["iap_one_time"] = _iap_facts(one_time_status, one_time_body,
+                                       kind="inappproducts")
+    facts["iap_subscriptions"] = _iap_facts(sub_status, results["iap_subscriptions"][1],
+                                           kind="subscriptions")
+
+    if "tracks" in results:
+        facts["tracks"] = _tracks_facts(results["tracks"])
+    else:
+        facts["tracks"] = {
+            t: "? cannot-verify (edit-scoped — pass --edit-id)" for t in
+            ("internal", "closed", "open", "production")
+        }
+    if "listings" in results:
+        facts["listing"] = _listing_facts(results["listings"])
+    if "appDetails" in results:
+        facts["signing_enrolled"] = _app_signing_facts(results["appDetails"])
+
+    return facts
+
+
+def _signing_cell(report: dict) -> str:
+    """Render the upload-keystore line from Phase 0 signing hints (paths only)."""
+    signing = report.get("signing") or {}
+    hints = signing.get("keystore_hints") or []
+    configured = signing.get("signing_config_set") or bool(hints)
+    if configured and hints:
+        return f"yes ({hints[0]})"
+    if configured:
+        return "yes (signingConfig wired)"
+    return "no → blocker"
+
+
+def _iap_facts(status: int, body: dict, kind: str) -> dict:
+    """Classify an IAP namespace response into the overview facts entry."""
+    verdict = classify_http(status, body)
+    if verdict["marker"] == "✓":
+        items = body.get(kind, []) or []
+        products = [
+            {"id": (it.get("sku") or it.get("productId") or "?"),
+             "status": (it.get("status") or "?")}
+            for it in items
+        ]
+        return {"marker": "✓", "products": products, "cause": None}
+    return {"marker": "?", "products": [], "cause": verdict["likely_cause"]}
+
+
+def _tracks_facts(result: tuple[int, dict]) -> dict:
+    status, body = result
+    verdict = classify_http(status, body)
+    out = {t: "unknown" for t in ("internal", "closed", "open", "production")}
+    if verdict["marker"] != "✓":
+        cause = verdict["likely_cause"] or "cannot-verify"
+        return {t: f"? cannot-verify ({cause})" for t in out}
+    for track in body.get("tracks", []) or []:
+        rel = track.get("track") or "?"
+        releases = track.get("releases") or []
+        if not releases:
+            out[rel] = "none"
+            continue
+        top = releases[0]
+        vc = (top.get("versionCodes") or [None])[0]
+        frac = top.get("userFraction")
+        status_v = top.get("status", "?")
+        ver = top.get("name") or (f"v{vc}" if vc else "?")
+        rollout = f" — rollout {int(frac * 100)}%" if frac else ""
+        out[rel] = f"{ver} ({status_v}){rollout}"
+    return out
+
+
+def _listing_facts(result: tuple[int, dict]) -> str:
+    status, body = result
+    verdict = classify_http(status, body)
+    if verdict["marker"] != "✓":
+        return f"? cannot-verify ({verdict['likely_cause']})"
+    listings = body.get("listings") or []
+    return f"complete ({len(listings)} locale(s))" if listings else "missing fields"
+
+
+def _app_signing_facts(result: tuple[int, dict]) -> str:
+    status, body = result
+    verdict = classify_http(status, body)
+    if verdict["marker"] != "✓":
+        return "?"
+    # App-signing enrolment is not reliably exposed in appDetails → cannot-verify.
+    return "?"
+
+
+def _resolve_sa_from_env() -> str | None:
+    """Thin: resolve a service-account path from GOOGLE_APPLICATION_CREDENTIALS
+    (its value is a file path). Value never printed."""
+    val = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    if val and os.path.isfile(val):
+        return val
+    val = os.environ.get("PLAY_CONFIG_JSON")
+    if val and os.path.isfile(val):
+        return val
+    return None
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="play-status",
+        description="Read-only Google Play Console readiness query (PRD §9).",
+    )
+    parser.add_argument("package", help="Application ID / package name to query.")
+    parser.add_argument("--report", help="Phase 0 situation-report JSON path "
+                        "(default: read from stdin).")
+    parser.add_argument("--edit-id", dest="edit_id",
+                        help="Active Play edit id; enables edit-scoped GET reads "
+                        "(tracks/listings/appDetails). Never created here.")
+    parser.add_argument("--service-account", dest="service_account",
+                        help="Override path to the service-account JSON.")
+    parser.add_argument("--debug", action="store_true",
+                        help="Print request labels + HTTP status codes to stderr.")
+    args = parser.parse_args(argv)
+
+    if args.report:
+        try:
+            with open(args.report, encoding="utf-8") as f:
+                report = json.load(f)
+        except (OSError, json.JSONDecodeError) as e:
+            print(f"ERROR: could not read Phase 0 report: {e}", file=sys.stderr)
+            return 2
+    else:
+        raw = sys.stdin.read()
+        if not raw.strip():
+            print("ERROR: no Phase 0 report on stdin and no --report given.",
+                  file=sys.stderr)
+            return 2
+        try:
+            report = json.loads(raw)
+        except json.JSONDecodeError as e:
+            print(f"ERROR: invalid Phase 0 report JSON: {e}", file=sys.stderr)
+            return 2
+
+    facts = _collect_facts(report, args.package, args.edit_id,
+                           args.debug, args.service_account)
+    print(render_situation_overview(facts))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

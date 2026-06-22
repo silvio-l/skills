@@ -1,0 +1,34 @@
+{
+  "package": "com.example.unlinked",
+  "app_exists": "?",
+  "live_prod": "unknown",
+  "tracks": {
+    "internal": "? cannot-verify (edit-scoped — pass --edit-id)",
+    "closed": "? cannot-verify (edit-scoped — pass --edit-id)",
+    "open": "? cannot-verify (edit-scoped — pass --edit-id)",
+    "production": "? cannot-verify (edit-scoped — pass --edit-id)"
+  },
+  "signing_enrolled": "?",
+  "upload_keystore": "yes (android/key.properties)",
+  "iap_one_time": {
+    "marker": "?",
+    "products": [],
+    "cause": "wrong scope or service account not linked in Play Console"
+  },
+  "iap_subscriptions": {
+    "marker": "?",
+    "products": [],
+    "cause": "wrong scope or service account not linked in Play Console"
+  },
+  "listing": "unknown",
+  "feature_graphic": "unknown",
+  "screenshots": "unknown",
+  "privacy_policy": "unknown",
+  "data_safety": "? cannot-verify (confirm in Console)",
+  "content_rating": "? cannot-verify",
+  "pricing": "? cannot-verify",
+  "fcm_used": true,
+  "firebase_in_manifest_only": true,
+  "strategy": "A",
+  "strategy_note": "Play Developer API (raw)"
+}
