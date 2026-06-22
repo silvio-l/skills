@@ -37,7 +37,7 @@ complete in the Phase 2 overview are marked ✓ and skipped in the loop.
 
 ---
 
-## 3.1 — Ordered Release Checklist (this slice: Steps 0–4, 10a, 11, 12)
+## 3.1 — Ordered Release Checklist (Steps 0–12)
 
 ```
 === Release Checklist (derived YYYY-MM-DD) ===
@@ -63,7 +63,7 @@ Remaining steps (slice 4 — binary→track→commit spine):
 Steps skipped (confirmed done in Phase 2):
   (list from Phase 2 overview, or "none")
 
-We will work through steps 0–4, 10a, 11, 12 one at a time.
+We will work through steps one at a time.
 Ready? Say "start" or "let's go".
 ```
 
@@ -213,10 +213,14 @@ When the user says "stuck here: <error>" or pastes error output:
 | bundletool verify failure | `bundletool dump manifest` shows wrong versionCode | AAB not rebuilt after version bump; run `flutter build appbundle --release` again |
 | Edit expired | `edits.insert` 400 with "editId expired" on a re-run | Old editId timed out; re-run `play-submit` (it opens a fresh edit automatically) |
 | Network error (token mint) | `play-submit` prints "token mint failed: network/transport error" | Check internet connectivity; verify `openssl` is on PATH |
+| Missing merchant profile | Play rejects production commit: "no payments profile" | Set up a merchant profile in Play Console → Monetize → Payments profile; see Step 9 |
+| Store listing incomplete | Play Console shows "incomplete" status; production blocked | Add feature graphic + at least 2 phone screenshots; complete title + descriptions; see Step 5 |
+| Data Safety not published | Play Console shows Data Safety as "draft" or "not started" | Enter the derived declarations in Play Console → Policy → Data Safety and publish; see Step 6 |
+| Content rating not assigned | Play Console shows rating as "not set"; production blocked | Complete the IARC questionnaire in Play Console → Policy → App content → Content ratings; see Step 7 |
 
 ---
 
-## Release Steps (Detailed — this slice: Steps 0–4, 10a, 11, 12)
+## Release Steps (Detailed)
 
 ---
 
@@ -399,6 +403,260 @@ The script checks the versionCode collision pre-upload and reports the result. A
 script prints the confirmed versionCode returned by Play's API.
 
 **Nothing is live until `edits.commit`** — the upload stages the AAB in the edit transaction.
+
+---
+
+### Step 5 — Store Listing + Assets
+
+**Mode:** Partially automatable — agent reads listing text via API; assets require Console.
+
+**What:** Verify and complete the store listing (title, short/full description) for every locale,
+and confirm that graphical assets (feature graphic, screenshots) are present. Many assets live
+**only in Play Console** — they are checked via the API where readable, and otherwise marked
+`? cannot-verify` with the Console path. Never assert "not done" from API silence alone.
+
+**Agent reads listing state (--yes listing checkpoint):**
+
+```bash
+SCRIPT=~/.claude/skills/ship-to-playstore/scripts/play-submit
+
+# Dry-run: show listing plan (text check + asset guidance, no mutation)
+python3 "$SCRIPT" {application_id} \
+  --aab build/app/outputs/bundle/release/app-release.aab \
+  --track {track} \
+  --report .scratch/ship-to-playstore/phase0-report.json
+
+# Approved: execute listing check
+python3 "$SCRIPT" {application_id} \
+  --aab build/app/outputs/bundle/release/app-release.aab \
+  --track {track} \
+  --report .scratch/ship-to-playstore/phase0-report.json \
+  --yes listing
+```
+
+**Asset verification (always required — Console only):**
+
+Console path: `Grow → Store presence → Main store listing`
+
+| Asset | Spec | API-readable? |
+|---|---|---|
+| App icon (store listing) | 512×512 px, PNG | ? cannot-verify |
+| Feature graphic | 1024×500 px, JPG/PNG | ? cannot-verify |
+| Phone screenshots | At least 2, up to 8; current Play spec via Phase 1 | ? cannot-verify |
+| Tablet screenshots | Optional but recommended | ? cannot-verify |
+
+**Tri-state rule:** A listing without feature graphic/screenshots will prevent the Production
+release ("This app doesn't have any screenshots"). Mark as `? cannot-verify` from the API and
+guide the user to the Console — never collapse to "not done" or "missing" from inference.
+
+**iOS delta:** iOS listing assets are uploaded via the ASC API. On Play, feature graphic and
+screenshots are managed in Play Console; they are readable via `edits.listings` text but
+image presence is not exposed cleanly by the API.
+
+---
+
+### Step 6 — Data Safety Form
+
+**Mode:** Partially automatable — declaration map derived from Phase 0 facts; entry in Console.
+
+**What:** Complete the Data Safety form declaring what user data the app collects, shares, and
+whether data deletion is offered. This is the Android analogue of the iOS Privacy Nutrition Label.
+**Derived entirely from Phase 0 facts — the skill does not ask the user what the app collects.**
+
+**Data Safety declaration map (derived from Phase 0):**
+
+| Phase 0 field | Data Safety declaration |
+|---|---|
+| `data_safety_hints.analytics_tracking[].category = "crash/diagnostics"` | Crash logs |
+| `data_safety_hints.analytics_tracking[].category = "analytics/usage"` | App interactions |
+| `supabase_used = true` | Email address; User IDs (Supabase Auth standard data) |
+| `push_notifications.fcm_used = true` | Device or other IDs (FCM registration token) |
+| `permissions.declared` contains `CAMERA` | Photos and videos |
+| `permissions.declared` contains `ACCESS_FINE_LOCATION` | Precise location |
+| `permissions.declared` contains `ACCESS_COARSE_LOCATION` | Approximate location |
+| `permissions.declared` contains `READ_CONTACTS` or `WRITE_CONTACTS` | Contacts |
+| `permissions.declared` contains `RECORD_AUDIO` | Audio files |
+| `data_safety_hints.account_deletion.likely_present = true` | **"Data deletion provided" = YES** |
+
+**Agent derives and presents the declaration map (--yes data-safety checkpoint):**
+
+```bash
+# Dry-run: show derived declarations (no mutation)
+python3 "$SCRIPT" {application_id} \
+  --aab build/app/outputs/bundle/release/app-release.aab \
+  --track {track} \
+  --report .scratch/ship-to-playstore/phase0-report.json
+
+# Approved: derive declarations + guide Console entry
+python3 "$SCRIPT" {application_id} \
+  --aab build/app/outputs/bundle/release/app-release.aab \
+  --track {track} \
+  --report .scratch/ship-to-playstore/phase0-report.json \
+  --yes data-safety
+```
+
+The `--yes data-safety` checkpoint prints the derived declaration map and guides the user to
+enter it in Play Console. The form's **published state is `? cannot-verify` via the API** —
+confirm in Play Console → Policy → Data Safety after entry.
+
+**Step 6a — Account/data-deletion webhook (OQ5, locked here):**
+
+If `data_safety_hints.account_deletion.likely_present = true`, Play's account/data-deletion
+mandate requires a server-side deletion endpoint that is reachable via an HTTPS URL registered
+in Play Console. The `--yes data-safety` output surfaces this requirement inline.
+
+**Default implementation (Free-Tier-Disziplin binding — Postgres function first):**
+
+Use a **Supabase Postgres function** as the deletion endpoint — never a Supabase Edge Function
+as the default:
+
+```sql
+-- In Supabase SQL editor (Postgres function — no Edge Function needed):
+CREATE OR REPLACE FUNCTION delete_account(user_id uuid)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER AS $$
+BEGIN
+  -- Cascade: delete user data before removing auth record
+  DELETE FROM public.profiles WHERE id = user_id;
+  -- (add more DELETEs for other user-owned rows)
+  DELETE FROM auth.users WHERE id = user_id;
+END;
+$$;
+```
+
+The client calls this directly via Supabase RPC (no server-to-server webhook needed for the
+in-app flow):
+
+```dart
+await supabase.rpc('delete_account', params: {'user_id': supabase.auth.currentUser?.id});
+```
+
+If Play Console requires a **reachable HTTPS webhook URL** (not just an in-app flow), expose the
+Postgres function via the Supabase REST API — no Edge Function needed:
+
+```
+POST https://{project-ref}.supabase.co/rest/v1/rpc/delete_account
+Authorization: Bearer {service_role_key}
+Content-Type: application/json
+{"user_id": "<uuid>"}
+```
+
+**Why not Edge Functions:** Supabase Edge Functions are avoided as a default under the global
+Free-Tier-Disziplin — they consume invocation quota unpredictably (cold starts, third-party
+pings) and can tip into the paid tier without warning. A Postgres function runs inside the
+existing Supabase DB compute (no extra quota). Edge Functions are acceptable only for one-time
+admin-triggered operations with a human-bounded invocation volume.
+
+Console path: `Play Console → Policy → Data Safety → Account deletion section`
+
+---
+
+### Step 7 — Content Rating (IARC)
+
+**Mode:** Manual — one-time questionnaire in Play Console; not accessible via the API.
+
+**What:** Complete the IARC (International Age Rating Coalition) questionnaire to obtain content
+ratings for each region (ESRB, PEGI, ClassInd, GRAC, USK, and others). This is a one-time action
+per app; ratings persist across releases unless the content changes materially.
+
+The IARC questionnaire is **not accessible via the Play Developer API** → always
+`? cannot-verify` from the API. Confirm in Play Console before releasing to production.
+
+**Console path:** `Policy → App content → Content ratings`
+
+The questionnaire (~5 minutes) covers:
+- Violence (realistic, cartoon, reference to)
+- Sexual content and nudity
+- Language (crude language, profanity)
+- Controlled substances and gambling references
+- Fear-inducing content (horror, shock)
+- User-generated content (if UGC-capable, per Phase 0 `user_generated_content`)
+
+A re-rating is triggered only if you re-complete the questionnaire. Ratings propagate to all
+target regions automatically once submitted.
+
+**iOS delta:** iOS has its own age rating in App Store Connect. IARC is broader in regional
+coverage. Once completed on Play, the rating is applied globally per region classification.
+
+Confirm in Play Console that the rating status shows "Assigned" before proceeding to production.
+
+---
+
+### Step 8 — Privacy Policy URL + Export/Encryption Declarations
+
+**Mode:** Partially automatable — URL liveness check automated; declarations guided.
+
+**What:** Confirm the Privacy Policy URL is set in `appDetails.privacyPolicy` (mandatory for
+apps declaring permissions or collecting user data), and address export/encryption requirements.
+
+**Privacy Policy URL check (API-readable via `edits.details`):**
+
+The Privacy Policy URL lives in `appDetails.privacyPolicy`. Phase 0's `data_safety_hints` and
+`permissions` fields confirm whether it is required.
+
+```bash
+# The --yes data-safety checkpoint also handles appDetails reads.
+# Liveness check (no credentials needed):
+curl -sL -o /dev/null -w "%{http_code}" "https://example.com/privacy"
+# Must return 200. Redirect chains that resolve to 200 are acceptable.
+```
+
+**Privacy Policy URL is required when:**
+- The app declares any `<uses-permission>` in `AndroidManifest.xml` (Phase 0 `permissions.declared`)
+- The app uses Supabase Auth (`supabase_used = true`) — user data is handled
+- The app has any analytics/crash reporting (`data_safety_hints.analytics_tracking` non-empty)
+
+If missing: `Play Console → Policy → App content → Privacy Policy`
+
+**Export compliance / encryption (Play-specific):**
+
+Unlike iOS (where a plist key `ITSAppUsesNonExemptEncryption` controls this), Android/Play
+handles encryption declaration inside the **Data Safety form** (Step 6) under "Data security"
+→ "Is your app's data in transit encrypted?". For apps using only standard HTTPS/TLS:
+
+- Answer: **Yes** — standard TLS is always in transit encryption.
+- No separate export-compliance form is required (unlike Apple).
+- If the app uses **custom cryptographic implementations** (not just TLS): flag for review with
+  the user. Non-standard crypto may trigger US export classification questions in Play Console.
+
+---
+
+### Step 9 — Pricing / Availability
+
+**Mode:** Manual — set in Play Console; a missing merchant profile is a **production blocker**
+for paid apps and apps with IAP.
+
+**What:** Set the app's pricing (free or paid), subscription/IAP pricing, and geographic
+availability. A missing **merchant profile** or **unset pricing** blocks production release for
+any app that charges users.
+
+**Pricing status from Phase 0:**
+
+Merchant profile and pricing state are **not reliably API-readable** → always `? cannot-verify`
+from the API. When `play_billing.likely_present = true` (Phase 0 detected IAP), the skill flags
+this as a potential production blocker:
+
+```
+Pricing / Merchant profile: ? cannot-verify
+  ← play_billing.likely_present = true detected in Phase 0
+  ← A missing merchant profile or unset pricing BLOCKS production.
+  ← Verify at: Play Console → Monetize → Payments profile
+```
+
+For apps confirmed free (no `play_billing` detected in Phase 0):
+- No merchant profile is required for a free app with no IAP.
+- Availability (country/region) is still Console-only: `{app} → Country / region availability`
+
+**Production blocker detection:**
+
+`scripts/play-submit` detects `play_billing.likely_present` from the Phase 0 report and
+surfaces the merchant profile requirement in the plan output. If pricing is later confirmed
+"not set" from Phase 2 situation data, `check_pricing_blocker(True, "not_set")` returns
+`blocker=True` and blocks `--yes commit` from proceeding.
+
+**Console paths:**
+- Merchant profile setup: `Play Console → Monetize → Payments profile`
+- App pricing:            `Play Console → {app} → Monetize → App pricing`
+- Country availability:   `Play Console → {app} → Country / region availability`
 
 ---
 

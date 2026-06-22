@@ -5,9 +5,11 @@ Dry-run by default: opens an edit to read existing state and reports intended
 mutations WITHOUT executing them. Only mutates when the matching --yes flag is
 passed explicitly. Each distinct mutation kind requires its own --yes:
 
-  --yes upload   → edits.bundles.upload (upload the AAB into the open edit)
-  --yes release  → edits.tracks.update (assign the bundle to the target track)
-  --yes commit   → edits.commit (publish all staged mutations atomically)
+  --yes upload      → edits.bundles.upload (upload the AAB into the open edit)
+  --yes listing     → edits.listings (check listing text; guide assets via Console — Step 5)
+  --yes data-safety → derive Data Safety declarations from Phase 0 + guide Console entry — Step 6
+  --yes release     → edits.tracks.update (assign the bundle to the target track)
+  --yes commit      → edits.commit (publish all staged mutations atomically)
 
 Nothing is live until edits.commit. An uncommitted edit changes nothing. The
 edit expires automatically if not committed; the script also discards it on
@@ -89,7 +91,7 @@ _SA_ENV_VARS = (
 
 _OUT_OF_REPO_SA = "~/.config/play/play-service-account.json"
 
-VALID_YES_FLAGS = frozenset({"upload", "release", "commit"})
+VALID_YES_FLAGS = frozenset({"upload", "release", "commit", "listing", "data-safety"})
 VALID_TRACKS = frozenset({"internal", "alpha", "beta", "production"})
 
 
@@ -323,6 +325,35 @@ def build_edits_delete_url(package: str, edit_id: str) -> str:
     return f"{API_BASE}/applications/{q}/edits/{ei}"
 
 
+def build_edits_listings_url(package: str, edit_id: str, language: str = "") -> str:
+    """URL for edits.listings (GET all locales or PUT a single locale).
+
+    language="":     returns the listings list URL (GET — read all locales).
+    language="en-US": returns the single-locale URL (PUT — write listing text for that locale).
+
+    Used by the --yes listing checkpoint (Step 5).
+    """
+    q = urllib.parse.quote(package, safe="")
+    ei = urllib.parse.quote(edit_id, safe="")
+    base = f"{API_BASE}/applications/{q}/edits/{ei}/listings"
+    if language:
+        lang = urllib.parse.quote(language, safe="")
+        return f"{base}/{lang}"
+    return base
+
+
+def build_edits_details_url(package: str, edit_id: str) -> str:
+    """URL for edits.details (GET/PUT — appDetails: Privacy Policy URL, contact email).
+
+    appDetails fields: defaultLanguage, contactEmail, contactPhone, contactWebsite,
+    privacyPolicy. This is also where Privacy Policy URL is staged for Step 8.
+    Used by the --yes data-safety checkpoint (Step 6/Step 8).
+    """
+    q = urllib.parse.quote(package, safe="")
+    ei = urllib.parse.quote(edit_id, safe="")
+    return f"{API_BASE}/applications/{q}/edits/{ei}/details"
+
+
 def build_track_release_payload(track: str, version_codes: list,
                                  rollout: float | None) -> dict:
     """Build the edits.tracks.update request body.
@@ -408,6 +439,255 @@ def describe_dry_run_plan(package: str, aab_path: str, track: str,
         "",
         "Tip: release to 'internal' first (instant, no review), then promote to production.",
         "     Conventional first production rollout fraction: 0.01 (1%).",
+    ]
+    return "\n".join(lines)
+
+
+def derive_data_safety_declarations(report: dict) -> dict:
+    """Derive the Data Safety declaration map from Phase 0 facts.
+
+    Never asks the user what data the app collects. Reads Phase 0 fields:
+      data_safety_hints.analytics_tracking  → crash_logs / app_interactions
+      permissions.declared                  → CAMERA, LOCATION, CONTACTS, RECORD_AUDIO
+      supabase_used                         → email_address, user_ids
+      push_notifications.fcm_used           → device_or_other_ids (FCM registration token)
+      data_safety_hints.account_deletion.likely_present → data_deletion_provided
+
+    Returns:
+      declared_data_types: list of canonical Play Data Safety data-type strings (in detection order)
+      data_deletion_provided: bool (from account_deletion.likely_present — never user-supplied)
+      sources: dict mapping each declared type to the Phase 0 field that triggered it
+    """
+    dsh = report.get("data_safety_hints") or {}
+    perms = (report.get("permissions") or {}).get("declared") or []
+    supabase = report.get("supabase_used") or False
+    push = (report.get("push_notifications") or {}).get("fcm_used") or False
+    account_deletion = (dsh.get("account_deletion") or {}).get("likely_present") or False
+
+    declared: list = []
+    sources: dict = {}
+
+    def _add(dtype: str, source: str) -> None:
+        if dtype not in declared:
+            declared.append(dtype)
+            sources[dtype] = source
+
+    # Crash / diagnostic / usage data from analytics_tracking
+    for entry in (dsh.get("analytics_tracking") or []):
+        category = (entry.get("category") or "").lower()
+        pkg = entry.get("package") or "unknown"
+        if "crash" in category or "diagnostics" in category:
+            _add("crash_logs", f"data_safety_hints.analytics_tracking[{pkg}]")
+        if "analytics" in category or "usage" in category:
+            _add("app_interactions", f"data_safety_hints.analytics_tracking[{pkg}]")
+
+    # Supabase → standard Supabase Auth user account data
+    if supabase:
+        _add("email_address", "supabase_used=true (Supabase Auth)")
+        _add("user_ids", "supabase_used=true (Supabase Auth)")
+
+    # FCM push → device / other IDs (FCM registration token)
+    if push:
+        _add("device_or_other_ids", "push_notifications.fcm_used=true (FCM token)")
+
+    # Permission-based data types
+    perm_set = set(perms)
+    if any("CAMERA" in p for p in perm_set):
+        _add("photos_and_videos", "permissions.declared[CAMERA]")
+    if any("ACCESS_FINE_LOCATION" in p for p in perm_set):
+        _add("precise_location", "permissions.declared[ACCESS_FINE_LOCATION]")
+    elif any("ACCESS_COARSE_LOCATION" in p for p in perm_set):
+        _add("approximate_location", "permissions.declared[ACCESS_COARSE_LOCATION]")
+    if any("READ_CONTACTS" in p or "WRITE_CONTACTS" in p for p in perm_set):
+        _add("contacts", "permissions.declared[CONTACTS]")
+    if any("RECORD_AUDIO" in p for p in perm_set):
+        _add("audio_files", "permissions.declared[RECORD_AUDIO]")
+
+    return {
+        "declared_data_types": declared,
+        "data_deletion_provided": account_deletion,
+        "sources": sources,
+    }
+
+
+def check_listing_completeness(listings_body: dict) -> dict:
+    """Check store listing text completeness from an edits.listings API response.
+
+    Readable via API → check required text fields and classify ✓ or □.
+    Not readable (empty/None body) → ? cannot-verify with Console path. Never "not done."
+
+    Feature graphic, screenshots, and the store icon are NOT reliably API-readable →
+    assets_status is always "cannot-verify" regardless of text completeness.
+
+    Returns:
+      text_status:   "complete" | "incomplete" | "cannot-verify"
+      missing_text:  list of missing required text field labels (e.g. "title (en-US)")
+      assets_status: always "cannot-verify" (Play Console manages these assets)
+      console_path:  Play Console path for manual verification
+      message:       human-readable summary suitable for printing
+    """
+    CONSOLE_PATH = "Grow → Store presence → Main store listing"
+
+    if not listings_body:
+        return {
+            "text_status": "cannot-verify",
+            "missing_text": [],
+            "assets_status": "cannot-verify",
+            "console_path": CONSOLE_PATH,
+            "message": (
+                f"? cannot-verify — listing API returned no data. "
+                f"Verify at: {CONSOLE_PATH}"
+            ),
+        }
+
+    listings = listings_body.get("listings") or []
+    if not listings:
+        return {
+            "text_status": "cannot-verify",
+            "missing_text": [],
+            "assets_status": "cannot-verify",
+            "console_path": CONSOLE_PATH,
+            "message": (
+                f"? cannot-verify — no listing locales returned. "
+                f"Verify at: {CONSOLE_PATH}"
+            ),
+        }
+
+    missing_text: list = []
+    for listing in listings:
+        lang = listing.get("language") or "?"
+        for field in ("title", "shortDescription", "fullDescription"):
+            label = f"{field} ({lang})"
+            if not listing.get(field) and label not in missing_text:
+                missing_text.append(label)
+
+    if missing_text:
+        text_status = "incomplete"
+        text_msg = (
+            f"□ Store listing text incomplete — missing: {', '.join(missing_text)}. "
+            f"Fix at: {CONSOLE_PATH}"
+        )
+    else:
+        text_status = "complete"
+        text_msg = "✓ Store listing text complete across all API-readable locales."
+
+    asset_note = (
+        f"? cannot-verify feature graphic + screenshots (not reliably API-readable). "
+        f"Verify at: {CONSOLE_PATH}"
+    )
+
+    return {
+        "text_status": text_status,
+        "missing_text": missing_text,
+        "assets_status": "cannot-verify",
+        "console_path": CONSOLE_PATH,
+        "message": f"{text_msg} {asset_note}",
+    }
+
+
+def check_pricing_blocker(billing_likely_present: bool,
+                           pricing_status: str | None = None) -> dict:
+    """Check pricing and merchant profile status for production release.
+
+    Merchant profile and pricing state are NOT API-readable → always ? cannot-verify
+    from the API. However, when billing is detected from Phase 0, the skill surfaces
+    a potential production blocker to verify before committing.
+
+    pricing_status: "set" | "not_set" | None (cannot determine from Phase 0 / API)
+
+    Returns:
+      blocker:      True = hard production blocker (must resolve before --yes commit)
+      message:      human-readable summary with the Console path
+      console_path: where to verify in Play Console
+    """
+    CONSOLE_PATH = "Play Console → Monetize → Payments profile"
+
+    if pricing_status == "not_set" and billing_likely_present:
+        return {
+            "blocker": True,
+            "message": (
+                "BLOCKER (production): pricing is NOT SET for app with IAP/paid content. "
+                "Set pricing and ensure a merchant profile exists before committing. "
+                f"Verify at: {CONSOLE_PATH}"
+            ),
+            "console_path": CONSOLE_PATH,
+        }
+
+    if billing_likely_present:
+        return {
+            "blocker": False,
+            "message": (
+                f"? cannot-verify — merchant profile + pricing (IAP detected in Phase 0). "
+                f"A missing merchant profile or unset pricing blocks production release. "
+                f"Verify at: {CONSOLE_PATH}"
+            ),
+            "console_path": CONSOLE_PATH,
+        }
+
+    return {
+        "blocker": False,
+        "message": (
+            f"? cannot-verify — pricing/availability not API-readable. "
+            f"Verify at: {CONSOLE_PATH}"
+        ),
+        "console_path": CONSOLE_PATH,
+    }
+
+
+def describe_metadata_plan(package: str, report: dict, yes_flags: frozenset) -> str:
+    """Return a human-readable dry-run plan for the metadata mutation checkpoints.
+
+    These are separate checkpoints from the binary upload/release/commit flow:
+      --yes listing:      edits.listings read/check + Console guidance for assets
+      --yes data-safety:  Data Safety declaration map derived from Phase 0 facts
+
+    Both are BLOCKED (dry-run) unless the matching --yes flag is passed explicitly.
+    The Data Safety map is ALWAYS derived from Phase 0 facts — never from user input.
+    """
+    declarations = derive_data_safety_declarations(report)
+    data_types = declarations["declared_data_types"]
+    data_types_label = ", ".join(data_types) if data_types else "(none detected)"
+    deletion_label = "YES" if declarations["data_deletion_provided"] else "NO"
+
+    stages = []
+    for kind, desc in [
+        (
+            "listing",
+            "edits.listings — read listing text completeness via API; "
+            "feature graphic + screenshots are ? cannot-verify (Console-only assets). "
+            "Console path: Grow → Store presence → Main store listing",
+        ),
+        (
+            "data-safety",
+            f"Data Safety declarations derived from Phase 0 (not from user input): "
+            f"[{data_types_label}]; data_deletion_provided={deletion_label}. "
+            "Enter these values in Play Console → Policy → Data Safety.",
+        ),
+    ]:
+        if kind in yes_flags:
+            gate = f"APPROVED (--yes {kind} passed)"
+            marker = "✓"
+        else:
+            gate = f"BLOCKED  (add --yes {kind} to approve)"
+            marker = "□"
+        stages.append(f"  {marker} {kind:12s}: {gate}\n               {desc}")
+
+    lines = [
+        "=== play-submit: metadata plan (Steps 5–9) ===",
+        "",
+        f"Package      : {package}",
+        "",
+        "Data Safety declarations (derived from Phase 0 — never from user input):",
+        f"  Data types : {data_types_label}",
+        f"  Data deletion provided: {deletion_label}",
+        "",
+        "Metadata checkpoints (each requires its own --yes — dry-run by default):",
+    ] + stages + [
+        "",
+        "Note: listing assets (feature graphic, screenshots) are always ? cannot-verify",
+        "      from the API — verify in Play Console, never infer 'not done' from API silence.",
+        "Note: Data Safety published state is ? cannot-verify — confirm in Play Console",
+        "      after entering the declarations.",
     ]
     return "\n".join(lines)
 
@@ -895,6 +1175,9 @@ def main(argv: list | None = None) -> int:
             version_code, existing_codes, collision, collision_msg, yes_flags,
         )
         print(plan)
+        print()
+        metadata_plan = describe_metadata_plan(args.package, report, yes_flags)
+        print(metadata_plan)
         _discard_edit(args.package, edit_id, token, args.debug)
         return 0
 
@@ -923,6 +1206,46 @@ def main(argv: list | None = None) -> int:
         print(f"Upload complete. versionCode: {uploaded_vc}")
     else:
         print("  [upload]: SKIPPED — add --yes upload to approve")
+
+    # Metadata checkpoint — Listing (Step 5: store listing text check + asset guidance)
+    if "listing" in yes_flags:
+        print("Checking store listing completeness (edits.listings)…")
+        list_status, list_body = http_get(
+            build_edits_listings_url(args.package, edit_id),
+            token, args.debug, "edits.listings",
+        )
+        if list_status == 200:
+            listing_result = check_listing_completeness(list_body)
+        else:
+            listing_result = check_listing_completeness({})
+        print(f"Listing: {listing_result['message']}")
+        if listing_result["text_status"] == "incomplete":
+            print(
+                f"  Action: complete the missing listing fields at: {listing_result['console_path']}",
+                file=sys.stderr,
+            )
+    else:
+        print("  [listing   ]: SKIPPED — add --yes listing to approve store listing check")
+
+    # Metadata checkpoint — Data Safety (Step 6: derive + stage declarations from Phase 0)
+    if "data-safety" in yes_flags:
+        print("Deriving Data Safety declarations from Phase 0 report (not from user input)…")
+        declarations = derive_data_safety_declarations(report)
+        data_types = declarations["declared_data_types"] or ["(none detected)"]
+        deletion_label = "YES" if declarations["data_deletion_provided"] else "NO"
+        print("Data Safety (Phase 0 derived):")
+        print(f"  Declared data types  : {', '.join(data_types)}")
+        print(f"  Data deletion provided: {deletion_label}")
+        print("  Action: enter these values in Play Console → Policy → Data Safety.")
+        print("  Note: Data Safety published state is ? cannot-verify via API. Confirm in Console.")
+        if declarations["data_deletion_provided"]:
+            print(
+                "  OQ5: account deletion endpoint required. Default: Supabase Postgres function "
+                "(not Edge Function) exposed via /rest/v1/rpc/delete_account. "
+                "Register the URL in Play Console → Data Safety → Account deletion section."
+            )
+    else:
+        print("  [data-safety]: SKIPPED — add --yes data-safety to approve Data Safety review")
 
     # Mutation 2 — Release to track
     if "release" in yes_flags:

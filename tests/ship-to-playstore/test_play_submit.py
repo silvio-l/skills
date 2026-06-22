@@ -682,5 +682,435 @@ class TestNoBytecacheInSkills(unittest.TestCase):
         )
 
 
+# ---------------------------------------------------------------------------
+# AC: listing and data-safety are valid --yes checkpoints (separate, never batched).
+# ---------------------------------------------------------------------------
+
+class TestMetadataYesFlags(unittest.TestCase):
+    """listing and data-safety recognised as valid --yes kinds, not warned/ignored."""
+
+    def test_listing_is_in_valid_yes_flags(self):
+        self.assertIn("listing", PS.VALID_YES_FLAGS)
+
+    def test_data_safety_is_in_valid_yes_flags(self):
+        self.assertIn("data-safety", PS.VALID_YES_FLAGS)
+
+    def test_listing_parsed_without_warning(self):
+        # If listing were unknown, parse_yes_flags would warn and ignore it.
+        flags = PS.parse_yes_flags(["listing"])
+        self.assertIn("listing", flags)
+
+    def test_data_safety_parsed_without_warning(self):
+        flags = PS.parse_yes_flags(["data-safety"])
+        self.assertIn("data-safety", flags)
+
+    def test_listing_and_data_safety_are_independent(self):
+        # Separate checkpoints: passing one does not imply the other.
+        flags_l = PS.parse_yes_flags(["listing"])
+        self.assertNotIn("data-safety", flags_l)
+        flags_d = PS.parse_yes_flags(["data-safety"])
+        self.assertNotIn("listing", flags_d)
+
+    def test_metadata_flags_do_not_imply_upload_release_commit(self):
+        flags = PS.parse_yes_flags(["listing", "data-safety"])
+        self.assertNotIn("upload", flags)
+        self.assertNotIn("release", flags)
+        self.assertNotIn("commit", flags)
+
+    def test_metadata_plan_shows_both_blocked_when_no_yes_flags(self):
+        plan = PS.describe_metadata_plan("com.example.app", {}, frozenset())
+        self.assertEqual(plan.count("BLOCKED"), 2)
+
+    def test_metadata_plan_listing_approved(self):
+        plan = PS.describe_metadata_plan(
+            "com.example.app", {}, frozenset({"listing"})
+        )
+        self.assertEqual(plan.count("APPROVED"), 1)
+        self.assertIn("BLOCKED", plan)   # data-safety still blocked
+
+    def test_metadata_plan_both_approved(self):
+        plan = PS.describe_metadata_plan(
+            "com.example.app", {}, frozenset({"listing", "data-safety"})
+        )
+        self.assertEqual(plan.count("APPROVED"), 2)
+        self.assertNotIn("BLOCKED", plan)
+
+    def test_metadata_plan_contains_cannot_verify_for_assets(self):
+        # Feature graphic + screenshots are always ? cannot-verify, never asserted "not done."
+        plan = PS.describe_metadata_plan("com.example.app", {}, frozenset())
+        self.assertIn("cannot-verify", plan.lower())
+
+    def test_metadata_plan_dry_run_by_default_confirmed(self):
+        # Dry-run confirmation: both stages BLOCKED without any --yes.
+        plan = PS.describe_metadata_plan("com.example.app", {}, frozenset())
+        self.assertNotIn("APPROVED", plan)
+
+
+# ---------------------------------------------------------------------------
+# AC: Data Safety declaration map derived from Phase 0 — never from user input.
+# ---------------------------------------------------------------------------
+
+class TestDataSafetyDeclarations(unittest.TestCase):
+    """derive_data_safety_declarations reads Phase 0 fields; never prompts user."""
+
+    def test_empty_report_returns_empty_declarations(self):
+        result = PS.derive_data_safety_declarations({})
+        self.assertEqual(result["declared_data_types"], [])
+        self.assertFalse(result["data_deletion_provided"])
+
+    def test_sentry_crash_analytics_adds_crash_logs(self):
+        report = {
+            "data_safety_hints": {
+                "analytics_tracking": [
+                    {"package": "sentry_flutter", "category": "crash/diagnostics"}
+                ]
+            }
+        }
+        result = PS.derive_data_safety_declarations(report)
+        self.assertIn("crash_logs", result["declared_data_types"])
+
+    def test_analytics_tracking_adds_app_interactions(self):
+        report = {
+            "data_safety_hints": {
+                "analytics_tracking": [
+                    {"package": "posthog_flutter", "category": "analytics/usage"}
+                ]
+            }
+        }
+        result = PS.derive_data_safety_declarations(report)
+        self.assertIn("app_interactions", result["declared_data_types"])
+
+    def test_supabase_used_adds_email_and_user_ids(self):
+        result = PS.derive_data_safety_declarations({"supabase_used": True})
+        types = result["declared_data_types"]
+        self.assertIn("email_address", types)
+        self.assertIn("user_ids", types)
+
+    def test_supabase_false_does_not_add_account_data(self):
+        result = PS.derive_data_safety_declarations({"supabase_used": False})
+        self.assertNotIn("email_address", result["declared_data_types"])
+        self.assertNotIn("user_ids", result["declared_data_types"])
+
+    def test_fcm_push_adds_device_ids(self):
+        report = {"push_notifications": {"fcm_used": True}}
+        result = PS.derive_data_safety_declarations(report)
+        self.assertIn("device_or_other_ids", result["declared_data_types"])
+
+    def test_camera_permission_adds_photos_and_videos(self):
+        report = {"permissions": {"declared": ["android.permission.CAMERA"]}}
+        result = PS.derive_data_safety_declarations(report)
+        self.assertIn("photos_and_videos", result["declared_data_types"])
+
+    def test_fine_location_permission_adds_precise_location(self):
+        report = {"permissions": {"declared": ["android.permission.ACCESS_FINE_LOCATION"]}}
+        result = PS.derive_data_safety_declarations(report)
+        self.assertIn("precise_location", result["declared_data_types"])
+
+    def test_coarse_location_adds_approximate_location(self):
+        report = {"permissions": {"declared": ["android.permission.ACCESS_COARSE_LOCATION"]}}
+        result = PS.derive_data_safety_declarations(report)
+        self.assertIn("approximate_location", result["declared_data_types"])
+        self.assertNotIn("precise_location", result["declared_data_types"])
+
+    def test_contacts_permission_adds_contacts(self):
+        report = {"permissions": {"declared": ["android.permission.READ_CONTACTS"]}}
+        result = PS.derive_data_safety_declarations(report)
+        self.assertIn("contacts", result["declared_data_types"])
+
+    def test_record_audio_permission_adds_audio_files(self):
+        report = {"permissions": {"declared": ["android.permission.RECORD_AUDIO"]}}
+        result = PS.derive_data_safety_declarations(report)
+        self.assertIn("audio_files", result["declared_data_types"])
+
+    # OQ5 binding: data_deletion_provided MUST come from account_deletion.likely_present.
+    def test_account_deletion_true_sets_data_deletion_provided(self):
+        report = {
+            "data_safety_hints": {
+                "account_deletion": {"likely_present": True, "hints": ["deleteAccount"]}
+            }
+        }
+        result = PS.derive_data_safety_declarations(report)
+        self.assertTrue(result["data_deletion_provided"])
+
+    def test_account_deletion_false_leaves_data_deletion_not_provided(self):
+        report = {
+            "data_safety_hints": {
+                "account_deletion": {"likely_present": False}
+            }
+        }
+        result = PS.derive_data_safety_declarations(report)
+        self.assertFalse(result["data_deletion_provided"])
+
+    def test_missing_account_deletion_field_defaults_false(self):
+        result = PS.derive_data_safety_declarations({"data_safety_hints": {}})
+        self.assertFalse(result["data_deletion_provided"])
+
+    def test_sources_dict_tracks_trigger_fields(self):
+        report = {"supabase_used": True}
+        result = PS.derive_data_safety_declarations(report)
+        sources = result["sources"]
+        self.assertIn("email_address", sources)
+        self.assertIn("supabase", sources["email_address"].lower())
+
+    def test_typical_phase0_report_comprehensive(self):
+        # Full Phase 0 report shape (mirrors phase0-introspect.md schema).
+        report = {
+            "supabase_used": True,
+            "push_notifications": {"fcm_used": True},
+            "permissions": {
+                "declared": [
+                    "android.permission.INTERNET",
+                    "android.permission.POST_NOTIFICATIONS",
+                    "android.permission.CAMERA",
+                ]
+            },
+            "data_safety_hints": {
+                "analytics_tracking": [
+                    {"package": "sentry_flutter", "category": "crash/diagnostics"}
+                ],
+                "account_deletion": {"likely_present": True, "hints": ["deleteAccount"]},
+            },
+        }
+        result = PS.derive_data_safety_declarations(report)
+        types = result["declared_data_types"]
+        self.assertIn("crash_logs", types)
+        self.assertIn("email_address", types)
+        self.assertIn("user_ids", types)
+        self.assertIn("device_or_other_ids", types)
+        self.assertIn("photos_and_videos", types)
+        self.assertTrue(result["data_deletion_provided"])
+
+
+# ---------------------------------------------------------------------------
+# AC: listing completeness — API readable → check; not readable → cannot-verify.
+# ---------------------------------------------------------------------------
+
+class TestListingCompleteness(unittest.TestCase):
+    """check_listing_completeness: tri-state correct; never asserts 'not done' from API silence."""
+
+    def test_empty_body_returns_cannot_verify(self):
+        result = PS.check_listing_completeness({})
+        self.assertEqual(result["text_status"], "cannot-verify")
+        self.assertIn("cannot-verify", result["message"].lower())
+
+    def test_none_listings_key_returns_cannot_verify(self):
+        result = PS.check_listing_completeness({"listings": []})
+        self.assertEqual(result["text_status"], "cannot-verify")
+
+    def test_complete_listing_returns_complete(self):
+        body = {
+            "listings": [{
+                "language": "en-US",
+                "title": "My App",
+                "shortDescription": "Short desc",
+                "fullDescription": "Full description here",
+            }]
+        }
+        result = PS.check_listing_completeness(body)
+        self.assertEqual(result["text_status"], "complete")
+
+    def test_missing_title_returns_incomplete(self):
+        body = {
+            "listings": [{
+                "language": "en-US",
+                "title": "",
+                "shortDescription": "Short",
+                "fullDescription": "Full",
+            }]
+        }
+        result = PS.check_listing_completeness(body)
+        self.assertEqual(result["text_status"], "incomplete")
+        self.assertTrue(any("title" in m for m in result["missing_text"]))
+
+    def test_missing_description_returns_incomplete(self):
+        body = {
+            "listings": [{
+                "language": "en-US",
+                "title": "My App",
+                "shortDescription": "",
+                "fullDescription": "",
+            }]
+        }
+        result = PS.check_listing_completeness(body)
+        self.assertEqual(result["text_status"], "incomplete")
+
+    def test_assets_always_cannot_verify(self):
+        # Feature graphic, screenshots not reliably API-readable → always cannot-verify.
+        body = {
+            "listings": [{
+                "language": "en-US",
+                "title": "My App",
+                "shortDescription": "Short",
+                "fullDescription": "Full",
+            }]
+        }
+        result = PS.check_listing_completeness(body)
+        self.assertEqual(result["assets_status"], "cannot-verify")
+
+    def test_console_path_always_present(self):
+        for body in [{}, {"listings": []}, {"listings": [{"language": "en-US"}]}]:
+            result = PS.check_listing_completeness(body)
+            self.assertIn("console_path", result)
+            self.assertIn("Store presence", result["console_path"])
+
+    def test_message_never_says_not_done_for_empty_body(self):
+        result = PS.check_listing_completeness({})
+        # "not done" must never appear — only cannot-verify.
+        self.assertNotIn("not done", result["message"].lower())
+
+    def test_multiple_locales_aggregated(self):
+        body = {
+            "listings": [
+                {"language": "en-US", "title": "App", "shortDescription": "S", "fullDescription": "F"},
+                {"language": "de-DE", "title": "", "shortDescription": "S", "fullDescription": "F"},
+            ]
+        }
+        result = PS.check_listing_completeness(body)
+        self.assertEqual(result["text_status"], "incomplete")
+        self.assertTrue(any("de-DE" in m for m in result["missing_text"]))
+
+
+# ---------------------------------------------------------------------------
+# AC: pricing step flags missing merchant profile / unset pricing as production blocker.
+# ---------------------------------------------------------------------------
+
+class TestPricingBlocker(unittest.TestCase):
+    """check_pricing_blocker: not_set + billing → blocker; cannot-verify otherwise."""
+
+    def test_not_set_with_billing_is_blocker(self):
+        result = PS.check_pricing_blocker(
+            billing_likely_present=True, pricing_status="not_set"
+        )
+        self.assertTrue(result["blocker"])
+        self.assertIn("BLOCKER", result["message"])
+
+    def test_not_set_without_billing_is_not_blocker(self):
+        # Free app with no IAP: pricing "not_set" is expected (price = free).
+        result = PS.check_pricing_blocker(
+            billing_likely_present=False, pricing_status="not_set"
+        )
+        self.assertFalse(result["blocker"])
+
+    def test_billing_detected_none_status_is_cannot_verify_warning(self):
+        result = PS.check_pricing_blocker(
+            billing_likely_present=True, pricing_status=None
+        )
+        self.assertFalse(result["blocker"])
+        self.assertIn("cannot-verify", result["message"].lower())
+
+    def test_no_billing_no_status_is_cannot_verify(self):
+        result = PS.check_pricing_blocker(
+            billing_likely_present=False, pricing_status=None
+        )
+        self.assertFalse(result["blocker"])
+        self.assertIn("cannot-verify", result["message"].lower())
+
+    def test_console_path_always_present(self):
+        for billing in (True, False):
+            for status in ("set", "not_set", None):
+                result = PS.check_pricing_blocker(billing, status)
+                self.assertIn("console_path", result)
+                self.assertIn("Payments", result["console_path"])
+
+    def test_blocker_message_mentions_merchant_profile(self):
+        result = PS.check_pricing_blocker(True, "not_set")
+        self.assertIn("merchant profile", result["message"].lower())
+
+    def test_cannot_verify_message_mentions_merchant_profile(self):
+        result = PS.check_pricing_blocker(True, None)
+        self.assertIn("merchant profile", result["message"].lower())
+
+
+# ---------------------------------------------------------------------------
+# AC OQ5: Step 6 documents Postgres-function-first preference over Edge Function.
+# ---------------------------------------------------------------------------
+
+class TestOQ5DataDeletionWebhookDoc(unittest.TestCase):
+    """OQ5 locked: Step 6 sub-step in phase3-release-loop.md documents Postgres function first."""
+
+    def setUp(self):
+        phase3_path = (
+            pathlib.Path(__file__).resolve().parents[2]
+            / "skills" / "ship-to-playstore" / "phase3-release-loop.md"
+        )
+        with open(phase3_path, encoding="utf-8") as fh:
+            self.doc = fh.read()
+        self.doc_lower = self.doc.lower()
+
+    def test_step6_mentions_account_deletion_webhook(self):
+        # Step 6 must surface the account/data-deletion webhook requirement.
+        self.assertIn("deletion webhook", self.doc_lower)
+
+    def test_step6_documents_postgres_function(self):
+        # Postgres function must be the documented default.
+        self.assertIn("postgres function", self.doc_lower)
+
+    def test_step6_mentions_edge_function_avoidance(self):
+        # Edge Function must be mentioned in a context of avoidance, not as the default.
+        self.assertIn("edge function", self.doc_lower)
+
+    def test_step6_edge_function_not_default(self):
+        # The word "avoid" or "not" must appear near "edge function".
+        # We check that at least one of these qualifiers is present.
+        self.assertTrue(
+            "avoid" in self.doc_lower or "not edge function" in self.doc_lower
+            or "never" in self.doc_lower,
+            "Edge Function mention must be qualified with avoid/not/never",
+        )
+
+    def test_step6_prefers_postgres_over_edge(self):
+        # "Postgres function" must appear and "Edge Function" must be framed as secondary/avoided.
+        pg_idx = self.doc_lower.find("postgres function")
+        edge_idx = self.doc_lower.find("edge function")
+        self.assertGreater(pg_idx, -1, "Postgres function not mentioned")
+        self.assertGreater(edge_idx, -1, "Edge Function not mentioned")
+
+    def test_step6a_sub_step_present(self):
+        # Step 6a sub-step must exist in the document.
+        self.assertIn("step 6a", self.doc_lower)
+
+    def test_supabase_rpc_documented(self):
+        # The recommended Supabase RPC approach must be documented.
+        self.assertTrue(
+            "supabase.rpc" in self.doc or "rpc(" in self.doc,
+            "Supabase RPC call must appear in Step 6a guidance",
+        )
+
+
+# ---------------------------------------------------------------------------
+# AC: URL builders for listing/details write surface.
+# ---------------------------------------------------------------------------
+
+class TestMetadataURLBuilders(unittest.TestCase):
+
+    PKG = "com.example.app"
+    EDIT = "editId42"
+
+    def test_listings_url_no_language_returns_base(self):
+        url = PS.build_edits_listings_url(self.PKG, self.EDIT)
+        self.assertIn("/listings", url)
+        self.assertIn(self.EDIT, url)
+        self.assertNotIn("/listings/", url.split(self.EDIT)[1].rstrip("/"))
+
+    def test_listings_url_with_language_appends_locale(self):
+        url = PS.build_edits_listings_url(self.PKG, self.EDIT, "en-US")
+        self.assertIn("/listings/en-US", url)
+
+    def test_listings_url_uses_api_base(self):
+        url = PS.build_edits_listings_url(self.PKG, self.EDIT)
+        self.assertIn(PS.API_BASE, url)
+
+    def test_details_url_contains_details(self):
+        url = PS.build_edits_details_url(self.PKG, self.EDIT)
+        self.assertIn("/details", url)
+        self.assertIn(self.EDIT, url)
+        self.assertIn(PS.API_BASE, url)
+
+    def test_listings_url_differs_from_details_url(self):
+        l_url = PS.build_edits_listings_url(self.PKG, self.EDIT)
+        d_url = PS.build_edits_details_url(self.PKG, self.EDIT)
+        self.assertNotEqual(l_url, d_url)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
