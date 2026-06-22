@@ -18,6 +18,8 @@ __pycache__/
 
 # Local scratch
 .scratch/
+# ship-to-playstore status note (append-only, never secrets) — PRD §4.3
+.scratch/ship-to-playstore/
 
 # Claude Code local-only settings (per-project; never shared)
 .claude/settings.local.json

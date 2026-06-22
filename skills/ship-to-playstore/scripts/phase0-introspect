@@ -1,0 +1,778 @@
+#!/usr/bin/env python3
+"""Phase 0 introspection for ship-to-playstore.
+
+Reads pubspec.yaml and the Android project to extract release-relevant facts
+and emits a structured JSON situation report to stdout.
+
+Usage:
+    phase0-introspect [<repo-path>]
+
+Arguments:
+    repo-path   Path to the Flutter repo root (default: current directory).
+
+Exit codes:
+    0  Flutter/Android project detected; JSON situation report on stdout.
+    1  Not a Flutter/Android project; warning on stderr, no JSON emitted.
+    2  Usage error.
+
+Output contract (JSON keys) — see PRD §7.1 for the authoritative schema:
+    flutter_android                bool            — always true on exit 0
+    app_display_name               str|null        — pubspec.yaml `name` field
+    application_id                 str|null        — applicationId (fallback namespace) from android/app/build.gradle
+    version_name                   str|null        — semver part of pubspec version (before `+`)
+    version_code                   int|null        — build-number part of pubspec version (after `+`, the monotonic Play identity)
+    min_sdk_version                int|null        — minSdkVersion from android/app/build.gradle
+    target_sdk_version             int|null        — targetSdkVersion (the annually-incrementing Play floor target)
+    gradle.wrapper_version         str|null        — Gradle wrapper version from gradle-wrapper.properties
+    gradle.agp_version             str|null        — Android Gradle Plugin version (settings.gradle or build.gradle)
+    gradle.kotlin_version          str|null        — Kotlin Gradle plugin version
+    gradle.java_toolchain          str|null        — Java sourceCompatibility / jvmTarget version
+    gradle.ndk_version             str|null        — ndkVersion from android/app/build.gradle
+    signing.signing_config_set     bool            — a signingConfig reference is wired into a build type
+    signing.keystore_hints         list[str]       — RELATIVE PATHS ONLY (key.properties, *.jks, *.keystore)
+    signing.has_key_properties     bool            — android/key.properties exists (presence only, never contents)
+    signing.play_app_signing_enrollable_from_repo  bool  — heuristic hint; Phase 2 overrides via Play Console
+    icon_set.complete              bool
+    icon_set.missing_densities     list[str]       — density names without a launcher icon
+    icon_set.present_densities     list[str]       — density names with a launcher icon present
+    permissions.declared           list[str]       — <uses-permission> names from AndroidManifest.xml
+    permissions.expected_from_plugins list[str]    — permission names the detected plugins typically require
+    permissions.excessive          list[str]       — declared but no detected plugin needs (Play ranking penalty)
+    permissions.missing            list[str]       — plugin needs, not declared (merge break risk)
+    credentials.service_account_json list[{path:str}]  — RELATIVE PATHS to service-account JSON files (presence only)
+    credentials.fastlane_supplyfile {path:str}|null     — fastlane/Appfile path if present
+    credentials.env_hints          list[str]       — env var NAMES that are set (never values)
+    fastlane_lanes                 list[str]       — lane names declared in fastlane/Fastfile
+    play_billing.likely_present    bool            — Play Billing / IAP usage detected (drives §9 H gate + §8 Step 10b)
+    play_billing.packages          list[str]       — IAP SDK names declared in pubspec.yaml
+    play_billing.code_markers      list[str]       — matched IAP API surface strings in lib/
+    data_safety_hints.analytics_tracking list[{package:str, category:str}]  — privacy/Data-Safety-relevant SDKs
+    data_safety_hints.account_deletion {likely_present:bool, hints:list[str]}  — in-app deletion-flow heuristic
+    user_generated_content.likely_present  bool    — conservative UGC heuristic (drives §9 L gate)
+    user_generated_content.has_report_or_block bool
+    push_notifications.fcm_used    bool            — FCM transport detected
+    push_notifications.firebase_in_manifest_only bool  — Firebase present only as push transport (stack-fidelity check)
+    supabase_used                  bool            — Supabase SDK in pubspec (stack-fidelity: Supabase, not Firebase)
+
+Security: this script NEVER reads or emits credential secret contents (keystore
+passwords, service-account JSON bodies, OAuth tokens, .env values). The signing
+section reports file PATHS only. The credentials section reports file existence
+and path only — the contents of key.properties, service-account JSON files,
+Appfiles, and .env files are never opened, read, logged, or emitted. Env var
+VALUES are never read — only whether a name is SET.
+"""
+
+import json
+import os
+import re
+import sys
+
+sys.dont_write_bytecode = True
+
+
+def _read_file(path: str) -> str | None:
+    """Read a text file; return None on any OSError."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def detect_flutter_android(root: str) -> tuple[bool, str | None]:
+    """Return (is_flutter_android, reason_if_not).
+
+    A project qualifies when:
+      1. pubspec.yaml exists in root, AND
+      2. pubspec.yaml contains a top-level 'flutter:' key (rules out plain
+         Dart CLI apps), AND
+      3. an android/ directory with android/app/build.gradle exists.
+    """
+    pubspec_path = os.path.join(root, "pubspec.yaml")
+    content = _read_file(pubspec_path)
+    if content is None:
+        return False, "pubspec.yaml not found"
+    if not re.search(r"^\s*flutter\s*:", content, re.MULTILINE):
+        return False, "pubspec.yaml found but no 'flutter:' key (looks like a plain Dart project)"
+    android_dir = os.path.join(root, "android")
+    if not os.path.isdir(android_dir):
+        return False, "Flutter project detected but no android/ directory (Android target missing — this may be an iOS-only project)"
+    app_gradle = os.path.join(root, "android", "app", "build.gradle")
+    app_gradle_kts = os.path.join(root, "android", "app", "build.gradle.kts")
+    if not (os.path.isfile(app_gradle) or os.path.isfile(app_gradle_kts)):
+        return False, "android/ directory found but no android/app/build.gradle (Android app module missing)"
+    return True, None
+
+
+def parse_pubspec(root: str) -> dict:
+    """Extract app_display_name, version_name, and version_code from pubspec.yaml.
+
+    Flutter version format: "1.2.3+42" where +42 is the versionCode (monotonic
+    Play identity) and 1.2.3 is the versionName (human).
+    """
+    path = os.path.join(root, "pubspec.yaml")
+    content = _read_file(path) or ""
+    result: dict = {
+        "app_display_name": None,
+        "version_name": None,
+        "version_code": None,
+    }
+
+    m = re.search(r"^name:\s*(.+)$", content, re.MULTILINE)
+    if m:
+        result["app_display_name"] = m.group(1).strip()
+
+    m = re.search(r"^version:\s*(.+)$", content, re.MULTILINE)
+    if m:
+        raw = m.group(1).strip()
+        if "+" in raw:
+            ver, code = raw.split("+", 1)
+            result["version_name"] = ver.strip()
+            code = code.strip()
+            try:
+                result["version_code"] = int(code)
+            except ValueError:
+                result["version_code"] = None
+        else:
+            result["version_name"] = raw
+
+    return result
+
+
+def _app_build_gradle_path(root: str) -> str | None:
+    """Return the path to android/app/build.gradle[.kts] if present."""
+    for name in ("build.gradle.kts", "build.gradle"):
+        p = os.path.join(root, "android", "app", name)
+        if os.path.isfile(p):
+            return p
+    return None
+
+
+def _settings_gradle_path(root: str) -> str | None:
+    for name in ("settings.gradle.kts", "settings.gradle"):
+        p = os.path.join(root, "android", name)
+        if os.path.isfile(p):
+            return p
+    return None
+
+
+def _root_build_gradle_path(root: str) -> str | None:
+    for name in ("build.gradle.kts", "build.gradle"):
+        p = os.path.join(root, "android", name)
+        if os.path.isfile(p):
+            return p
+    return None
+
+
+def parse_gradle_wrapper(root: str) -> str | None:
+    """Extract the Gradle wrapper version from gradle-wrapper.properties.
+
+    Reads `distributionUrl=...gradle-8.5-bin.zip` → "8.5".
+    """
+    props = _read_file(
+        os.path.join(root, "android", "gradle", "wrapper", "gradle-wrapper.properties")
+    )
+    if not props:
+        return None
+    m = re.search(r"distributionUrl\s*=\s*[^-]*-([\d.]+)(?:-|\.(?:zip|bin))", props)
+    if m:
+        return m.group(1).strip()
+    # Fallback: bare gradle-VERSION
+    m = re.search(r"gradle-([\d.]+)", props)
+    return m.group(1).strip() if m else None
+
+
+def parse_gradle_plugins(root: str) -> dict:
+    """Extract AGP and Kotlin plugin versions.
+
+    Modern Flutter uses a plugins{} block in settings.gradle; legacy projects
+    declare the same via buildscript classpath in android/build.gradle. Both
+    are checked (settings.gradle first).
+    """
+    result: dict = {"agp_version": None, "kotlin_version": None}
+
+    sources = []
+    s = _settings_gradle_path(root)
+    if s:
+        sources.append(s)
+    b = _root_build_gradle_path(root)
+    if b:
+        sources.append(b)
+
+    combined = "\n".join(_read_file(p) or "" for p in sources)
+
+    # AGP — plugins block first, then classpath fallback.
+    m = (re.search(r'id\s+"com\.android\.application"\s+version\s+"([^"]+)"', combined)
+         or re.search(r'id\(.\s*com\.android\.application.\s*\)\s+version\s+"([^"]+)"', combined)
+         or re.search(r"com\.android\.tools\.build:gradle:([\d.]+)", combined))
+    if m:
+        result["agp_version"] = m.group(1).strip()
+
+    # Kotlin — plugins block, classpath, or ext.kotlin_version.
+    m = (re.search(r'id\s+"org\.jetbrains\.kotlin\.android"\s+version\s+"([^"]+)"', combined)
+         or re.search(r'id\(.\s*org\.jetbrains\.kotlin\.android.\s*\)\s+version\s+"([^"]+)"', combined)
+         or re.search(r"org\.jetbrains\.kotlin:kotlin-gradle-plugin:([\d.]+)", combined)
+         or re.search(r'kotlin[_-]version\s*=\s*"([\d.]+)"', combined))
+    if m:
+        result["kotlin_version"] = m.group(1).strip()
+
+    return result
+
+
+def parse_app_build_gradle(root: str) -> dict:
+    """Extract application_id, SDK levels, signing-config wiring, NDK, Java.
+
+    applicationId is preferred; falls back to `namespace` (the R-class package)
+    when applicationId is delegated to a flavor or omitted in the source.
+    """
+    gradle_path = _app_build_gradle_path(root)
+    result: dict = {
+        "application_id": None,
+        "min_sdk_version": None,
+        "target_sdk_version": None,
+        "signing_config_set": False,
+        "ndk_version": None,
+        "java_toolchain": None,
+    }
+    content = _read_file(gradle_path) if gradle_path else None
+    if not content:
+        return result
+
+    m = re.search(r'^\s*applicationId\s+"([^"]+)"', content, re.MULTILINE)
+    if m:
+        result["application_id"] = m.group(1).strip()
+    else:
+        m = re.search(r'^\s*namespace\s+"([^"]+)"', content, re.MULTILINE)
+        if m:
+            result["application_id"] = m.group(1).strip()
+
+    # minSdk / minSdkVersion — newer DSL dropped the `Version` suffix. Word
+    # boundary is safe: `minSdk\s+` requires whitespace right after `minSdk`,
+    # so it never matches `minSdkVersion` (which has `V` after `minSdk`).
+    m = (re.search(r"\bminSdkVersion\s+(\d+)", content)
+         or re.search(r"\bminSdk\s+(\d+)", content))
+    if m:
+        result["min_sdk_version"] = int(m.group(1))
+
+    m = (re.search(r"\btargetSdkVersion\s+(\d+)", content)
+         or re.search(r"\btargetSdk\s+(\d+)", content))
+    if m:
+        result["target_sdk_version"] = int(m.group(1))
+
+    # signingConfig wiring — `signingConfig signingConfigs.<name>` inside a
+    # build type. Presence means signing is wired (does not reveal the key).
+    if re.search(r"signingConfig\s+signingConfigs\.\w+", content):
+        result["signing_config_set"] = True
+
+    # NDK.
+    m = re.search(r'^\s*ndkVersion\s+"([^"]+)"', content, re.MULTILINE)
+    if m:
+        result["ndk_version"] = m.group(1).strip()
+
+    # Java toolchain — prefer JavaVersion.VERSION_X, then jvmTarget.
+    m = re.search(r"JavaVersion\.VERSION_(\d+)", content)
+    if m:
+        result["java_toolchain"] = m.group(1).strip()
+    else:
+        m = re.search(r"jvmTarget\s*=\s*['\"]([\d.]+)['\"]", content)
+        if m:
+            result["java_toolchain"] = m.group(1).strip()
+        else:
+            m = re.search(r"sourceCompatibility\s+JavaVersion\.VERSION_(\d+)", content)
+            if m:
+                result["java_toolchain"] = m.group(1).strip()
+
+    return result
+
+
+def check_icon_densities(root: str) -> dict:
+    """Check launcher-icon density completeness under res/.
+
+    Play reads the launcher icon from mipmap-<density>/ic_launcher(.png). Missing
+    densities are a defect ( blurry or absent icon on some device classes ).
+    Any icon file (ic_launcher.png or ic_launcher.webp, plus xml adaptive) in
+    a density bucket counts as present.
+    """
+    res_dir = os.path.join(root, "android", "app", "src", "main", "res")
+    densities = ["mdpi", "hdpi", "xhdpi", "xxhdpi", "xxxhdpi"]
+    result: dict = {
+        "complete": False,
+        "missing_densities": [],
+        "present_densities": [],
+    }
+    if not os.path.isdir(res_dir):
+        result["missing_densities"] = list(densities)
+        return result
+
+    for d in densities:
+        bucket = os.path.join(res_dir, f"mipmap-{d}")
+        present = False
+        if os.path.isdir(bucket):
+            for entry in os.listdir(bucket):
+                low = entry.lower()
+                if low.startswith("ic_launcher") and (
+                    low.endswith(".png") or low.endswith(".webp") or low.endswith(".xml")
+                ):
+                    present = True
+                    break
+        (result["present_densities"] if present else result["missing_densities"]).append(d)
+
+    result["complete"] = len(result["missing_densities"]) == 0
+    return result
+
+
+# Maps a plugin name to the Android permissions that plugin's capability
+# typically requires at install time. Drives the excessive/missing diff vs.
+# the app's own AndroidManifest.xml declarations. Plugin manifests merge at
+# build time, so `missing` is a merge-break hint, not a guaranteed failure.
+_PERMISSION_PLUGINS = {
+    "camera": ["android.permission.CAMERA"],
+    "geolocator": ["android.permission.ACCESS_FINE_LOCATION", "android.permission.ACCESS_COARSE_LOCATION"],
+    "location": ["android.permission.ACCESS_FINE_LOCATION", "android.permission.ACCESS_COARSE_LOCATION"],
+    "google_maps_flutter": ["android.permission.ACCESS_FINE_LOCATION"],
+    "flutter_local_notifications": ["android.permission.POST_NOTIFICATIONS"],
+    "record": ["android.permission.RECORD_AUDIO"],
+    "flutter_sound": ["android.permission.RECORD_AUDIO"],
+    "speech_to_text": ["android.permission.RECORD_AUDIO"],
+    "flutter_contacts": ["android.permission.READ_CONTACTS"],
+    "contacts_service": ["android.permission.READ_CONTACTS"],
+    "flutter_blue_plus": ["android.permission.BLUETOOTH_SCAN", "android.permission.BLUETOOTH_CONNECT"],
+    "device_calendar": ["android.permission.READ_CALENDAR", "android.permission.WRITE_CALENDAR"],
+    "health": ["android.permission.ACTIVITY_RECOGNITION"],
+    "connectivity_plus": ["android.permission.ACCESS_NETWORK_STATE"],
+    "flutter_background_geolocation": [
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.FOREGROUND_SERVICE",
+    ],
+    "permission_handler": [],
+    "image_picker": [],
+}
+
+# Permissions a default Flutter/Android app declares without any plugin — the
+# baseline expectation so INTERNET etc. don't show as "excessive".
+_BASELINE_EXPECTED = {"android.permission.INTERNET"}
+
+
+def detect_permissions(root: str) -> dict:
+    """Cross-check AndroidManifest permissions against permission-using plugins.
+
+    Over-declared permissions are a Play ranking penalty + possible reject;
+    under-declared (plugin needs, not present) is a merge-break / runtime risk.
+    Only permission NAMES are emitted — never the permission node attributes
+    beyond `android:name`.
+    """
+    manifest = _read_file(
+        os.path.join(root, "android", "app", "src", "main", "AndroidManifest.xml")
+    ) or ""
+    declared = sorted(set(re.findall(
+        r'<uses-permission\s+[^>]*android:name\s*=\s*"([^"]+)"', manifest)))
+
+    pubspec = _read_file(os.path.join(root, "pubspec.yaml")) or ""
+    expected: set[str] = set(_BASELINE_EXPECTED)
+    for plugin, perms in _PERMISSION_PLUGINS.items():
+        if re.search(rf"^\s{{2,}}{re.escape(plugin)}\s*:", pubspec, re.MULTILINE):
+            expected.update(perms)
+
+    declared_set = set(declared)
+    excessive = sorted(declared_set - expected)
+    missing = sorted(expected - declared_set)
+
+    return {
+        "declared": declared,
+        "expected_from_plugins": sorted(expected),
+        "excessive": excessive,
+        "missing": missing,
+    }
+
+
+def detect_signing(root: str) -> dict:
+    """Detect signing-config evidence — PATHS ONLY, never passwords.
+
+    Surface keystore file paths and whether key.properties exists. The contents
+    of key.properties (storePassword, keyPassword, keyAliasPassword) are NEVER
+    read — only file presence and relative path are reported. The alias name
+    is also NOT read from key.properties (it sits next to passwords); the
+    interpretation doc points the user at the file instead.
+    """
+    hints: list[str] = []
+    key_props_path = os.path.join(root, "android", "key.properties")
+    has_key_props = os.path.isfile(key_props_path)
+    if has_key_props:
+        hints.append(os.path.relpath(key_props_path, root))
+
+    # Bounded keystore scan — android/ and android/app/ only (avoid build/).
+    for scan_dir in (os.path.join(root, "android"), os.path.join(root, "android", "app")):
+        if not os.path.isdir(scan_dir):
+            continue
+        try:
+            entries = os.listdir(scan_dir)
+        except OSError:
+            continue
+        for entry in entries:
+            low = entry.lower()
+            if low.endswith(".jks") or low.endswith(".keystore"):
+                abs_path = os.path.join(scan_dir, entry)
+                if os.path.isfile(abs_path):
+                    rel = os.path.relpath(abs_path, root)
+                    if rel not in hints:
+                        hints.append(rel)
+
+    # signing_config_set comes from parse_app_build_gradle; recompute here so
+    # detect_signing is self-contained and independently testable.
+    app_gradle = parse_app_build_gradle(root)
+    signing_config_set = app_gradle["signing_config_set"]
+
+    # Heuristic: no keystore evidence at all suggests a first release, where
+    # Play App Signing enrolment is still on the table. A configured upload
+    # key (keystore file present OR signingConfig wired) suggests enrolment
+    # is already settled. Phase 2 determines the real enrolment state via the
+    # Play Console API/UI and overrides this hint.
+    has_keystore_file = any(
+        h.lower().endswith((".jks", ".keystore")) for h in hints
+    )
+    enrolable_hint = not (signing_config_set or has_keystore_file)
+
+    return {
+        "signing_config_set": signing_config_set,
+        "keystore_hints": hints,
+        "has_key_properties": has_key_props,
+        "play_app_signing_enrollable_from_repo": enrolable_hint,
+    }
+
+
+def discover_credentials(root: str) -> dict:
+    """Discover Play credential-source hints in the repo — PATHS ONLY.
+
+    Reports file existence and relative path only — the contents of
+    service-account JSON files, fastlane Appfiles, and .env files are never
+    opened, read, or emitted. Env var VALUES are never read.
+    """
+    result: dict = {
+        "service_account_json": [],
+        "fastlane_supplyfile": None,
+        "env_hints": [],
+    }
+
+    # Service-account JSON — match by filename shape only, never read contents.
+    seen: set[str] = set()
+
+    def _scan_dir_for_sa(search_dir: str, name_patterns: tuple[str, ...]) -> None:
+        if not os.path.isdir(search_dir):
+            return
+        try:
+            entries = os.listdir(search_dir)
+        except OSError:
+            return
+        for entry in entries:
+            low = entry.lower()
+            if not low.endswith(".json"):
+                continue
+            if not any(p in low for p in name_patterns):
+                continue
+            abs_path = os.path.join(search_dir, entry)
+            if os.path.isfile(abs_path):
+                rel = os.path.relpath(abs_path, root)
+                if rel not in seen:
+                    seen.add(rel)
+                    result["service_account_json"].append({"path": rel})
+
+    # In-repo conventions: android/api/, repo root, android/.
+    sa_patterns = ("service-account", "service_account", "play-", "play_service")
+    _scan_dir_for_sa(os.path.join(root, "android", "api"), sa_patterns)
+    _scan_dir_for_sa(os.path.join(root, "android"), sa_patterns)
+    _scan_dir_for_sa(root, sa_patterns)
+    # Out-of-repo: ~/.config/play/.
+    _scan_dir_for_sa(os.path.expanduser("~/.config/play"), sa_patterns)
+
+    # fastlane/Appfile (supply reads it).
+    appfile = os.path.join(root, "fastlane", "Appfile")
+    if os.path.isfile(appfile):
+        result["fastlane_supplyfile"] = {"path": os.path.relpath(appfile, root)}
+
+    # Env var NAMES only — never values.
+    _PLAY_HINT_ENV_VARS = (
+        "ANDROID_PUBLISHER_SERVICE_ACCOUNT",
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "PLAY_STORE_SERVICE_ACCOUNT",
+        "PLAY_STORE_PACKAGE_NAME",
+        "PLAY_CONFIG_JSON",
+        "SUPPLY_PACKAGE_NAME",
+    )
+    for var in _PLAY_HINT_ENV_VARS:
+        if os.environ.get(var):
+            result["env_hints"].append(var)
+
+    return result
+
+
+def detect_fastlane_lanes(root: str) -> list[str]:
+    """List lane names declared in fastlane/Fastfile (prefer project lanes)."""
+    fastfile = _read_file(os.path.join(root, "fastlane", "Fastfile"))
+    if not fastfile:
+        return []
+    return sorted(set(re.findall(r"^\s*lane\s+:([A-Za-z0-9_]+)", fastfile, re.MULTILINE)))
+
+
+def detect_play_billing(root: str) -> dict:
+    """Detect Play Billing / IAP usage to drive the Play-Billing gate (§9 H)
+    and the IAP submission gate (§8 Step 10b).
+
+    Flutter's `in_app_purchase` plugin routes through Play Billing on Android.
+    Scans pubspec for IAP SDKs and lib/ for the IAP API surface.
+    """
+    result: dict = {
+        "likely_present": False,
+        "packages": [],
+        "code_markers": [],
+    }
+
+    pubspec = _read_file(os.path.join(root, "pubspec.yaml")) or ""
+    known_iap_packages = (
+        "in_app_purchase",
+        "purchases_flutter",  # RevenueCat (uses Play Billing underneath)
+        "flutter_inapp_purchase",
+    )
+    found_packages: list[str] = []
+    for dep in known_iap_packages:
+        if re.search(rf"^\s{{2,}}{re.escape(dep)}\s*:", pubspec, re.MULTILINE):
+            found_packages.append(dep)
+    result["packages"] = found_packages
+
+    lib_dir = os.path.join(root, "lib")
+    markers: list[str] = []
+    if os.path.isdir(lib_dir):
+        rx = re.compile(
+            r"\bInAppPurchase\b|queryProductDetails|\bProductDetails\b"
+            r"|purchaseStream|purchaseNonConsumable|purchaseConsumable"
+            r"|\bBillingClient\b|BillingFlowParams|acknowledgePurchase"
+            r"|InAppPurchaseAndroidPlatformAddition"
+        )
+        for dirpath, _dirs, files in os.walk(lib_dir):
+            for fn in files:
+                if not fn.endswith(".dart"):
+                    continue
+                text = _read_file(os.path.join(dirpath, fn))
+                if not text:
+                    continue
+                for m in rx.finditer(text):
+                    marker = m.group(0).strip()
+                    if marker not in markers:
+                        markers.append(marker)
+    result["code_markers"] = markers[:8]
+
+    # IAP likely present if an SDK is declared OR >=2 distinct API markers.
+    result["likely_present"] = bool(found_packages) or len(markers) >= 2
+    return result
+
+
+# Privacy/Data-Safety-relevant SDKs → coarse category. Drives the Data Safety
+# form (§9 D) from on-disk facts instead of asking the user.
+_TRACKING_SDKS = {
+    "sentry_flutter": "crash/diagnostics",
+    "sentry": "crash/diagnostics",
+    "firebase_crashlytics": "crash/diagnostics",
+    "posthog_flutter": "analytics",
+    "posthog": "analytics",
+    "firebase_analytics": "analytics",
+    "amplitude_flutter": "analytics",
+    "mixpanel_flutter": "analytics",
+    "appsflyer_sdk": "att/tracking",
+    "adjust_sdk": "att/tracking",
+}
+
+
+def detect_data_safety_hints(root: str) -> dict:
+    """Drive the Data Safety form (§9 D) from on-disk facts.
+
+    `analytics_tracking` is the factual answer to "what data does this app
+    collect" — use it to fill the Data Safety form instead of asking the user.
+    `account_deletion` is a heuristic scan of lib/ for an in-app deletion flow
+    (Play's account/data-deletion mandate).
+    """
+    pubspec = _read_file(os.path.join(root, "pubspec.yaml")) or ""
+    found: list[dict] = []
+    for dep, category in _TRACKING_SDKS.items():
+        if re.search(rf"^\s{{2,}}{re.escape(dep)}\s*:", pubspec, re.MULTILINE):
+            found.append({"package": dep, "category": category})
+
+    lib_dir = os.path.join(root, "lib")
+    deletion = {"likely_present": False, "hints": []}
+    if os.path.isdir(lib_dir):
+        rx = re.compile(
+            r"admin\.deleteUser|auth\.admin|deleteUser\b|delete_account|deleteAccount"
+            r"|rpc\(['\"]delete|Konto\s+löschen|Account\s+löschen|delete\s+account",
+            re.IGNORECASE,
+        )
+        hits: list[str] = []
+        for dirpath, _dirs, files in os.walk(lib_dir):
+            for fn in files:
+                if not fn.endswith(".dart"):
+                    continue
+                text = _read_file(os.path.join(dirpath, fn))
+                if not text:
+                    continue
+                for m in rx.finditer(text):
+                    marker = m.group(0).strip()
+                    if marker not in hits:
+                        hits.append(marker)
+        deletion["hints"] = hits[:8]
+        deletion["likely_present"] = len(hits) > 0
+
+    return {"analytics_tracking": found, "account_deletion": deletion}
+
+
+def detect_user_generated_content(root: str) -> dict:
+    """Conservative heuristic for UGC → drives the UGC-safety gate (§9 L).
+
+    Requires >=2 distinct content-shaped markers — bare words like "post"/
+    "message" false-positive on "postgres"/"PostgrestException".
+    """
+    lib_dir = os.path.join(root, "lib")
+    result = {"likely_present": False, "has_report_or_block": False}
+    if not os.path.isdir(lib_dir):
+        return result
+    ugc_rx = re.compile(
+        r"create(Post|Comment|Thread|Review)|add(Comment|Post|Reply|Review)"
+        r"|submit(Comment|Post|Review)|post(Comment|Message)|(send|new)Message"
+        r"|chatMessage|userPost|feedItem|forumThread|publishPost|sharePost"
+        r"|comment(Controller|Text|Field)|message(Controller|Composer|Input)")
+    safety_rx = re.compile(
+        r"report(Post|Comment|User|Content|Abuse)|block(User|Author|Account)"
+        r"|flagContent|moderat\w*", re.IGNORECASE)
+    hits: list[str] = []
+    has_safety = False
+    for dirpath, _dirs, files in os.walk(lib_dir):
+        for fn in files:
+            if not fn.endswith(".dart"):
+                continue
+            text = _read_file(os.path.join(dirpath, fn)) or ""
+            for m in ugc_rx.finditer(text):
+                marker = m.group(0).strip()
+                if marker not in hits:
+                    hits.append(marker)
+            if safety_rx.search(text):
+                has_safety = True
+    result["likely_present"] = len(hits) >= 2
+    result["has_report_or_block"] = has_safety
+    return result
+
+
+def detect_push_notifications(root: str) -> dict:
+    """Detect FCM push usage and the Firebase-in-manifest-only stack-fidelity case.
+
+    Per global stack rules: FCM is acceptable as Android push transport only.
+    `firebase_in_manifest_only` flags Firebase wired at the native layer
+    (google-services plugin / google-services.json) without a broad Dart-side
+    Firebase SDK — i.e. transport-only, which is the acceptable pattern.
+    """
+    pubspec = _read_file(os.path.join(root, "pubspec.yaml")) or ""
+    has_firebase_messaging = bool(
+        re.search(r"^\s{2,}firebase_messaging\s*:", pubspec, re.MULTILINE)
+    )
+
+    # google-services.json or Firebase referenced in the Android build.
+    gservices_json = os.path.isfile(
+        os.path.join(root, "android", "app", "google-services.json")
+    )
+    root_gradle = _read_file(_root_build_gradle_path(root) or "") or ""
+    app_gradle = _read_file(_app_build_gradle_path(root) or "") or ""
+    combined_gradle = root_gradle + "\n" + app_gradle
+    gservices_plugin = bool(
+        re.search(r"com\.google\.gsms\.google-services|google-services", combined_gradle)
+    )
+    firebase_gradle_ref = bool(
+        re.search(r"firebase|com\.google\.firebase", combined_gradle)
+    )
+
+    fcm_used = has_firebase_messaging or (gservices_json and gservices_plugin)
+    # Transport-only: Firebase present at the native/build layer but no
+    # firebase_messaging Dart package (or only messaging among Firebase pkgs).
+    broad_firebase_dart = bool(
+        re.search(
+            r"^\s{2,}(firebase_core|firebase_auth|firebase_storage|firebase_database"
+            r"|firestore|cloud_firestore|firebase_analytics|firebase_crashlytics)\s*:",
+            pubspec,
+            re.MULTILINE,
+        )
+    )
+    firebase_in_manifest_only = (
+        (gservices_json or gservices_plugin or firebase_gradle_ref)
+        and not broad_firebase_dart
+    )
+
+    return {
+        "fcm_used": fcm_used,
+        "firebase_in_manifest_only": firebase_in_manifest_only,
+    }
+
+
+def detect_supabase(root: str) -> bool:
+    """Detect Supabase usage (stack-fidelity: Supabase, not Firebase)."""
+    pubspec = _read_file(os.path.join(root, "pubspec.yaml")) or ""
+    return bool(
+        re.search(
+            r"^\s{2,}(supabase_flutter|supabase)\s*:", pubspec, re.MULTILINE
+        )
+    )
+
+
+def build_report(root: str) -> dict:
+    """Assemble the full situation report dict (no I/O to stdout)."""
+    report: dict = {"flutter_android": True}
+    report.update(parse_pubspec(root))
+
+    app_gradle = parse_app_build_gradle(root)
+    report["application_id"] = app_gradle["application_id"]
+    report["version_name"] = report.get("version_name")
+    report["version_code"] = report.get("version_code")
+    report["min_sdk_version"] = app_gradle["min_sdk_version"]
+    report["target_sdk_version"] = app_gradle["target_sdk_version"]
+
+    plugins = parse_gradle_plugins(root)
+    report["gradle"] = {
+        "wrapper_version": parse_gradle_wrapper(root),
+        "agp_version": plugins["agp_version"],
+        "kotlin_version": plugins["kotlin_version"],
+        "java_toolchain": app_gradle["java_toolchain"],
+        "ndk_version": app_gradle["ndk_version"],
+    }
+
+    report["signing"] = detect_signing(root)
+    report["icon_set"] = check_icon_densities(root)
+    report["permissions"] = detect_permissions(root)
+    report["credentials"] = discover_credentials(root)
+    report["fastlane_lanes"] = detect_fastlane_lanes(root)
+    report["play_billing"] = detect_play_billing(root)
+    report["data_safety_hints"] = detect_data_safety_hints(root)
+    report["user_generated_content"] = detect_user_generated_content(root)
+    report["push_notifications"] = detect_push_notifications(root)
+    report["supabase_used"] = detect_supabase(root)
+    return report
+
+
+def main() -> int:
+    if len(sys.argv) > 2:
+        print(
+            f"Usage: {os.path.basename(sys.argv[0])} [<repo-path>]",
+            file=sys.stderr,
+        )
+        return 2
+
+    root = os.path.abspath(sys.argv[1] if len(sys.argv) == 2 else os.getcwd())
+
+    is_flutter_android, reason = detect_flutter_android(root)
+    if not is_flutter_android:
+        print(
+            f"WARNING: Not a Flutter/Android project — {reason}. "
+            "ship-to-playstore requires a Flutter project with an Android target.",
+            file=sys.stderr,
+        )
+        return 1
+
+    print(json.dumps(build_report(root), indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
