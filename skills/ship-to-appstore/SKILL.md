@@ -1,6 +1,7 @@
 ---
 name: ship-to-appstore
 description: "Guide a Flutter solo-dev through an Apple App Store release and manage App Store Connect (ASC) via bundled scripts: status, IAP readiness, screenshot upload, submit, publish. Use for: App Store Release, App einreichen, ASC-Status, IAP prüfen."
+disable-model-invocation: true
 ---
 
 # Ship to App Store

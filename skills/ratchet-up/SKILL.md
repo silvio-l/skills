@@ -1,6 +1,7 @@
 ---
 name: ratchet-up
 description: "Context-safe agentic loop that ratchets a feature's issues forward — discovers ready issues, respects blocked-by deps, dispatches workers and read-only reviewers, gates format/analyze, commits approved. Usage: /ratchet-up <feature-path> [max-iter]"
+disable-model-invocation: true
 metadata:
   argument-hint: "<feature-path> [max-iter]"
 ---

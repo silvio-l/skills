@@ -85,8 +85,16 @@ For guidance on what makes a good skill (description shape, trigger phrases, sup
 - `name` — required. Lowercase, hyphens only. MUST match the directory name.
 - `description` — required. One paragraph, **≤ 250 characters. This is a hard cap — never exceed it.** The description *is* the auto-invoke router: it must carry the core trigger phrases ("Use when …") and nothing more. Push every detail (modes, flags, tool lists, examples) into the body. Don't overcorrect into terseness either — too short and the model can't tell when to load the skill; aim for ~200–250 chars with the essential triggers intact. Count characters before committing (`python3 -c 'print(len(open("…").read()))'` on the extracted value, or just eyeball against an existing in-cap skill).
 - `metadata.*` — optional. Used for extra hints (e.g. `metadata.argument-hint` in `ratchet-up`).
+- `disable-model-invocation: true` — optional. Makes the skill **user-invoked only** (a procedure) and removes its `description` from the model's auto-invoke context entirely, so it costs zero ambient tokens. Set it on skills you always trigger deliberately by slash command and would never want the model to auto-load — e.g. heavyweight, stateful, or argument-driven controllers (`ratchet-up`, `ship-to-appstore`, `ship-to-playstore`). **Do NOT set it** on skills whose value is auto-discovery via natural-language triggers (`humanize-text`, `figma-to-flutter`, `openai-image`, `full-quality-scan`, `seo-audit`, `to-roadmap`) — disabling those defeats carve-out #1 in "Authoring language". The test: *would the model ever usefully load this without the user typing the slash command?* If no → disable.
 
 Frontmatter is currently checked by hand. If the skill count grows, add a small lint script and a CI job.
+
+## Harness hygiene (context discipline)
+
+Every model-invoked skill pre-loads its `description` into the system prompt at startup ([Anthropic — Agent Skills](https://www.anthropic.com/engineering/equipping-agents-for-the-real-world-with-agent-skills)); a large always-on skill set is real context cost and degrades routing ("context rot"). Two ongoing practices keep the harness lean:
+
+1. **Invocation-type discipline** — classify every new skill as a *procedure* (user-invoked; prefer `disable-model-invocation: true`) or an *ability* (model-invoked; description stays in context). Default to procedure unless auto-discovery is the point. See the `disable-model-invocation` rule above.
+2. **Periodic blank-slate audit** — run `context-optimization-audit` **in a fresh session** (not at the tail of a long one — a polluted context mismeasures the baseline) to catch description leak, redundant globally-installed skill clusters, and stale instructions. Prefer project-scoped installs over global (`-g`) for skills only relevant to one project type.
 
 ## Authoring language (HARD RULE)
 
