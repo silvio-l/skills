@@ -1006,28 +1006,191 @@ Append to the status note:
 
 ## 3.8 — Play Policy Reject / Suspension Handling
 
-A rejection or suspension is a new feedback loop, not a process abort.
+A rejection or suspension is a new feedback loop, not a process abort. The correction loop uses
+the **same state machine, status note, and resume mechanic** as the release path (§3.2–§3.6) —
+one step at a time, one confirmation per action, no batching.
 
-### When Play rejects or suspends:
+---
 
-1. Policy decision text is **not reliably API-readable** — the user must paste it from
-   Play Console → Policy status → Policy issues, or from the email notification.
-2. Apply `pre-submit-verification.md` Gate C to classify the reason (slice 05).
-3. Build a compact correction checklist (same one-step-at-a-time mechanic).
-4. Log in status note: `{timestamp} ✗ REJECTED — policy: {name} — correction plan: {N} steps`
+### 3.8.0 — Entry: Three Modes
 
-### Reject/suspension class table
+Play feedback arrives in one of three structurally distinct modes. Classify before acting.
 
-| Class | Play policy cited | Correction |
+| Mode | What happened | Recovery path |
 |---|---|---|
-| Minimum Functionality | *Minimum Functionality* | Fix crashes/placeholders; rebuild; re-upload to same track |
-| Permissions | *Permissions* | Remove over-declared permissions from `AndroidManifest.xml`; rebuild |
-| Payments / external steering | *Payments* | Remove links to external payment; use Play Billing API |
-| Data Safety mismatch | *Privacy and Security / User Data* | Correct Data Safety form; republish |
-| Over-broad permissions | *Personal and Sensitive User Information* | Narrow permission set in manifest |
-| Store listing misleading | *Store Listing and Promotional Content* | Update title/description/screenshots |
-| Subscription disclosure | *Subscriptions* | Show price/period/terms/privacy on paywall |
-| App suspended | Varies | Whole app pulled; reinstatement is a separate Play Console flow |
+| **Reject** | A specific release was rejected before going live. The live version on the target track (if any) is unaffected. Policy violation is cited by name. | Fix → rebuild → re-upload to the **same track** → recommit. No appeal form needed. |
+| **App Suspension** | The **whole app** is pulled — all tracks, including production. More serious than a reject; new installs and store visibility are removed. | Reinstatement is a **separate Play Console flow** (see §3.8.4). Fix the violation, then submit a formal reinstatement request — a re-upload alone does **not** reinstate. |
+| **Post-hoc policy action** | A release that shipped immediately (bypassing review) was flagged later by automated checks or a delayed policy audit. May be a reject of the live version or a suspension. | Treat as reject or suspend depending on what the action text says. Gate C (§3.8.1) classifies the pasted text to determine which. |
+
+**Key structural fact:** Policy decision text is **not reliably API-readable** — it appears in
+Play Console → Policy status → Policy issues, or in an email notification. The agent cannot
+query it.
+
+**Instruction to the user:**
+
+> "Play Console's policy decision text is not accessible via the API. Please paste the full
+> policy notice here (from Play Console → Policy status → Policy issues, or the email you
+> received) so I can classify the violation and build a correction plan."
+
+Log in status note: `{timestamp} ✗ POLICY ACTION — mode: {reject|suspend|post-hoc} — user pasting decision text`
+
+---
+
+### 3.8.1 — Gate C: Classify the Pasted Text
+
+After the user pastes the policy decision text, apply Gate C from `pre-submit-verification.md`
+(the reject-handler-only gate). The four classification steps are in that file; in summary:
+
+1. **Identify the cited policy name(s)** — e.g. *Minimum Functionality*, *Payments*,
+   *Permissions*, *User Generated Content*, *Privacy and Security / User Data*,
+   *Store Listing and Promotional Content*, *Subscriptions*, *Device and Network Abuse*.
+   There may be multiple co-cited policies.
+2. **Determine the mode** (§3.8.0): is this a release reject, a suspension, or a post-hoc action?
+3. **Map each cited policy → cause → correction** via the reject-class table (§3.8.2 below).
+4. **Strip boilerplate.** Policy emails carry generic "review our policies" language. Focus on
+   the specific cited policy name and any reviewer-provided example. Do not treat boilerplate
+   as a concrete finding.
+
+Log result: `{timestamp} ✗ REJECTED — policies: {names} — mode: {reject|suspend|post-hoc} — {N} correction steps`
+
+---
+
+### 3.8.2 — Reject-Class Table
+
+Maps Play policy names to their most common causes and the required correction action.
+
+| Play policy cited | Common cause(s) | Correction |
+|---|---|---|
+| *Minimum Functionality* | Crashes on launch; placeholder / lorem-ipsum screens; core feature broken or missing; blank or skeleton UI | Fix crash / remove placeholder / implement the claimed feature; rebuild + re-upload to same track |
+| *Functionality* / *Misleading claims* | Store listing describes a feature absent, broken, or non-functional in the binary; claimed feature fails during review | Update store listing to match actual features, **or** implement the missing feature; rebuild + re-upload |
+| *Permissions* | Over-declared permission with no apparent use (`<uses-permission>` in manifest but no plugin or code path needs it) | Remove the excess permission from `AndroidManifest.xml`; rebuild + re-upload (no store-listing change needed) |
+| *Personal and Sensitive User Information* | Permission declared for sensitive data (contacts, location, microphone, camera) beyond what app functionality requires; location precision higher than needed | Narrow the permission (e.g. `ACCESS_FINE_LOCATION` → `ACCESS_COARSE_LOCATION`; remove `READ_CONTACTS`); rebuild + re-upload |
+| *Payments* — external steering | Link or CTA directs users to buy digital goods / subscribe outside the app (web checkout, "manage on our website") | Remove or replace with in-app Play Billing flow; rebuild + re-upload |
+| *Payments* — Play Billing not used | Digital goods or subscriptions sold via non-Play payment method (Stripe, PayPal, etc.) | Migrate to `in_app_purchase` / Play Billing Library; rebuild + re-upload |
+| *Subscriptions* | Paywall does not disclose price, period, or included benefits; no Privacy Policy / Terms link on paywall | Add price, period, benefits, and tappable PP + ToS links to paywall UI; rebuild + re-upload |
+| *Privacy and Security* / *User Data* — Data Safety mismatch | Data Safety form does not match what the binary actually collects or shares; data-deletion field missing when accounts exist | Correct the Data Safety form in Play Console → Policy → Data Safety; republish form (no rebuild needed unless the collection itself changed) |
+| *User Data* — account/data deletion | App creates accounts but in-app deletion does not reach a server-side delete; web deletion URL missing from Play Console | Wire the `delete_account` Supabase RPC (see Step 6a); set web deletion URL in Play Console → Policy → Data Safety → Account deletion section |
+| *Store Listing and Promotional Content* / *Misleading claims* | Price references in title, short description, or screenshot overlays ("Free", discount text, currency amounts); listing copy inconsistent with actual app experience | Reword metadata to remove price/discount references; regenerate and re-upload screenshots; update listing via Play Console |
+| *User Generated Content* | App has UGC capability but lacks in-app report + block controls; missing Terms of Service with zero-tolerance clause | Add report/block UI; link ToS from store listing; rebuild + re-upload |
+| *Device and Network Abuse* | App requests admin/root/accessibility privileges it does not need; code path classifiable as spyware, ad fraud, or network abuse | Remove the privilege request or abusive code path; rebuild + re-upload; may require a formal policy declaration in Play Console |
+| App Suspension (any policy) | Whole-app suspension for repeated violations or a severe policy breach | See §3.8.4 — reinstatement is a separate Play Console flow; do not re-upload without completing the reinstatement process |
+
+---
+
+### 3.8.3 — Correction Loop (one-step-at-a-time)
+
+After Gate C classifies the rejection, build a compact correction checklist from the policy-class
+row(s) in §3.8.2. Then drive corrections using the **same loop mechanic as the release path (§3.2)**:
+
+```
+WHILE correction steps remain:
+    Present current correction step (§3.3 template adapted for reject context)
+    Execute any safely-automatable part
+    Prompt: "Let me know when step N is done, or 'stuck here: <error>' if you hit a problem."
+    WAIT for user reply
+
+    CASE user reply:
+        "done" / "next" / "✓"
+            → Mark step ✓ in status note
+            → Advance to next correction step
+
+        "stuck here: <error>" / pastes error output
+            → Run stuck handler (§3.5)
+            → Re-present current step; do not advance until user confirms fix
+
+        "skip" / "not applicable"
+            → Mark step ✓ (skipped) in status note
+            → Advance to next step
+
+        "pause" / "stop"
+            → Write status note update
+            → Print resume instructions (§3.6 adapted)
+            → Stop
+
+ALL correction steps ✓:
+    → Proceed to §3.8.5 (resubmit) or §3.8.4 (reinstatement if suspension)
+```
+
+**Never** advance to resubmit or reinstatement before all correction steps are confirmed.
+
+**Correction step presentation template:**
+
+```
+## Correction Step N — <Policy> — <Title>
+
+**Policy cited:** <name>
+**Cause:** <one sentence>
+**Fix:** <one sentence>
+**Mode:** <"Automatable" | "Partially automatable" | "Manual in Play Console">
+
+<Commands or Console path>
+
+---
+Let me know when step N is done, or "stuck here: <description>" if you hit a problem.
+```
+
+**Status-note entries for the correction loop:**
+
+```
+{timestamp} ✗ REJECTED — policy: {name} — mode: {reject|suspend|post-hoc} — {N} correction steps
+{timestamp} ✓ Correction 1 — removed ACCESS_FINE_LOCATION from AndroidManifest.xml
+{timestamp} ✓ Correction 2 — rebuilt AAB — versionCode 43
+{timestamp} □ Correction 3 — re-upload to track internal (pending --yes upload)
+```
+
+**Resume after pause:** the same status-note resume mechanic (§3.4) applies. Re-invoking the
+skill reads the last few status-note lines, detects an open correction step, and resumes from
+there without re-running Phase 0/1/2. Resume prompt:
+
+> "Resuming rejection handling for policy {name}. Last status note: '{last line}'. Continue
+> from Correction Step N — {title}?"
+
+---
+
+### 3.8.4 — App Suspension: Separate Reinstatement Flow
+
+When Gate C classifies the action as an **app suspension** (mode = `suspend`), a re-upload
+alone does not reinstate the app. The reinstatement flow is:
+
+1. **Fix the violation.** Use the correction loop (§3.8.3) to address every cited policy.
+2. **Submit a reinstatement request** in Play Console → Policy status → Policy issues →
+   "Submit an appeal" (the exact UI label may vary; Phase-1 freshness research confirms the
+   current path). This is a **manual Play Console step** — not accessible via the Play
+   Developer API.
+3. **Wait for the reinstatement decision.** Google reviews the appeal; duration varies and is
+   Phase-1 research, not training memory. Do not assert a timeframe from training data.
+4. **On reinstatement approval:** the app is restored on all tracks; re-upload any corrected
+   release via the standard release loop starting at Step 4 (§3.1).
+5. **On denial:** a second appeal or additional fixes may be required. Log in status note and
+   surface the denial text for re-classification via Gate C.
+
+Log in status note:
+```
+{timestamp} ⏳ SUSPENSION — corrections complete — appeal submitted; awaiting reinstatement decision
+```
+
+**Do not attempt to re-upload during a suspension appeal** — the app record may not accept
+new uploads while suspended. Confirm in Play Console → Releases before attempting.
+
+---
+
+### 3.8.5 — Resubmit After Correction (Reject Only)
+
+When all correction steps are confirmed done and Gate C determined the mode as **reject** (not
+suspension):
+
+1. Confirm the corrected `versionCode` is greater than the rejected release's `versionCode`.
+2. Rebuild the AAB: `flutter build appbundle --release`.
+3. Re-run the release loop from **Step 4** (Upload AAB) on the **same track** as the rejected
+   release — do not change tracks unless the correction plan explicitly requires it.
+4. Re-run any pre-submit gates from Step 10c that are relevant to the cited policies to
+   confirm the correction is complete.
+5. Commit the corrected release (`--yes upload --yes release --yes commit`).
+
+Log in status note:
+```
+{timestamp} ↩ RESUBMIT — versionCode {N} → track {track} — policies addressed: {names}
+```
 
 ---
 

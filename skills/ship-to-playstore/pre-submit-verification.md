@@ -542,18 +542,62 @@ Any `⚠` blocks Step 11.
 
 ## Gate C — Reject-text classification (reject handler only — §3.8)
 
-Not a pre-submit gate — used in Phase 3 §3.8 when a rejection or policy action arrives. Policy
-decision text is **not reliably API-readable** (Play Console → Policy status → Policy issues, or
-the emailed notification); the user must paste it. Then apply LLM judgement:
+**Scope: reject handler only.** Not a pre-submit gate — loaded by Phase 3 §3.8 when a
+rejection, suspension, or post-hoc policy action arrives. Policy decision text is **not
+reliably API-readable** (Play Console → Policy status → Policy issues, or the emailed
+notification); the user must paste it.
 
-1. **Identify the cited policy name(s)** (e.g. *Minimum Functionality*, *Permissions*, *Payments*,
-   *User Generated Content*, *Privacy and Security*, *Subscriptions*) and whether it is single- or
-   multi-cause.
-2. **Map each cause to the artifact that fixes it** via the §3.8.2 reject-class table in
-   `phase3-release-loop.md`.
-3. **Separate actionable text from boilerplate.** Some rejection emails carry generic "review the
-   policy" language that does not identify the exact violation — do not treat boilerplate as a
-   concrete finding. Focus on the specific cited policy and any example the reviewer provides.
-4. **For app suspensions** (whole-app pull, not just a release reject): the fix and reinstatement
-   flow differs — a suspension requires a formal appeal or policy declaration in Play Console, not
-   just a re-upload. Do not assume the same correction steps as a single-release reject.
+**Entry prompt (the agent delivers this when §3.8 is triggered):**
+
+> "Play Console's policy decision text is not accessible via the API. Please paste the full
+> policy notice here (from Play Console → Policy status → Policy issues, or the email you
+> received) so I can classify the violation and build a correction plan."
+
+Then apply LLM judgement across the four steps below:
+
+**Step C.1 — Determine the mode** (three structural possibilities — see §3.8.0 in
+`phase3-release-loop.md`):
+
+- **Reject** — a specific release was rejected; the live version is unaffected. Key signals:
+  "your release has been rejected", "removed from review", a cited versionCode or track name.
+- **App Suspension** — the whole app is pulled. Key signals: "your app has been suspended",
+  "removed from Google Play", references to all tracks being affected. Reinstatement requires
+  a formal appeal (§3.8.4) — a re-upload alone does **not** reinstate.
+- **Post-hoc policy action** — a shipped release was flagged after going live. Key signals:
+  "we've detected a policy violation in your published app", "your app has been removed from
+  the store" for a version that previously passed review. Treat as reject or suspend based
+  on whether a single release or the whole app is affected.
+
+**Step C.2 — Identify the cited policy name(s)** — e.g. *Minimum Functionality*,
+*Permissions*, *Personal and Sensitive User Information*, *Payments*, *Subscriptions*,
+*User Generated Content*, *Privacy and Security*, *User Data*, *Store Listing and Promotional
+Content*, *Misleading claims*, *Functionality*, *Device and Network Abuse*. There may be
+multiple co-cited policies in a single notice.
+
+**Step C.3 — Map each cited policy → cause → correction** via the §3.8.2 reject-class table
+in `phase3-release-loop.md`. Each row maps a policy name to its common cause and the required
+correction action. Build a numbered correction checklist; drive it one step at a time using
+the §3.8.3 correction loop (same state machine and status-note resume mechanic as the release
+path).
+
+**Step C.4 — Strip boilerplate.** Policy notices carry generic "review our policies" language
+that does not identify the exact violation. Do not treat boilerplate as a concrete finding.
+Focus on the specific cited policy name and any example the reviewer provides (e.g. a quoted
+string, a screenshot description, a specific permission name).
+
+**Classification output format:**
+
+```
+=== Gate C — Reject-text classification ===
+
+Mode            : {reject | suspend | post-hoc}
+Policies cited  : {comma-separated list}
+Correction steps:
+  1. <policy name> — <cause> — <correction action>
+  2. …
+
+Suspension note : {only if mode=suspend} Reinstatement required via Play Console appeal (§3.8.4).
+                  Do not re-upload until reinstatement is approved.
+```
+
+Log in status note: `{timestamp} Gate C — mode: {mode} — policies: {names} — {N} corrections`
