@@ -693,6 +693,83 @@ The agent confirms the track and rollout fraction with the user before Step 11.
 
 ---
 
+### Step 10c — Pre-Submit Verification Gates
+
+**Mode:** Automatable — agent loads `pre-submit-verification.md` and runs all in-scope gates.
+
+**What:** Run the full set of Play Policy judgement gates before committing the release. These catch
+the reject reasons that are **not** expressible as an API field — price references in listings,
+misleading feature claims, Data Safety form accuracy, permission over-declaration, subscription
+disclosure, external-payment steering, URL liveness, demo-account access, account-deletion depth,
+UGC controls, and placeholder content. Gates are scoped to Phase 0 facts — only gates relevant to
+this app's profile run. No gate interrogates the user; each reads from the Phase 0 report or the
+codebase directly.
+
+**Gate selection (driven by Phase 0 report):**
+
+| Gate | Play policy | Runs when |
+|---|---|---|
+| A — price references | *Store Listing and Promotional Content* | always |
+| B — listing claims vs code | *Functionality* / *Misleading claims* | always |
+| D — Data Safety form + deletion field | *Privacy and Security* / *User Data* | always |
+| E — permissions: declared, used, not excessive | *Permissions* | always (`permissions` always present) |
+| G — subscription disclosure | *Subscriptions* / *Payments* | `play_billing.likely_present = true` + subscriptions detected |
+| H — no external payment steering | *Payments* | `play_billing.likely_present = true` |
+| I — Privacy/Support URL liveness | *Privacy and Security* | always (uses `WebFetch`) |
+| J — demo account in review notes | *Functionality* | when login gates content |
+| K — account-deletion depth + web URL | *User Data* | `data_safety_hints.account_deletion.likely_present = true` |
+| L — UGC safety controls | *User Generated Content* | `user_generated_content.likely_present = true` |
+| M — placeholder / minimum functionality | *Minimum Functionality* | always |
+
+Gate F is absent — Sign in with Apple is Apple-only; no Android equivalent mandate (see
+`pre-submit-verification.md`). Gate C runs only in the reject handler (§3.8), not here.
+
+**Agent executes:**
+
+Load `~/.claude/skills/ship-to-playstore/pre-submit-verification.md`. Read the Phase 0 report
+at `.scratch/ship-to-playstore/phase0-report.json` to identify which gates are in scope. Run each
+in-scope gate in order (A → B → D → E → G → H → I → J → K → L → M) and report a tri-state verdict
+for each:
+
+```
+✓ verified         — gate passed, no issues found
+? cannot-verify    — gate cannot be mechanically resolved; user must confirm manually
+□ confirmed-open   — gate found a concrete issue; Step 11 is blocked until resolved
+```
+
+Any `□ confirmed-open` verdict is a **hard blocker** — do not advance to Step 11 until the user
+confirms the issue is resolved. `? cannot-verify` items are non-blocking but must be acknowledged
+by the user before advancing.
+
+**Summary block format:**
+
+```
+=== Pre-Submit Verification — Play Policy Gates ===
+
+A — price references:            ✓ verified
+B — listing claims:              ✓ verified
+D — Data Safety form:            □ confirmed-open  ← sentry_flutter not declared in form
+E — permissions:                 ✓ verified
+G — subscription disclosure:     (skipped — play_billing.likely_present = false)
+H — external payment steering:   (skipped — play_billing.likely_present = false)
+I — URL liveness:                ✓ verified
+J — demo account:                ? cannot-verify   ← confirm App access note in Play Console
+K — account-deletion depth:      □ confirmed-open  ← web deletion URL not set in Play Console
+L — UGC controls:                (skipped — user_generated_content.likely_present = false)
+M — placeholder / completeness:  ✓ verified
+
+Blockers (□): 2 — resolve before Step 11.
+Cannot-verify (?): 1 — acknowledge before Step 11.
+```
+
+Log in status note: `{timestamp} □ Step 10c — pre-submit gates: {N} open, {M} cannot-verify`
+
+---
+Let me know when all gates are resolved (✓ or ? acknowledged), or "stuck here: Gate <X> — <issue>"
+if a gate needs help resolving.
+
+---
+
 ### Step 11 — Release to Track + Commit
 
 **Mode:** Automatable with explicit opt-in — each mutation is a separate `--yes`.
