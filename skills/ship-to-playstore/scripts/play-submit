@@ -9,6 +9,7 @@ passed explicitly. Each distinct mutation kind requires its own --yes:
   --yes listing     → edits.listings (check listing text; guide assets via Console — Step 5)
   --yes data-safety → derive Data Safety declarations from Phase 0 + guide Console entry — Step 6
   --yes release     → edits.tracks.update (assign the bundle to the target track)
+  --yes publish-iap → publish pending IAP/subscription products (edit-free — Step 10b)
   --yes commit      → edits.commit (publish all staged mutations atomically)
 
 Nothing is live until edits.commit. An uncommitted edit changes nothing. The
@@ -26,7 +27,8 @@ Prerequisites: Python 3 (stdlib only) + `openssl` on PATH (RS256 signing).
 Usage:
     play-submit <package> --aab <path> --track <track>
                 [--rollout <fraction>]
-                [--yes upload] [--yes release] [--yes commit]
+                [--yes upload] [--yes listing] [--yes data-safety]
+                [--yes release] [--yes publish-iap] [--yes commit]
                 [--version-code <int>]
                 [--report <phase0.json>]
                 [--service-account <path>]
@@ -43,7 +45,8 @@ Arguments:
                        --track production. Conventional first value: 0.01 (1%).
                        Recommend Internal Testing first, then promote up the
                        track ladder.
-    --yes <kind>       Approve a specific mutation: upload | release | commit.
+    --yes <kind>       Approve a specific mutation: upload | listing |
+                       data-safety | release | publish-iap | commit.
                        Each kind is a SEPARATE checkpoint, never batched.
                        Without any --yes the script is a read-only dry-run.
     --version-code <n> Expected versionCode (for collision check). Falls back
@@ -124,7 +127,8 @@ def build_jwt_assertion_segments(client_email: str, scope: str, audience: str,
 def parse_yes_flags(yes_list: list | None) -> frozenset:
     """Parse --yes flag values into a frozenset of approved mutation kinds.
 
-    Valid kinds: upload | release | commit. Unknown values are warned and
+    Valid kinds: upload | listing | data-safety | release | publish-iap |
+    commit. Unknown values are warned and
     ignored — they are not a usage error (forward-compat posture). Unknown
     kinds cannot unlock any mutation.
     """
@@ -1298,8 +1302,8 @@ def main(argv: list | None = None) -> int:
     )
     parser.add_argument(
         "--yes", action="append", dest="yes", metavar="KIND",
-        help="Approve a mutation: upload | release | commit. Repeat per kind. "
-             "Without any --yes, dry-run only.",
+        help="Approve a mutation: upload | listing | data-safety | release | "
+             "publish-iap | commit. Repeat per kind. Without any --yes, dry-run only.",
     )
     parser.add_argument(
         "--version-code", dest="version_code", type=int, default=None,

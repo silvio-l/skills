@@ -93,22 +93,26 @@ openssl version
 
 Lane-first, mirroring the iOS posture (OQ2 — locked):
 
-| Priority | Strategy | When |
+Strategy letters are the fixed PRD §9.3 identifiers (A=raw Play API, B=Fastlane, C=bundletool,
+D=Web UI) — matching `select_strategy()` and the situation-overview legend. The selection is
+**lane-first**: when a qualifying Fastlane lane is present, prefer **B** over **A**.
+
+| Strategy | How | When |
 |---|---|---|
-| **A — Fastlane `supply`/`play_*` (preferred)** | Run `bundle exec fastlane run supply --skip_upload_*` for a dry-run read | Phase 0 `fastlane_lanes` contains `supply` or any lane starting with `play_` |
-| **B — `scripts/play-status` (raw Play API)** | Mint an OAuth2 token from service-account JSON; GET tracks/IAP/listings/appDetails | No qualifying Fastlane lane found |
+| **A — `scripts/play-status` (raw Play API)** | Mint an OAuth2 token from service-account JSON; GET tracks/IAP/listings/appDetails | Default read path; selected when no qualifying Fastlane lane is found |
+| **B — Fastlane `supply`/`play_*` (lane-first — preferred when present)** | Run `bundle exec fastlane run supply --skip_upload_*` for a dry-run read | Phase 0 `fastlane_lanes` contains `supply` or any lane starting with `play_` |
 | **C — `bundletool` / `aapt2` local** | AAB inspection only — `versionCode`, permissions, min/targetSdk | No credentials at all; local AAB available |
 | **D — Play Console web UI guidance** | Pointer to the Console path for each check | Always-available fallback |
 
 `scripts/play-status` reports the recommended strategy letter in the situation overview regardless
-of which path the agent chose. When Strategy A is used (Fastlane lane), `play-status` is still
+of which path the agent chose. When Strategy B is used (Fastlane lane), `play-status` is still
 available for supplemental checks; the strategy letter in the overview reflects the primary read
 path.
 
 **OQ2 decision:** Fastlane `supply`/`play_*` is preferred when present because it may cover auth
 and state management via `Supplyfile` / `Appfile` without requiring the agent to handle the
 service-account JSON separately. If the Fastlane lane exists but cannot authenticate (e.g. the
-`Appfile` references a JSON that is absent), fall back to Strategy B.
+`Appfile` references a JSON that is absent), fall back to Strategy A.
 
 ---
 
