@@ -9,22 +9,22 @@ You are the **orchestrator** for a Google Play Store release. You inspect, resea
 to production autonomously. Every mutation (AAB upload, track release, staged rollout, production commit, IAP publish,
 Data Safety publish) is a discrete opt-in checkpoint the user must explicitly approve. This is a guided, one-step-at-a-time loop.
 
-> **Slice 1 status — skeleton.** This skill currently delivers Phase 0 (repo introspection) only. Phases 1–3, the Play
-> API scripts, and pre-submit gates land in later slices. After Phase 0 interpretation, **halt here** — do not invent
-> Phase 1+ behaviour from training memory.
+> **Slice 2 status.** This skill delivers Phase 0 (repo introspection) and Phase 1 (freshness research). Phases 2–3,
+> the Play API scripts, and pre-submit gates land in later slices. After Phase 1, **halt** — do not improvise Phase 2+
+> behaviour from training memory.
 
 ## Prerequisites
 
 | Tool | Required for |
 |---|---|
-| `WebSearch` | Phase 1 — live search for current Play requirements (later slice) |
-| `WebFetch` | Phase 1 — fetching canonical developer.android.com / play.google.com pages (later slice) |
+| `WebSearch` | Phase 1 — live search for current Play requirements |
+| `WebFetch` | Phase 1 — fetching canonical developer.android.com / play.google.com pages |
 | Python 3 | Phase 0 — runs `scripts/phase0-introspect` (stdlib only) |
 | `flutter`, `java`, `gradle` | Phase 2+ build steps (later slice) |
 
-Phase 1 (freshness research) is not wired yet. Until it lands, training-memory Play requirements must never be
-substituted for live research — if a later-phase question needs current SDK floors or policy clauses, tell the user
-that Phase 1 is required and halt.
+Phase 1 (freshness research) is wired in this slice. It requires `WebSearch` and `WebFetch` — if either is
+unavailable in the session, the skill halts after Phase 0 and tells the user live web access is required (training-memory
+Play requirements must never be substituted). Phase 2+ lands later; until then, halt after Phase 1.
 
 The user invokes this skill with `/ship-to-playstore`, or it auto-invokes on German triggers like
 *"Play Store Release"*, *"App einreichen"*, *"Play-Status"*, *"Play Billing prüfen"*.
@@ -35,7 +35,7 @@ The user invokes this skill with `/ship-to-playstore`, or it auto-invokes on Ger
 |---|---|---|
 | Phase 0 — repo introspection (report interpretation) | [phase0-introspect.md](phase0-introspect.md) | ✅ this slice |
 | Phase 0 introspection script | [scripts/phase0-introspect](scripts/phase0-introspect) | ✅ this slice |
-| Phase 1 — freshness research (current Play requirements) | `phase1-research.md` | ⏳ later slice — halt here |
+| Phase 1 — freshness research (current Play requirements) | [phase1-research.md](phase1-research.md) | ✅ this slice |
 | Phase 2 — Play Console status + credential discovery | `phase2-play-status.md` | ⏳ later slice — halt here |
 | Phase 3 — guided release loop | `phase3-release-loop.md` | ⏳ later slice — halt here |
 | Play Developer API reference | `play-api-reference.md` | ⏳ later slice |
@@ -52,7 +52,7 @@ Inherited from `ship-to-appstore`, with the Play deltas marked **(Play delta)**:
 
 - **One step at a time, feedback loop.** Present one release step, explain it, wait for the user's response.
 - **Freshness first.** Never recite Play/Google requirements from training memory — always research current guidance
-  in-session (Phase 1, later slice).
+  in-session (Phase 1).
 - **Abort cleanly on non-Flutter/non-Android repos.** Phase 0 detects Flutter + Android; if either is absent, stop.
 - **API power + opt-in gates (Play delta, PRD §4.1).** Play allows the entire release flow via the API (no
   Apple-style human submit gate). The skill exercises full API power, but every mutation is a discrete opt-in
@@ -93,7 +93,13 @@ When invoked:
    `ship-to-appstore` for iOS.
 3. If exit code 0: read [phase0-introspect.md](phase0-introspect.md) to interpret the JSON situation report and
    present findings to the user.
-4. **Halt** — Phase 1 (freshness research) lands in slice 02. Do not proceed or improvise later-phase behaviour.
+4. **Phase 1 freshness research.** Check that `WebSearch` **and** `WebFetch` are available in the active session.
+   - If either is unavailable: **halt** and tell the user "Live web access is required for freshness research.
+     Training-memory Google Play requirements must not be substituted — please re-run this skill in a session with
+     web search enabled." Do not proceed, do not recite Play requirements from memory.
+   - If both are available: read [phase1-research.md](phase1-research.md) and execute the nine-domain freshness
+     research protocol. Present the Freshness Report and the Phase 0 cross-reference (blockers / warnings), then
+     **halt** — Phase 2 lands in a later slice.
 
 ```bash
 SCRIPT=~/.claude/skills/ship-to-playstore/scripts/phase0-introspect
