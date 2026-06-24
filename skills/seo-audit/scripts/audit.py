@@ -31,6 +31,7 @@ sys.path.insert(0, HERE)
 import inventory as INV  # noqa: E402
 import glossary_parser as GP  # noqa: E402
 import brand_scan as BS  # noqa: E402
+import geo_scan as GS  # noqa: E402
 import synthesis as SY  # noqa: E402
 from probes import probe as PROBE  # noqa: E402
 from push import push as PUSH  # noqa: E402
@@ -399,7 +400,20 @@ def run(args: argparse.Namespace) -> int:
             f.setdefault("track", "technical")
             findings.append(f)
 
-    # External probes — slice 02. Run only when at least one URL is
+    # GEO/AEO phase — slice 02. Runs fully offline over built HTML.
+    # Reduced to fast subset when --quick is passed.
+    if os.path.isdir(dist):
+        for f in GS.scan_directory(dist, quick=args.quick):
+            f = dict(f)
+            f.setdefault("category", "geo")
+            f.setdefault("severity", "med")
+            f.setdefault("user_impact", 2)
+            f.setdefault("fix_effort", 2)
+            f.setdefault("dimension", "geo")
+            f.setdefault("track", "strategic")
+            findings.append(f)
+
+    # External probes — slice 03. Run only when at least one URL is
     # supplied; the rest of the pipeline is offline-friendly.
     if args.url:
         probe_findings = PROBE.run(args.url, quick=args.quick) or []
