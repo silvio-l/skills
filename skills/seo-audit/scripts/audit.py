@@ -30,6 +30,7 @@ sys.path.insert(0, HERE)
 
 import inventory as INV  # noqa: E402
 import glossary_parser as GP  # noqa: E402
+import positioning_brief as PB  # noqa: E402
 import brand_scan as BS  # noqa: E402
 import geo_scan as GS  # noqa: E402
 import schema_scan as SS  # noqa: E402
@@ -389,6 +390,10 @@ def run(args: argparse.Namespace) -> int:
     inv = INV.inventory(root)
     glossary = GP.load_glossary_from_repo(root)
 
+    # Load positioning brief BEFORE any finding-producing phase.
+    # The brief NEVER touches the Finding list — it only flows into report ctx.
+    brief = PB.load_brief(getattr(args, "brief", None), root)
+
     findings = []
     if os.path.isdir(dist):
         for f in BS.scan_directory(dist, glossary):
@@ -460,6 +465,13 @@ def run(args: argparse.Namespace) -> int:
         "diff_section": _render_diff(prior),
         "recommendations": _render_recommendations(synth),
         "generator_version": GENERATOR_VERSION,
+        # Positioning-brief context — purely additive; never alters findings.
+        "brief_status": PB.render_status(brief),
+        "brief_content": (
+            brief["content"]
+            if brief["content"]
+            else "_Kein Positioning-Brief geladen — Empfehlungen ohne Marken-Kontext._"
+        ),
     }
 
     rendered = _render(_load_template(), ctx)
@@ -504,6 +516,12 @@ def parse_args(argv) -> argparse.Namespace:
     )
     p.add_argument("--root", required=True,
                    help="Repository root to audit.")
+    p.add_argument("--brief", default=None, metavar="PATH",
+                   help="Path to a Markdown positioning brief. Provides brand "
+                        "context for recommendations without affecting findings. "
+                        "Auto-discovered from <root>/.seo/positioning.md or a "
+                        "<!-- seo:brief --> section in <root>/CONTEXT.md when "
+                        "absent or unreadable.")
     p.add_argument("--env-file", dest="env_file", action="append", default=[],
                    metavar="PATH",
                    help="Extra dotenv file to load before the audit "

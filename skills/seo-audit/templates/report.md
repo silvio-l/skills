@@ -3,6 +3,7 @@
 Repository: `{{root}}`
 Framework: `{{framework}}`
 Domain doc: `{{domain_doc}}`
+Positioning-Brief: {{brief_status}}
 
 ## Executive Summary
 
@@ -27,6 +28,12 @@ Domain doc: `{{domain_doc}}`
 {{diff_section}}
 
 ## Empfehlungen (Hebel × Aufwand)
+
+### Positionierungs-Kontext
+
+{{brief_content}}
+
+### Top-Empfehlungen
 
 {{recommendations}}
 
