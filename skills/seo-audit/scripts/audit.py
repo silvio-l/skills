@@ -23,6 +23,7 @@ import argparse
 import datetime
 import json
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -159,6 +160,11 @@ def _render_findings_by_category(synth: dict) -> str:
 
 
 def _render_recommendations(synth: dict) -> str:
+    """Legacy renderer — kept only for callers that pre-date the track split.
+
+    New code should use _render_recommendations_strategic /
+    _render_recommendations_technical instead.
+    """
     if not synth["findings"]:
         return "_Nichts zu tun — sauberer Lauf._"
     lines = []
@@ -174,17 +180,168 @@ def _render_recommendations(synth: dict) -> str:
 
 
 def _render_dimensions_breakdown(synth: dict) -> str:
-    """Render the dimensions breakdown as a Markdown table (German header)."""
+    """Render the dimensions breakdown as a Markdown table (German header).
+
+    Includes score and finding count per dimension (AC1).
+    """
     bd = synth.get("dimensions_breakdown", {})
     if not bd:
         return "_Keine Dimensions-Daten._"
+
+    # Count findings per dimension.
+    counts: dict = {}
+    for finding in synth.get("findings", []):
+        dim = finding.get("dimension", "brand")
+        counts[dim] = counts.get(dim, 0) + 1
+
     lines = [
-        "| Dimension | Score |",
-        "| --------- | ----- |",
+        "| Dimension | Score | Befunde |",
+        "| --------- | ----- | ------- |",
     ]
     for dim in sorted(bd):
-        lines.append(f"| {dim} | {bd[dim]}/100 |")
+        count = counts.get(dim, 0)
+        lines.append(f"| {dim} | {bd[dim]}/100 | {count} |")
     return "\n".join(lines)
+
+
+# Pattern to parse "SchemaType: Pflichtfeld „field" fehlt" from match strings.
+_INCOMPLETE_FIELD_RE = re.compile(
+    r'^(.+?):\s*Pflichtfeld\s*„(.+?)“\s*fehlt',
+    re.UNICODE,
+)
+
+
+def _derive_fix_snippet(finding: dict) -> tuple:
+    """Return (snippet_key, markdown_snippet) or (None, None).
+
+    Only produces snippets for findings whose fix is unambiguously derivable
+    from finding data — no invented content. snippet_key deduplicates entries
+    with identical fix payloads across multiple files.
+    """
+    category = finding.get("category", "")
+    match_text = finding.get("match", "")
+    file_path = finding.get("file_path", "")
+
+    if category == "schema-missing":
+        key = "schema-missing"
+        snippet = (
+            f"Datei: `{file_path}`\n\n"
+            "```json\n"
+            "{\n"
+            '  "@context": "https://schema.org",\n'
+            '  "@type": "WebSite",\n'
+            '  "name": "SITE_NAME",\n'
+            '  "url": "https://DOMAIN"\n'
+            "}\n"
+            "```"
+        )
+        return key, snippet
+
+    if category == "schema-incomplete":
+        m = _INCOMPLETE_FIELD_RE.match(match_text)
+        if m:
+            schema_type = m.group(1).strip()
+            field = m.group(2).strip()
+            key = f"schema-incomplete::{schema_type}::{field}"
+            snippet = (
+                f"**{schema_type} — fehlendes Pflichtfeld `{field}`**\n\n"
+                f"Datei: `{file_path}`\n\n"
+                "```json\n"
+                "{\n"
+                '  "@context": "https://schema.org",\n'
+                f'  "@type": "{schema_type}",\n'
+                f'  "{field}": "PLACEHOLDER"\n'
+                "}\n"
+                "```"
+            )
+            return key, snippet
+
+    if category == "geo-llms":
+        key = "geo-llms"
+        snippet = (
+            "Neu erstellen: `llms.txt` im Dist-Root\n\n"
+            "```\n"
+            "# llms.txt\n"
+            "# Machine-readable site summary for AI agents.\n"
+            "# Spec: https://llmstxt.org/\n"
+            "\n"
+            "> SITE_NAME\n"
+            "\n"
+            "## Über diese Site\n"
+            "\n"
+            "SITE_DESCRIPTION\n"
+            "\n"
+            "## Wichtige Seiten\n"
+            "\n"
+            "- /: Startseite\n"
+            "- /about: Über uns\n"
+            "```"
+        )
+        return key, snippet
+
+    return None, None
+
+
+def _render_track(findings: list, limit: int = 10) -> str:
+    """Render a list of findings as a numbered Markdown list."""
+    if not findings:
+        return "_Keine Befunde in dieser Spur._"
+    lines = []
+    for i, f in enumerate(findings[:limit], start=1):
+        lines.append(
+            f"{i}. **{f['match']}** in `{f['file_path']}:{f['line_number']}` "
+            f"(Score {f['score']}) — {f.get('suggested_replacement', '?')}"
+        )
+    if len(findings) > limit:
+        lines.append(f"\n_(+{len(findings) - limit} weitere Befunde.)_")
+    return "\n".join(lines)
+
+
+def _render_recommendations_strategic(synth: dict) -> str:
+    """Render findings with track='strategic' (AC2)."""
+    strategic = [
+        f for f in synth.get("findings", [])
+        if f.get("track") == "strategic"
+    ]
+    return _render_track(strategic)
+
+
+def _render_recommendations_technical(synth: dict) -> str:
+    """Render findings with track!='strategic' (default: technical) (AC2)."""
+    technical = [
+        f for f in synth.get("findings", [])
+        if f.get("track") != "strategic"
+    ]
+    return _render_track(technical)
+
+
+def _render_fix_snippets(synth: dict) -> str:
+    """Render copy-paste fix snippets for technical findings (AC3).
+
+    Only findings whose fix block is DETERMINISTICALLY derivable produce a
+    snippet. Snippets are deduplicated by snippet_key so the same JSON-LD
+    skeleton is never repeated for multiple files with the same issue.
+    The report is never mutated — this function is pure string building.
+    """
+    technical = [
+        f for f in synth.get("findings", [])
+        if f.get("track") != "strategic"
+    ]
+
+    parts = []
+    seen_keys: set = set()
+
+    for finding in technical:
+        key, snippet = _derive_fix_snippet(finding)
+        if key is None or key in seen_keys:
+            continue
+        seen_keys.add(key)
+        match_text = finding.get("match", "")
+        parts.append(f"#### {match_text}\n\n{snippet}")
+
+    if not parts:
+        return "_Keine deterministisch ableitbaren Fix-Snippets für diese Befunde._"
+    return "\n\n---\n\n".join(parts)
 
 
 def _render_diff(prior_path: str | None) -> str:
@@ -463,7 +620,9 @@ def run(args: argparse.Namespace) -> int:
         "summary_prose": _summary_prose(synth, inv),
         "findings_by_category": _render_findings_by_category(synth),
         "diff_section": _render_diff(prior),
-        "recommendations": _render_recommendations(synth),
+        "recommendations_strategic": _render_recommendations_strategic(synth),
+        "recommendations_technical": _render_recommendations_technical(synth),
+        "fix_snippets": _render_fix_snippets(synth),
         "generator_version": GENERATOR_VERSION,
         # Positioning-brief context — purely additive; never alters findings.
         "brief_status": PB.render_status(brief),

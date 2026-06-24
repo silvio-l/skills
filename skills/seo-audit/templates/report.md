@@ -33,9 +33,17 @@ Positioning-Brief: {{brief_status}}
 
 {{brief_content}}
 
-### Top-Empfehlungen
+### Strategisch (du entscheidest)
 
-{{recommendations}}
+{{recommendations_strategic}}
+
+### Technisch (umsetzbar)
+
+{{recommendations_technical}}
+
+### Fix-Snippets (copy-paste-fertig)
+
+{{fix_snippets}}
 
 ---
 
