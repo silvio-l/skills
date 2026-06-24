@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="de">
+  <head><title>Valid Schema</title></head>
+  <body>
+    <h1>Beispiel GmbH</h1>
+    <p>Wir sind ein Unternehmen mit Sitz in Berlin.</p>
+    <a href="https://twitter.com/beispielgmbh">Twitter</a>
+    <a href="https://linkedin.com/company/beispielgmbh">LinkedIn</a>
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      "name": "Beispiel GmbH",
+      "url": "https://beispiel.de",
+      "sameAs": [
+        "https://twitter.com/beispielgmbh",
+        "https://linkedin.com/company/beispielgmbh"
+      ]
+    }
+    </script>
+  </body>
+</html>

@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="de">
+  <head><title>Broken Schema</title></head>
+  <body>
+    <h1>Seite mit defektem JSON-LD</h1>
+    <p>Diese Seite enthält einen syntaktisch fehlerhaften JSON-LD-Block.</p>
+    <script type="application/ld+json">
+    {
+      "@type": "Organization",
+      "name": "Kaputt GmbH",
+      UNGUELTIG: dieser block ist kein valides json
+    }
+    </script>
+  </body>
+</html>

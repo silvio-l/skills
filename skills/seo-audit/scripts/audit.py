@@ -32,6 +32,7 @@ import inventory as INV  # noqa: E402
 import glossary_parser as GP  # noqa: E402
 import brand_scan as BS  # noqa: E402
 import geo_scan as GS  # noqa: E402
+import schema_scan as SS  # noqa: E402
 import synthesis as SY  # noqa: E402
 from probes import probe as PROBE  # noqa: E402
 from push import push as PUSH  # noqa: E402
@@ -413,7 +414,21 @@ def run(args: argparse.Namespace) -> int:
             f.setdefault("track", "strategic")
             findings.append(f)
 
-    # External probes — slice 03. Run only when at least one URL is
+    # Schema phase — slice 03. Runs fully offline over built HTML.
+    # Checks JSON-LD presence, tolerant extraction, required fields,
+    # deprecated types, and sameAs consistency (GEO signal).
+    if os.path.isdir(dist):
+        for f in SS.scan_directory(dist):
+            f = dict(f)
+            f.setdefault("category", "schema")
+            f.setdefault("severity", "med")
+            f.setdefault("user_impact", 2)
+            f.setdefault("fix_effort", 2)
+            f.setdefault("dimension", "schema")
+            f.setdefault("track", "technical")
+            findings.append(f)
+
+    # External probes — slice 04. Run only when at least one URL is
     # supplied; the rest of the pipeline is offline-friendly.
     if args.url:
         probe_findings = PROBE.run(args.url, quick=args.quick) or []
