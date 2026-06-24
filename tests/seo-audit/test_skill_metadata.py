@@ -60,7 +60,8 @@ class SkillMd(unittest.TestCase):
 
 
 class PhaseDocs(unittest.TestCase):
-    REQUIRED = ["inventory.md", "brand.md", "probes.md", "push.md",
+    REQUIRED = ["inventory.md", "brand.md", "geo.md", "schema.md",
+                "probes.md", "push.md",
                 "setup.md", "synthesis.md", "report.md"]
 
     def test_phase_docs_exist(self):

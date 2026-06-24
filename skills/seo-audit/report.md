@@ -1,4 +1,4 @@
-# Phase 4 — Report
+# Phase 8 — Report
 
 The final phase. Takes the synthesis output, fills the template, and
 writes one Markdown file to disk.
@@ -16,10 +16,11 @@ deterministic single artifact.
 
 ## Sections (in order)
 
-1. **Header** — date, root, framework, domain doc.
-2. **Executive Summary** — pages scanned, glossary size, total
-   findings, top category, one-sentence prose lede pointing at the
-   top-scoring finding.
+1. **Header** — date, root, framework, domain doc, and the
+   Positioning-Brief status (`geladen aus …` or `nicht gefunden`).
+2. **Executive Summary** — headline score (`/100`), per-dimension
+   breakdown table, pages scanned, glossary size, total findings, top
+   category, one-sentence prose lede pointing at the top-scoring finding.
 3. **Findings nach Kategorie** — one subsection per category. Each
    carries a table with `Score | Datei:Zeile | Match | Vorschlag |
    Begründung`. Findings already arrive sorted by score; the table
@@ -27,8 +28,19 @@ deterministic single artifact.
 4. **Diff zum letzten Lauf** — empty when no prior report exists or
    `--compare-last` was not passed. Even then, the header stays so the
    section ordering is stable.
-5. **Empfehlungen (Hebel × Aufwand)** — the top 10 findings rephrased
-   as bullet recommendations. A footer line counts the overflow.
+5. **Empfehlungen (Hebel × Aufwand)** — three subsections:
+   - *Positionierungs-Kontext* — the raw content of the Positioning-Brief
+     (or a note that none was found). Never alters findings or score.
+   - *Strategisch (du entscheidest)* — findings with `track=strategic`
+     (content and entity decisions only the project owner can make),
+     presented as a numbered list, up to 10 entries.
+   - *Technisch (umsetzbar)* — findings with `track=technical`
+     (automatable markup fixes), same format.
+   - *Fix-Snippets (copy-paste-fertig)* — deterministically derived
+     code blocks for technical findings where the fix payload is
+     unambiguously known: JSON-LD skeletons for `schema-missing` and
+     `schema-incomplete` findings, and an `llms.txt` skeleton for
+     `geo-llms` findings. Deduplicated by `snippet_key`.
 
 ## Diff mode
 
@@ -50,6 +62,9 @@ The template at `templates/report.md` uses `{{key}}` placeholders. The
 | `{{root}}` | `inventory.root` |
 | `{{framework}}` | `inventory.framework` |
 | `{{domain_doc}}` | `inventory.domain_doc` |
+| `{{brief_status}}` | `positioning_brief.render_status(brief)` — path or "nicht gefunden" |
+| `{{headline_score}}` | `synthesis.headline_score` (float, 0–100) |
+| `{{dimensions_breakdown}}` | Markdown table: dimension / score / finding count |
 | `{{pages_count}}` | `len(inventory.pages)` |
 | `{{glossary_count}}` | `len(glossary)` |
 | `{{findings_count}}` | `len(synthesis.findings)` |
@@ -57,7 +72,10 @@ The template at `templates/report.md` uses `{{key}}` placeholders. The
 | `{{summary_prose}}` | computed sentence about top finding |
 | `{{findings_by_category}}` | rendered tables, one per category |
 | `{{diff_section}}` | diff placeholder or empty notice |
-| `{{recommendations}}` | top 10 bullets + overflow line |
+| `{{brief_content}}` | raw Positioning-Brief Markdown, or a "none loaded" notice |
+| `{{recommendations_strategic}}` | numbered list of `track=strategic` findings (up to 10) |
+| `{{recommendations_technical}}` | numbered list of `track=technical` findings (up to 10) |
+| `{{fix_snippets}}` | copy-paste code blocks derived from technical findings |
 | `{{generator_version}}` | constant in `audit.py` |
 
 ## Idempotency contract

@@ -32,11 +32,47 @@ Result is rounded to 4 decimal places to keep the JSON readable. The
 maximum theoretical score is `9.0` (high severity × impact 3 / effort
 1); the minimum is `~0.33`.
 
+## Dimension weights — `DIMENSION_WEIGHTS_V1`
+
+Each finding carries a `dimension` field set by the producing module.
+The synthesis layer computes a per-dimension score (0–100, penalty-based)
+and then aggregates them into a `/100` headline score using the weights
+below. Dimensions with no findings score 100 (no issues found → full marks).
+
+| Dimension | Weight | Set by |
+|---|---|---|
+| `technical` | 20% | External probes (pa11y, Observatory, W3C) |
+| `schema` | 15% | `schema_scan.py` |
+| `onpage` | 15% | External probes (Lighthouse on-page audits) |
+| `content` | 15% | External probes (Lighthouse content/SEO audits) |
+| `geo` | 15% | `geo_scan.py` |
+| `performance` | 10% | External probes (Lighthouse performance) |
+| `images` | 5% | External probes (Lighthouse image audits) |
+| `brand` | 5% | `brand_scan.py` |
+
+Weights must sum to exactly 1.0. Changing `DIMENSION_WEIGHTS_V1` is a
+code change reviewable in git history; update the version comment in the
+constant and bump `GENERATOR_VERSION` in `audit.py`.
+
+## Headline score formula
+
+```
+dim_score[d]     = max(0, 100 − sum(finding.score for finding in d))
+headline_score   = Σ DIMENSION_WEIGHTS_V1[d] × dim_score[d]
+```
+
+Result is rounded to one decimal place. A clean run with zero findings
+scores 100.0. The headline score is included in the report's Executive
+Summary and in the synthesis output as `headline_score`.
+
 ## Dedup key
 
-`(file_path, line_number, match, category)` — two findings with the
-same coordinates collapse to one. The **first** occurrence wins; that
-keeps the weights from the original producer.
+`(file_path, line_number, match, category, dimension)` — two findings
+with the same coordinates **and** the same dimension collapse to one.
+Including `dimension` ensures that a finding produced by two different
+scanners (e.g. brand and geo) for the same location is kept as two
+distinct entries. The **first** occurrence wins; that keeps the weights
+from the original producer.
 
 ## Sort key
 
