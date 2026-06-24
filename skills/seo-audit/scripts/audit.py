@@ -170,6 +170,20 @@ def _render_recommendations(synth: dict) -> str:
     return "\n".join(lines)
 
 
+def _render_dimensions_breakdown(synth: dict) -> str:
+    """Render the dimensions breakdown as a Markdown table (German header)."""
+    bd = synth.get("dimensions_breakdown", {})
+    if not bd:
+        return "_Keine Dimensions-Daten._"
+    lines = [
+        "| Dimension | Score |",
+        "| --------- | ----- |",
+    ]
+    for dim in sorted(bd):
+        lines.append(f"| {dim} | {bd[dim]}/100 |")
+    return "\n".join(lines)
+
+
 def _render_diff(prior_path: str | None) -> str:
     if not prior_path:
         return "_Kein vorheriger Lauf zum Vergleich._"
@@ -381,6 +395,8 @@ def run(args: argparse.Namespace) -> int:
             f.setdefault("severity", "med")
             f.setdefault("user_impact", 2)
             f.setdefault("fix_effort", 1)
+            f.setdefault("dimension", "brand")
+            f.setdefault("track", "technical")
             findings.append(f)
 
     # External probes — slice 02. Run only when at least one URL is
@@ -408,6 +424,8 @@ def run(args: argparse.Namespace) -> int:
         "glossary_count": len(glossary),
         "findings_count": len(synth["findings"]),
         "top_category": top_category,
+        "headline_score": synth.get("headline_score", 100.0),
+        "dimensions_breakdown": _render_dimensions_breakdown(synth),
         "summary_prose": _summary_prose(synth, inv),
         "findings_by_category": _render_findings_by_category(synth),
         "diff_section": _render_diff(prior),

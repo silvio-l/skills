@@ -6,10 +6,15 @@ Domain doc: `{{domain_doc}}`
 
 ## Executive Summary
 
+- Headline-Score: **{{headline_score}}/100**
 - Pages scanned: **{{pages_count}}**
 - Glossary entries: **{{glossary_count}}**
 - Findings: **{{findings_count}}**
 - Top category: **{{top_category}}**
+
+### Dimensions-Breakdown
+
+{{dimensions_breakdown}}
 
 {{summary_prose}}
 
