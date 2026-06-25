@@ -51,6 +51,12 @@ If you only want one of these, skip the dependencies you do not exercise.
 
 **The Fix.** A single dispatcher (`scripts/apple-notes`) wraps AppleScript to read, search, write, and image-extract from Notes on macOS. Subfolders of one configured "company folder" map to projects (auto-resolved from the current git repo). Each project enforces a four-folder layout — `inbox` / `ready` / `done` / `docs` — with title prefixes (`BUG:` `FEAT:` `IDEA:` `FB:` `TECH:`) so the partner drops things in `inbox`, the agent triages from there, and nothing has to leave Notes until it is ready to become a real issue. Note titles are just the first body line, which Apple Notes truncates with an ellipsis — so when a collaborator dumps everything into the first line, the dispatcher still resolves the note from the truncated title, a prefix, or its stable `id` (exposed in `notes --json`).
 
+### `aso-research`
+
+**The Problem.** ASO tools (AppTweak, Sensor Tower) sell competitor intelligence and keyword difficulty behind a recurring SaaS subscription, lock the "real" data in proprietary panels you cannot reproduce locally, and hand out generic advice disconnected from your own app's competitive reality. You want to know how rivals position themselves and which keywords they fight for *before* you write your store listing — without a subscription or a cloud dependency.
+
+**The Fix.** A local, deterministic, macOS-only research pipeline (`/aso-research`) that turns a structured app-idea input into an evidence-based ASO report. Deterministic Python stages (run via `uv`) collect public competitor intelligence and compress it; the LLM only interprets the compressed, token-budget-gated result — it never does the data collection. Official public APIs first (iTunes Search, Apple RSS, Reddit `.json`), Playwright only where the API genuinely has nothing, a shared HTTP cache (`~/.cache/aso-research/`, 24h TTL) for resumability, and transparent proxy scores that are honest about being *signals, not real search volume*. Keyword extraction (YAKE + TF-IDF) and the full 8-section report land in later slices; the skeleton slice already proves the Apple-only iTunes→artefact loop end to end.
+
 ### `context-optimization-audit`
 
 **The Problem.** Claude Code loads everything in sight — skills, MCP servers, plugins, project instructions. Over time the context turns into a buffet. You lose tokens, signal-to-noise drops, and the model gets distracted.
