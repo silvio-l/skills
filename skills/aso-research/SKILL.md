@@ -41,8 +41,11 @@ tokens), consistent with `ratchet-up` / `ship-to-*`.
 | Unified category taxonomy + raw→Core+Slots schema mapping | [scripts/schema.py](scripts/schema.py) |
 | Keyword extraction (YAKE + TF-IDF position-weighted + suggest) | [scripts/extract.py](scripts/extract.py) |
 | Scoring (Competition/Relevance proxy, opportunity, split, is_gap) | [scripts/score.py](scripts/score.py) |
+| LLM-input prep (H1 raw profiles + token-gated S1 representation, Modus-A flag) | [scripts/condense.py](scripts/condense.py) |
+| Token-Budget Gate (measure + auto-trim under ~70k, chars/4 estimate) | [scripts/llm_gate.py](scripts/llm_gate.py) |
+| H2 contradiction rubric + Apple slot char-count validation | [scripts/crosscheck.py](scripts/crosscheck.py) |
 | Stable serialization (byte-identical determinism) | [scripts/serialize.py](scripts/serialize.py) |
-| Report assembly (Competitive Landscape + Keyword Report + Sources) | [scripts/report.py](scripts/report.py) |
+| Report assembly (full 8 sections from artefacts + subagent outputs) | [scripts/report.py](scripts/report.py) |
 
 Read `pipeline.md` before running. `SKILL.md` is the always-on layer —
 keep it minimal; push per-stage detail into phase docs.
@@ -67,18 +70,46 @@ stdout. **Open `report.md` and verify it** before declaring the run
 done. The canonical design source is the PRD at
 `.scratch/aso-research/PRD.md`.
 
-## Current scope (slice 02 — deep Apple spine)
+## The LLM phase (agent-performed, Claude-native)
 
-Slice 02 deepens the deterministic spine end to end on **Apple only**:
-real keyword extraction (YAKE phrases + TF-IDF with position weighting
-Title ×5 · Subtitle ×3 · Description ×1, DE+EN stopwords, generics
-filter, min frequency ≥2, light morphology grouping, Apple Search-Suggest
-enrichment) and the real scoring engine (Competition = position-weighted
-share, Relevance = cosine TF-IDF + Search-Suggest boost, Opportunity +
-niche bonus, primary/long-tail split, `is_gap`). Collectors: iTunes
-Search + Lookup, Apple subtitle + similar-apps (Playwright), Apple RSS
-charts, Reddit `.json`, Apple Search-Suggest — all under the politeness
-rule-set, **never-blocking** (a failing source is marked "unavailable"),
-**no stealth plugins**. The report gains a real **Keyword Report**
-section labelled "Competition/Relevance signal" (never search volume).
-No Google Play, no Microsoft, no LLM yet (slices 03–05).
+This skill runs **inside** a Claude agent — that agent *is* the LLM, so
+the four subagents are **not** external API calls (no paid key — US19).
+The dispatcher prepares the deterministic spine + the token-gated
+representation; **you** (the running agent) perform the subagent steps
+with the **model pinned explicitly per call**:
+
+- **H1 Metadata-Condenser — Haiku** → `llm/h1-condensed.json`
+- **S1 Niche & Positioning Analyst — Sonnet** → `llm/s1-analysis.json`
+- **S2 Listing Strategist — Sonnet** → `llm/s2-listing.json` (Apple: 1 + 2 per slot, char counts)
+- **H2 Cross-Checker — Haiku** → `llm/h2-crosscheck.json` (reject contradictions)
+
+Stitch between them with the deterministic stages:
+
+```bash
+S=~/.claude/skills/aso-research/scripts/aso_research.py
+uv run "$S" --input seed.yaml        # spine + llm-input/h1-input.json
+# … run H1 (Haiku) → llm/h1-condensed.json …
+python3 "$S" --gate   <run-dir>      # token-gated s1-input.json
+# … run S1 (Sonnet) → s1-analysis.json, S2 → s2-listing.json, H2 → h2-crosscheck.json …
+python3 "$S" --assemble <run-dir>    # full 8-section report.md
+```
+
+The exact JSON schemas, the gate limits, the H2 thresholds
+(Opportunity ≥ 20, Competition ≤ 70), and the Modus A/B handling are in
+[pipeline.md](pipeline.md) → "LLM interpretation phase".
+
+## Current scope (slice 03 — LLM phase + full report)
+
+Slice 03 wires the four LLM subagents behind a hard token-budget gate and
+assembles the **full 8-section report** (Executive Summary · Competitive
+Landscape · Positioning Map · Keyword Report · Opportunities · Risks/
+Threats · Listing Recommendation · Methodology). The gate
+(`scripts/llm_gate.py`) measures the condensed LLM-input representation
+(chars/4 estimate) and auto-trims it under ~70k tokens; the condensed
+input (`scripts/condense.py`) carries no raw descriptions into the later
+LLM stages; the H2 rubric (`scripts/crosscheck.py`) is a real gate — it
+rejects a low-opportunity / high-competition / unscored recommendation.
+Modus A (own app present) self-audits via the same path (the own app is
+just another reference entry); Modus B omits the self-audit. **Apple
+listing only** here (Title 30 / Subtitle 30 / Keyword Field 100); Play
+listing, Microsoft scoring, and resumability/diff are later slices.

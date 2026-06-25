@@ -3,7 +3,7 @@
 # requires-python = ">=3.11"
 # dependencies = ["pyyaml>=6.0", "playwright>=1.40"]
 # ///
-"""aso-research dispatcher — deep Apple spine (slice 02).
+"""aso-research dispatcher — deep Apple spine + LLM phase (slice 03).
 
 Single entry point that turns a structured app-idea input into a written
 report end to end:
@@ -12,7 +12,20 @@ report end to end:
       (subtitle via Playwright, similar-apps hop, RSS charts, Reddit,
        Search-Suggest) → extract (YAKE + TF-IDF) → score
       (Competition/Relevance proxy) → serialize keywords.json /
-      competition.json / run-config.yaml → write report.md
+      competition.json / run-config.yaml → prepare the LLM-input
+      artefacts (H1 raw profiles + token-gated S1 representation) →
+      write report.md
+
+The **LLM subagent steps (H1/S1/S2/H2) are performed by the running agent**
+(Claude-native — no external paid API, US19). Python only prepares,
+constrains, measures, and assembles. Two extra stages wire the hybrid:
+
+* ``--gate <run_dir>``    — deterministic: build the token-gated S1
+  representation from the agent's H1 output + the score table + Reddit,
+  measure/trim it, write ``llm/s1-input.json`` + ``llm/gate-report.json``.
+* ``--assemble <run_dir>`` — deterministic: stitch the full 8-section
+  ``report.md`` from the artefacts + the agent's ``llm/*.json`` subagent
+  outputs (graceful fallback to deterministic sections when absent).
 
 Every deep channel is never-blocking: a failing source is marked
 "unavailable" and the pipeline continues. Run via ``uv run`` (pulls
@@ -24,12 +37,15 @@ Usage:
     python3 scripts/aso_research.py --app-name "Habit Hero" \
         --description "Gamified habit tracker" --seed-keyword habit \
         --seed-keyword tracker --output-dir /tmp/aso
+    python3 scripts/aso_research.py --gate /tmp/aso/<run-id>
+    python3 scripts/aso_research.py --assemble /tmp/aso/<run-id>
 """
 
 from __future__ import annotations
 
 import argparse
 import datetime
+import json
 import os
 import sys
 
@@ -39,17 +55,27 @@ sys.dont_write_bytecode = True
 
 import cache as CACHE  # noqa: E402
 import collect  # noqa: E402
+import condense  # noqa: E402
 import input_config  # noqa: E402
 import itunes  # noqa: E402
+import llm_gate  # noqa: E402
 import report  # noqa: E402
 import run_id  # noqa: E402
 import serialize  # noqa: E402
 
 
+# Subagent-output filenames the agent writes (read by --gate / --assemble).
+_H1_CONDENSED = "llm/h1-condensed.json"
+_S1_INPUT = "llm/s1-input.json"
+_S1_ANALYSIS = "llm/s1-analysis.json"
+_S2_LISTING = "llm/s2-listing.json"
+_H2_CROSSCHECK = "llm/h2-crosscheck.json"
+
+
 def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="aso-research",
-        description="ASO research — deep Apple collect/extract/score pipeline (slice 02).",
+        description="ASO research — deep Apple spine + LLM phase (slice 03).",
     )
     p.add_argument("--input", help="structured input file (YAML or JSON)")
     p.add_argument("--app-name", help="app name (required unless --input)")
@@ -70,6 +96,15 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--cache-dir", default=CACHE.DEFAULT_CACHE_DIR, help=f"HTTP cache dir (default: {CACHE.DEFAULT_CACHE_DIR})")
     p.add_argument("--fresh", action="store_true", help="ignore cache, re-pull live")
     p.add_argument("--max-queries", type=int, default=3, help="cap on iTunes queries (default: 3)")
+    # --- slice 03 LLM-phase stages ---
+    p.add_argument(
+        "--gate", metavar="RUN_DIR",
+        help="build the token-gated S1 representation from the agent's H1 output",
+    )
+    p.add_argument(
+        "--assemble", metavar="RUN_DIR",
+        help="assemble the full 8-section report.md from artefacts + llm/*.json",
+    )
     return p
 
 
@@ -99,8 +134,120 @@ def _merge_file_and_flags(args: argparse.Namespace) -> dict:
     return raw
 
 
+def _load_json(path: str):
+    """Load JSON if the file exists, else None."""
+    if path and os.path.isfile(path):
+        with open(path, "r", encoding="utf-8") as fh:
+            return json.load(fh)
+    return None
+
+
+def _gate_token_limit(config: dict) -> int:
+    gtl = config.get("gate_token_limit")
+    if isinstance(gtl, int) and gtl > 0:
+        return gtl
+    return llm_gate.DEFAULT_GATE_TOKEN_LIMIT
+
+
+def _run_gate(run_dir: str) -> int:
+    """Stage 50: build the token-gated S1 representation deterministically.
+
+    Reads the agent's H1 output (``llm/h1-condensed.json``) + the scored
+    keywords + Reddit summaries + the resolved config, assembles the
+    representation, measures/trims it under the token limit, and writes
+    ``llm/s1-input.json`` + ``llm/gate-report.json``.
+    """
+    condensed_profiles = _load_json(os.path.join(run_dir, _H1_CONDENSED))
+    if not condensed_profiles:
+        print(
+            f"error: {_H1_CONDENSED} not found in {run_dir} — run the H1 "
+            f"Metadata-Condenser (Haiku) subagent first.",
+            file=sys.stderr,
+        )
+        return 2
+    keywords = _load_json(os.path.join(run_dir, "keywords.json")) or []
+    reddit_threads = _load_json(os.path.join(run_dir, "reddit-threads.json")) or []
+    config = _load_json(os.path.join(run_dir, "run-config.json")) or {}
+
+    rep = condense.build_llm_input(
+        condensed_profiles, keywords, reddit_threads, config=config
+    )
+    trimmed, gate_report = llm_gate.apply_token_gate(rep, _gate_token_limit(config))
+    os.makedirs(os.path.join(run_dir, "llm"), exist_ok=True)
+    serialize.dump_json(trimmed, os.path.join(run_dir, _S1_INPUT))
+    serialize.dump_json(gate_report, os.path.join(run_dir, "llm/gate-report.json"))
+
+    tag = "trimmed" if gate_report["trimmed"] else "within budget"
+    print(
+        f"[aso-research] gate: {tag} "
+        f"({gate_report['measured_before']} -> {gate_report['measured_after']} "
+        f"tokens, limit {gate_report['limit']}, "
+        f"{gate_report['profiles_kept']}/{gate_report['profiles_before']} profiles)",
+        file=sys.stderr,
+    )
+    print(os.path.abspath(os.path.join(run_dir, _S1_INPUT)))
+    return 0
+
+
+def _assemble(run_dir: str) -> int:
+    """Stage 80: stitch the full 8-section report from artefacts + llm/*.json."""
+    keywords = _load_json(os.path.join(run_dir, "keywords.json")) or []
+    competitors = _load_json(os.path.join(run_dir, "competition.json")) or []
+    config = _load_json(os.path.join(run_dir, "run-config.json")) or {}
+    summary = _load_json(os.path.join(run_dir, "run-summary.json")) or {}
+    reddit_threads = _load_json(os.path.join(run_dir, "reddit-threads.json")) or []
+    source_status = summary.get("source_status") or {}
+
+    # Agent-produced subagent outputs (all optional → deterministic fallback).
+    s1_input = _load_json(os.path.join(run_dir, _S1_INPUT)) or {}
+    condensed_profiles = (
+        _load_json(os.path.join(run_dir, _H1_CONDENSED))
+        or s1_input.get("condensed_profiles")
+        or []
+    )
+    s1_output = _load_json(os.path.join(run_dir, _S1_ANALYSIS))
+    s2_output = _load_json(os.path.join(run_dir, _S2_LISTING))
+    h2_output = _load_json(os.path.join(run_dir, _H2_CROSSCHECK))
+
+    now = datetime.datetime.now()
+    report_md = report.build_report(
+        config, competitors, keywords,
+        now=now, source_status=source_status, reddit_threads=reddit_threads,
+        condensed_profiles=condensed_profiles,
+        s1_output=s1_output, s2_output=s2_output, h2_output=h2_output,
+    )
+    with open(os.path.join(run_dir, "report.md"), "w", encoding="utf-8") as fh:
+        fh.write(report_md)
+    print(f"[aso-research] assembled report.md in {run_dir}", file=sys.stderr)
+    print(os.path.abspath(os.path.join(run_dir, "report.md")))
+    return 0
+
+
+def _write_report(run_dir, config, competitors, keywords, source_status, reddit_threads, now):
+    """Write report.md from whatever subagent outputs already exist (if any)."""
+    condensed_profiles = _load_json(os.path.join(run_dir, _H1_CONDENSED)) or []
+    s1_output = _load_json(os.path.join(run_dir, _S1_ANALYSIS))
+    s2_output = _load_json(os.path.join(run_dir, _S2_LISTING))
+    h2_output = _load_json(os.path.join(run_dir, _H2_CROSSCHECK))
+    report_md = report.build_report(
+        config, competitors, keywords,
+        now=now, source_status=source_status, reddit_threads=reddit_threads,
+        condensed_profiles=condensed_profiles,
+        s1_output=s1_output, s2_output=s2_output, h2_output=h2_output,
+    )
+    with open(os.path.join(run_dir, "report.md"), "w", encoding="utf-8") as fh:
+        fh.write(report_md)
+
+
 def run(argv=None) -> int:
     args = _build_arg_parser().parse_args(argv)
+
+    # --- slice 03 LLM-phase stages (no collection) ---
+    if args.gate:
+        return _run_gate(args.gate)
+    if args.assemble:
+        return _assemble(args.assemble)
+
     raw = _merge_file_and_flags(args)
     try:
         config = input_config.parse_input(raw)
@@ -158,6 +305,7 @@ def run(argv=None) -> int:
     # --- side artefacts (deterministic; no timestamp inside) ---
     serialize.dump_json(keywords, os.path.join(run_dir, "keywords.json"))
     serialize.dump_json(competitors, os.path.join(run_dir, "competition.json"))
+    serialize.dump_json(reddit_threads, os.path.join(run_dir, "reddit-threads.json"))
     serialize.dump_json(
         {
             "run_id": run_id_str,
@@ -177,18 +325,24 @@ def run(argv=None) -> int:
         os.path.join(run_dir, "run-summary.json"),
     )
 
-    # --- run-config.yaml echoes the resolved input ---
+    # --- run-config.yaml (human echo) + run-config.json (machine round-trip) ---
     run_config = {k: config[k] for k in input_config.CANONICAL_KEYS}
     with open(os.path.join(run_dir, "run-config.yaml"), "w", encoding="utf-8") as fh:
         fh.write(serialize.dumps_yaml(run_config))
+    serialize.dump_json(run_config, os.path.join(run_dir, "run-config.json"))
+
+    # --- LLM-input artefact: H1 raw profiles (the agent condenses these) ---
+    h1_input = condense.prepare_h1_input(competitors, own_app_id=config.get("own_app_id"))
+    serialize.dump_json(h1_input, os.path.join(run_dir, "llm-input/h1-input.json"))
 
     # --- report.md (timestamp differs between runs by design) ---
-    report_md = report.build_report(
-        config, competitors, keywords,
-        now=now, source_status=source_status, reddit_threads=reddit_threads,
-    )
-    with open(os.path.join(run_dir, "report.md"), "w", encoding="utf-8") as fh:
-        fh.write(report_md)
+    _write_report(run_dir, config, competitors, keywords, source_status, reddit_threads, now)
+    if not os.path.exists(os.path.join(run_dir, _H1_CONDENSED)):
+        print(
+            "[aso-research] next: run H1 → `--gate <run-dir>` → S1 → S2 → H2 "
+            "→ `--assemble <run-dir>` (see pipeline.md LLM phase)",
+            file=sys.stderr,
+        )
 
     # Absolute path on stdout (machine-parseable).
     print(os.path.abspath(run_dir))

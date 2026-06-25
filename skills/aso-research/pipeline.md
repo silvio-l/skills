@@ -1,7 +1,7 @@
 # aso-research — Pipeline
 
 The staged, cacheable, resumable pipeline. Each slice of the PRD fills
-in more stages; this document records the **current (slice 02)** state
+in more stages; this document records the **current (slice 03)** state
 and the contracts later slices build on.
 
 ## Stages (deterministic → artefacts)
@@ -17,15 +17,19 @@ Input (structured YAML/JSON)
   │                          Apple Search-Suggest (slice 02) — never-blocking
   ├─ 30  Keyword Extract   ── YAKE phrases + TF-IDF position-weighted + suggest
   ├─ 40  Score             ── Competition/Relevance proxy + opportunity + split + gap
-  ├─ 50  Token-Budget Gate ── slice 04 (no LLM yet)
-  ├─ 60  LLM Interpret     ── slice 03/04 (no LLM yet)
-  └─ 80  Report            ── Competitive Landscape + Keyword Report + Sources
-                             (slice 02); full 8 sections slice 03
+  ├─ 50  Token-Budget Gate ── Python: measure + auto-trim the condensed LLM
+  │                          representation under ~70k tokens (slice 03)
+  ├─ 60  LLM Interpret     ── Agent-performed H1/S1/S2/H2 subagents (slice 03);
+  │                          Claude-native, no external paid API, pinned models
+  └─ 80  Report            ── Python assembles the full 8-section report.md from
+                             artefacts + subagent outputs (slice 03)
 ```
 
-Slice 02 deepens the deterministic spine: real extraction + scoring, the
-Apple subtitle + similar-apps niche channel, and the chart/Reddit/suggest
-collectors — all under the politeness rule-set, never-blocking.
+Slice 03 adds the **brain**: the token-budget gate, the four LLM
+subagents (performed by the running agent, not Python), and the full
+8-section report. Deterministic stages (gate, condensed-input prep,
+report assembly, Modus-A flagging) stay Python; the agent performs the
+subagent interpretation steps.
 
 ## Per-app metadata schema (Core + Slots)
 
@@ -99,6 +103,113 @@ volume.
 - **No stealth plugins** (no playwright-stealth/Camoufox/fingerprint
   spoof/proxy). Moderation over extraction.
 
+## LLM interpretation phase (slice 03) — agent-performed, Claude-native
+
+The skill is a **procedure** that runs *inside* a Claude agent — that agent
+**is** the LLM. So the four subagents are **not** external API calls (no
+paid key — US19, repo-wide free-tier discipline). They are
+**agent-performed**: the running Claude plays each role as a subagent call
+with its **model pinned explicitly** (never inherited), reads the exact
+JSON input Python prepared, and emits the exact JSON schema the next stage
+consumes. Python only prepares, constrains, measures, and assembles.
+
+### Run order (orchestrator)
+
+1. **Collect** — `uv run scripts/aso_research.py --input seed.yaml`. Writes
+   the deterministic spine + `llm-input/h1-input.json` (raw per-app
+   metadata) + `reddit-threads.json` + `run-config.json` + a first
+   `report.md` (data sections + deterministic fallbacks for the LLM
+   sections).
+2. **H1** (agent) — condense `llm-input/h1-input.json` → `llm/h1-condensed.json`.
+3. **Gate** — `python3 scripts/aso_research.py --gate <run-dir>`. Builds the
+   token-gated S1 representation → `llm/s1-input.json` + `llm/gate-report.json`.
+4. **S1** (agent) — analyse `llm/s1-input.json` → `llm/s1-analysis.json`.
+5. **S2** (agent) — listing from `llm/s1-input.json` + S1 → `llm/s2-listing.json`.
+6. **H2** (agent) — cross-check S2 vs the score table → `llm/h2-crosscheck.json`.
+7. **Assemble** — `python3 scripts/aso_research.py --assemble <run-dir>`.
+   Stitches the final 8-section `report.md`.
+
+### Subagents (model set explicitly per call — never inherited)
+
+| # | Subagent | **Pinned model** | Reads | Emits |
+|---|---|---|---|---|
+| H1 | Metadata-Condenser | **Haiku** | `llm-input/h1-input.json` (raw per-app metadata) | `llm/h1-condensed.json` — one condensed profile per app |
+| S1 | Niche & Positioning Analyst | **Sonnet** | `llm/s1-input.json` (condensed profiles + score table + Reddit) | `llm/s1-analysis.json` |
+| S2 | Listing Strategist | **Sonnet** | S1 analysis + score table (Apple slot model) | `llm/s2-listing.json` |
+| H2 | Cross-Checker (quality gate) | **Haiku** | S2 listing vs the score table | `llm/h2-crosscheck.json` |
+
+### Token-Budget Gate (stage 50, deterministic)
+
+`scripts/llm_gate.py`. The LLM-input representation (condensed profiles +
+score table + Reddit summaries) is measured with a dependency-free
+**chars/4** token estimate and auto-trimmed under the configured limit
+(default **~70k**; honour the input's `gate-token-limit`). Trim order:
+condensed-profiles tail (least-relevant) → score-table tail → Reddit tail;
+the score table is kept whole unless profiles are exhausted. The gate is
+the hard control on context quality (US13), not wall-clock time.
+
+### Schemas (deterministic JSON in, defined JSON out)
+
+**Condensed profile** (H1 output, one per app):
+
+```json
+{"app_id": "324684580", "title": "Spotify …",
+ "positioning": "One sentence: what it is + who it targets + the wedge.",
+ "top_keywords": ["musik", "podcasts", "spotify", "streamen", "playlists"],
+ "tag": "music-streaming"}
+```
+
+Raw `description` reaches H1 but **never** the later representation (the
+gate measures `s1-input.json`, which carries only condensed fields).
+
+**S1 analysis** (`llm/s1-analysis.json`):
+
+```json
+{"niches": […], "dominant_themes": […], "leader_positioning": […],
+ "audiences": […], "missing_themes": […], "threats": […],
+ "own_app_audit": ["…", "…"]}   // only in Modus A
+```
+
+S1 must flag **missing themes** and **threats to monitor**, grounded in
+the Reddit qualitative summaries (US14).
+
+**S2 listing** (`llm/s2-listing.json`) — Apple slots only here (Play is
+slice 04). Exactly **1 recommended + 2 alternatives** per slot, each with
+an accurate `char_count` fitting Apple's limits out of the box (Title 30 /
+Subtitle 30 / hidden Keyword Field 100):
+
+```json
+{"store": "apple", "slots": [
+  {"slot": "title",        "recommended": {"text": "…", "char_count": N},
+                          "alternatives": [{"text": "…", "char_count": N}, …]},
+  {"slot": "subtitle",     "recommended": {…}, "alternatives": […, …]},
+  {"slot": "keyword_field","recommended": {…}, "alternatives": […, …]}
+]}
+```
+
+**H2 cross-check** (`llm/h2-crosscheck.json`) — a real gate, not a rubber
+stamp (US17, DoD criterion 10). The deterministic contradiction rubric
+(`scripts/crosscheck.py`) is applied **plus** semantic contradiction
+checks at runtime:
+
+```json
+{"status": "ok"|"rejected",
+ "findings": [{"slot", "source", "keyword", "reasons": […], "severity"}],
+ "note": "…"}
+```
+
+A recommended keyword is a contradiction when its Opportunity < 20 **or**
+Competition > 70 **or** (Keyword Field only) it is absent from the scored
+set. Rejected contradictions are reported, not silently passed.
+
+### Modus A / B (no separate code path)
+
+When the input carries `own-app-id` (Modus A), the own app is flagged
+`is_own_app` and carried as **just another reference entry** in the
+condensed profiles — S1/S2 compare it against the competitors and emit an
+`own_app_audit`. Without it (Modus B, canonical) the self-audit is simply
+absent. The flag is deterministic (`condense.own_app_is_referenced`).
+
 ## File layout, cache, run identity
 
 - **HTTP response cache:** `~/.cache/aso-research/`, shared across runs,
@@ -112,17 +223,23 @@ volume.
 - **Run-ID:** `YYYYMMDD-HHMMSS-<app-slug>`. Re-running the same seed
   produces a **new** run directory (the timestamp differs) — nothing is
   clobbered.
-- **Artefacts per run:** `report.md`, `keywords.json`,
-  `competition.json`, `run-config.yaml` (echoes the resolved input),
-  `run-summary.json` (includes `source_status`).
+- **Artefacts per run:** `report.md` (8 sections), `keywords.json`,
+  `competition.json`, `reddit-threads.json`, `run-config.yaml`
+  (human echo) + `run-config.json` (machine round-trip),
+  `run-summary.json` (includes `source_status`),
+  `llm-input/h1-input.json` (raw profiles for H1), and the agent-written
+  `llm/{h1-condensed,s1-input,gate-report,s1-analysis,s2-listing,
+  h2-crosscheck}.json`.
 
 ## Determinism
 
 `keywords.json` and `competition.json` are byte-identical across two
 runs with identical input + warm cache (stable, key-sorted, sorted-list
-serialization in `scripts/serialize.py`; no timestamps inside). The
-`report.md` timestamp differs between runs — that is expected and the
-only intentional non-determinism. Proven by `tests/aso-research/
+serialization in `scripts/serialize.py`; no timestamps inside). The gated
+representation (`llm/s1-input.json`) is likewise deterministic for a given
+H1 output. The `report.md` timestamp differs between runs — that is
+expected and the only intentional non-determinism (besides the LLM stages
+themselves, which vary within reason). Proven by `tests/aso-research/
 test_determinism.py` (fixture) and by paired live runs over a warm cache.
 
 ## Dependencies
@@ -154,11 +271,23 @@ Offline-testable pure logic is covered by plain `unittest` under
   fakes: source-status tracking, never-blocking, niche merge/dedup.
 - `test_determinism.py` — feed fixture Apple metadata through
   extract→score→serialize twice, byte-identical.
+- `test_llm_gate.py` — token estimation, the measure + auto-trim boundary,
+  trim order (profiles before score table).
+- `test_condense.py` — H1 raw-profile prep, the gated representation
+  carrying no raw descriptions, Modus-A flagging.
+- `test_crosscheck.py` — the H2 contradiction rubric (reject low-opp /
+  high-comp / unscored Keyword-Field term; accept clean) + Apple char-count
+  validation.
+- `test_report_llm.py` — full 8-section assembly (all sections present,
+  methodology proxy/source honesty, Modus A/B self-audit, listing
+  1+2-per-slot char counts).
 
-The live collectors are **not** unit-tested — they fail loud and their
-output formats would rot tests (see `CLAUDE.md` → "Tooling and
-testing"); they are verified by manual live-smoke runs. Run:
+The LLM subagent steps (H1/S1/S2/H2) are **not** unit-tested
+(non-deterministic by design); their I/O schemas are asserted via the
+assembly tests. The live collectors are **not** unit-tested either — they
+fail loud and their output formats would rot tests (see `CLAUDE.md` →
+"Tooling and testing"); they are verified by manual live-smoke runs. Run:
 
 ```bash
-python3 tests/aso-research/test_*.py
+python3 -m unittest discover -s tests/aso-research
 ```
