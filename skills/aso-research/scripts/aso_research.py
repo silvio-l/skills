@@ -1,20 +1,23 @@
 #!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["pyyaml>=6.0"]
+# dependencies = ["pyyaml>=6.0", "playwright>=1.40"]
 # ///
-"""aso-research dispatcher — skeleton slice (01).
+"""aso-research dispatcher — deep Apple spine (slice 02).
 
 Single entry point that turns a structured app-idea input into a written
 report end to end:
 
-    parse input → discover (iTunes Search, cached) → extract+score
-      → serialize keywords.json / competition.json / run-config.yaml
-      → write report.md
+    parse input → iTunes discovery → deep Apple channels
+      (subtitle via Playwright, similar-apps hop, RSS charts, Reddit,
+       Search-Suggest) → extract (YAKE + TF-IDF) → score
+      (Competition/Relevance proxy) → serialize keywords.json /
+      competition.json / run-config.yaml → write report.md
 
-Run via ``uv run`` (pulls PyYAML so YAML input works) or plain
-``python3`` (JSON input only when PyYAML is absent). Prints the absolute
-path of the written run directory on stdout.
+Every deep channel is never-blocking: a failing source is marked
+"unavailable" and the pipeline continues. Run via ``uv run`` (pulls
+PyYAML so YAML input works; Playwright is already installed locally).
+Prints the absolute path of the written run directory on stdout.
 
 Usage:
     uv run scripts/aso_research.py --input seed.yaml
@@ -35,6 +38,7 @@ sys.path.insert(0, HERE)
 sys.dont_write_bytecode = True
 
 import cache as CACHE  # noqa: E402
+import collect  # noqa: E402
 import input_config  # noqa: E402
 import itunes  # noqa: E402
 import report  # noqa: E402
@@ -45,7 +49,7 @@ import serialize  # noqa: E402
 def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="aso-research",
-        description="ASO research — Apple-only skeleton pipeline (slice 01).",
+        description="ASO research — deep Apple collect/extract/score pipeline (slice 02).",
     )
     p.add_argument("--input", help="structured input file (YAML or JSON)")
     p.add_argument("--app-name", help="app name (required unless --input)")
@@ -122,8 +126,34 @@ def run(argv=None) -> int:
     )
 
     competitors = data["competitors"]
-    keywords = data["keywords"]
-    print(f"[aso-research] discovered {len(competitors)} competitor(s)", file=sys.stderr)
+    print(f"[aso-research] iTunes discovered {len(competitors)} competitor(s)", file=sys.stderr)
+
+    # --- deep Apple channels (never-blocking; failing source -> unavailable) ---
+    deep = collect.collect_apple(
+        config,
+        competitors,
+        seed_terms=config.get("seed_keywords") or [],
+        country=config.get("country", "de"),
+        cache_dir=args.cache_dir,
+        fresh=args.fresh,
+    )
+    competitors = deep["competitors"]
+    suggest_terms = deep["suggest_terms"]
+    source_status = deep["source_status"]
+    reddit_threads = deep["reddit_threads"]
+    for src, status in source_status.items():
+        if status != "ok":
+            print(f"[aso-research] source {src}: {status}", file=sys.stderr)
+    print(
+        f"[aso-research] deep: {len(competitors)} competitors "
+        f"({sum(1 for c in competitors if c.get('discovery')=='niche_similar')} niche), "
+        f"{len(suggest_terms)} suggest terms",
+        file=sys.stderr,
+    )
+
+    scored = collect.extract_and_score(competitors, config, suggest_terms=suggest_terms)
+    keywords = scored["keywords"]
+    print(f"[aso-research] scored {len(keywords)} keyword(s)", file=sys.stderr)
 
     # --- side artefacts (deterministic; no timestamp inside) ---
     serialize.dump_json(keywords, os.path.join(run_dir, "keywords.json"))
@@ -132,9 +162,17 @@ def run(argv=None) -> int:
         {
             "run_id": run_id_str,
             "platforms": ["apple"],
-            "channels": ["itunes_search"],
+            "channels": [
+                "itunes_search",
+                "apple_subtitle",
+                "apple_similar",
+                "apple_rss_charts",
+                "reddit",
+                "apple_search_suggest",
+            ],
             "competitor_count": len(competitors),
             "keyword_count": len(keywords),
+            "source_status": source_status,
         },
         os.path.join(run_dir, "run-summary.json"),
     )
@@ -145,7 +183,10 @@ def run(argv=None) -> int:
         fh.write(serialize.dumps_yaml(run_config))
 
     # --- report.md (timestamp differs between runs by design) ---
-    report_md = report.build_report(config, competitors, keywords, now=now)
+    report_md = report.build_report(
+        config, competitors, keywords,
+        now=now, source_status=source_status, reddit_threads=reddit_threads,
+    )
     with open(os.path.join(run_dir, "report.md"), "w", encoding="utf-8") as fh:
         fh.write(report_md)
 

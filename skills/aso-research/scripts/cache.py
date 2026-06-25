@@ -22,7 +22,8 @@ import urllib.parse
 from typing import Dict, Mapping, Optional
 
 DEFAULT_CACHE_DIR = os.path.join(os.path.expanduser("~"), ".cache", "aso-research")
-HTTP_TTL = 24 * 60 * 60  # 24 hours, in seconds
+HTTP_TTL = 24 * 60 * 60  # 24 hours, in seconds (official API responses)
+BROWSER_TTL = 12 * 60 * 60  # 12 hours, in seconds (Playwright-scraped pages)
 
 
 def _canonical_query(params: Mapping[str, object]) -> str:

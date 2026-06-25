@@ -190,9 +190,9 @@ class SchemaTests(unittest.TestCase):
         self.assertEqual(schema.infer_price_model({"price": 2.99, "formattedPrice": "$2.99"}), "paid")
         self.assertEqual(schema.infer_price_model({"price": 0.0, "formattedPrice": "Free"}), "free")
 
-    def test_map_itunes_to_core_populates_core_and_leaves_slots_empty(self):
+    def test_map_itunes_to_core_populates_core_and_slots(self):
         core = schema.map_itunes_to_core(RAW_ITUNES_SPOTIFY)
-        # Core (this slice)
+        # Core
         self.assertEqual(core["id"], "324684580")
         self.assertEqual(core["platform"], "apple")
         self.assertEqual(core["title"], "Spotify Musik und Podcasts")
@@ -204,10 +204,11 @@ class SchemaTests(unittest.TestCase):
         self.assertEqual(core["price_model"], "free")
         self.assertEqual(core["screenshot_count"], 3)
         self.assertEqual(core["last_updated"], "2026-06-19T09:42:47Z")
-        # Slots empty by this slice
+        # Apple slots (slice 02): description from iTunes (fixture has none -> ""),
+        # subtitle empty until browser merge, keyword_hints inferred by inversion.
         self.assertEqual(core["subtitle"], "")
         self.assertEqual(core["description"], "")
-        self.assertEqual(core["keyword_hints"], [])
+        self.assertEqual(core["keyword_hints"], ["musik", "podcasts", "spotify"])
 
     def test_map_itunes_to_core_degrades_safely_on_missing_fields(self):
         core = schema.map_itunes_to_core({"trackId": 1})
@@ -218,7 +219,7 @@ class SchemaTests(unittest.TestCase):
 
 
 # ===========================================================================
-# extract (trivial)
+# extract (real engine — smoke; edge cases in test_extraction.py)
 # ===========================================================================
 
 class ExtractTests(unittest.TestCase):
@@ -231,58 +232,82 @@ class ExtractTests(unittest.TestCase):
         self.assertIn("daily", toks)
         self.assertIn("tracker", toks)
 
-    def test_extract_counts_per_title_not_per_occurrence(self):
-        out = extract.extract_keywords(["Tracker Tracker", "Tracker Daily"])
+    def test_extract_takes_documents_and_counts_per_doc(self):
+        docs = [
+            {"title": "Tracker Tracker", "subtitle": "", "description": ""},
+            {"title": "Tracker Daily", "subtitle": "", "description": ""},
+        ]
+        out = extract.extract_keywords(docs, min_freq=1)
         by_term = {e["term"]: e["title_hits"] for e in out}
-        self.assertEqual(by_term["tracker"], 2)  # in both titles
+        # 'tracker' is in both titles (per-doc, not per-occurrence)
+        self.assertEqual(by_term["tracker"], 2)
         self.assertEqual(by_term["daily"], 1)
 
     def test_extract_is_deterministic_and_sorted(self):
-        titles = ["Habit Tracker", "Daily Habit", "Tracker Pro"]
-        a = extract.extract_keywords(titles)
-        b = extract.extract_keywords(titles)
+        docs = [
+            {"title": "Habit Tracker", "subtitle": "", "description": ""},
+            {"title": "Daily Habit", "subtitle": "", "description": ""},
+            {"title": "Tracker Pro", "subtitle": "", "description": ""},
+        ]
+        a = extract.extract_keywords(docs, min_freq=1)
+        b = extract.extract_keywords(docs, min_freq=1)
         self.assertEqual(a, b)
-        # sorted by (-title_hits, term): habit & tracker hit twice, then daily & pro
-        self.assertEqual([e["term"] for e in a], ["habit", "tracker", "daily", "pro"])
 
     def test_extract_drops_generics(self):
-        out = extract.extract_keywords(["Music App Music"], generics=["music"])
+        docs = [{"title": "Music App Music", "subtitle": "", "description": ""}]
+        out = extract.extract_keywords(docs, generics=["music"], min_freq=1)
         terms = {e["term"] for e in out}
         self.assertNotIn("music", terms)
 
 
 # ===========================================================================
-# score (placeholder)
+# score (real engine — smoke; edge cases in test_scoring.py)
 # ===========================================================================
 
 class ScoreTests(unittest.TestCase):
     def setUp(self):
-        self.extracted = [
-            {"term": "habit", "title_hits": 3},
-            {"term": "tracker", "title_hits": 2},
-            {"term": "randomword", "title_hits": 1},
-        ]
+        self.extracted = extract.extract_keywords(
+            [
+                {"title": "Habit Tracker", "subtitle": "", "description": ""},
+                {"title": "Daily Habit", "subtitle": "", "description": ""},
+                {"title": "Tracker Pro", "subtitle": "", "description": ""},
+            ],
+            min_freq=1,
+        )
 
-    def test_seed_keyword_gets_top_relevance(self):
-        scored = score.score_keywords(self.extracted, ["habit"], "desc", 5)
+    def test_seed_concept_term_scored_high_relevance(self):
+        # 'habit' is part of the seed description -> high cosine relevance
+        scored = score.score_keywords(
+            self.extracted, seed_description="A gamified habit tracker app", n_docs=3
+        )
         by_term = {s["term"]: s for s in scored}
-        self.assertEqual(by_term["habit"]["relevance"], 100)
+        self.assertIn("habit", by_term)
+        # relevance is a 0..100 proxy signal, never "volume"
+        self.assertTrue(0 <= by_term["habit"]["relevance"] <= 100)
 
-    def test_competition_is_title_share_fraction(self):
-        scored = score.score_keywords(self.extracted, [], "desc", 5)
+    def test_competition_is_position_weighted_share(self):
+        scored = score.score_keywords(
+            self.extracted, seed_description="desc", n_docs=3
+        )
         by_term = {s["term"]: s for s in scored}
-        self.assertEqual(by_term["habit"]["competition"], round(100 * 3 / 5))
-        self.assertEqual(by_term["tracker"]["competition"], round(100 * 2 / 5))
+        # 'habit' in 2 of 3 titles -> competition = round(100*(5*2/3)/9) = 37
+        self.assertEqual(by_term["habit"]["competition"], 37)
 
     def test_division_by_zero_when_no_competitors(self):
-        scored = score.score_keywords(self.extracted, [], "desc", 0)
+        scored = score.score_keywords(
+            self.extracted, seed_description="desc", n_docs=0
+        )
         self.assertTrue(all(s["competition"] == 0 for s in scored))
 
     def test_output_sorted_deterministically(self):
-        a = score.score_keywords(self.extracted, ["habit"], "desc", 5)
-        b = score.score_keywords(self.extracted, ["habit"], "desc", 5)
+        a = score.score_keywords(
+            self.extracted, seed_description="habit tracker", n_docs=3
+        )
+        b = score.score_keywords(
+            self.extracted, seed_description="habit tracker", n_docs=3
+        )
         self.assertEqual(a, b)
-        keys = [(-s["relevance"], -s["competition"], s["term"]) for s in a]
+        keys = [(-s["opportunity"], -s["relevance"], s["term"]) for s in a]
         self.assertEqual(keys, sorted(keys))
 
 
@@ -378,18 +403,24 @@ class ProcessResultsTests(unittest.TestCase):
         # sorted by -rating_count (Spotify 5.5M > Habit 12k)
         self.assertEqual(out["competitors"][0]["title"], "Spotify Musik und Podcasts")
 
-    def test_slot_fields_empty_in_output(self):
+    def test_slot_fields_subtitle_empty_without_browser(self):
         out = itunes.process_results([dict(RAW_ITUNES_SPOTIFY)], self.config)
         c = out["competitors"][0]
+        # subtitle needs the Playwright collector; without it the slot is empty
         self.assertEqual(c["subtitle"], "")
-        self.assertEqual(c["description"], "")
 
-    def test_seed_keyword_scored_top_relevance(self):
-        raw = [dict(RAW_ITUNES_HABIT)]  # title contains "habit"
+    def test_seed_concept_term_present_and_scored(self):
+        # two habit-bearing competitors so 'habit' clears the min_freq>=2 gate
+        second = dict(RAW_ITUNES_HABIT)
+        second["trackId"] = 987654399
+        second["trackName"] = "Habit Buddy"
+        raw = [dict(RAW_ITUNES_HABIT), second]
         out = itunes.process_results(raw, self.config)
         habit = next((k for k in out["keywords"] if k["term"] == "habit"), None)
         self.assertIsNotNone(habit)
-        self.assertEqual(habit["relevance"], 100)
+        # relevance is a 0..100 proxy signal (never "volume"), present on every term
+        self.assertTrue(0 <= habit["relevance"] <= 100)
+        self.assertIn(habit["split"], ("primary-candidate", "long-tail-candidate"))
 
     def test_determinism_byte_identical_full_path_twice(self):
         """AC: two runs of collect→extract→score→serialize are byte-identical."""

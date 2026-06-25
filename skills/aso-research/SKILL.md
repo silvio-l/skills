@@ -30,17 +30,22 @@ tokens), consistent with `ratchet-up` / `ship-to-*`.
 | Dispatcher (single entry point; run via `uv run`) | [scripts/aso_research.py](scripts/aso_research.py) |
 | Structured-input parsing + validation | [scripts/input_config.py](scripts/input_config.py) |
 | Run-identity (`YYYYMMDD-HHMMSS-<app-slug>`) | [scripts/run_id.py](scripts/run_id.py) |
-| HTTP response cache (~/.cache/aso-research/, 24h TTL) | [scripts/cache.py](scripts/cache.py) |
-| iTunes Search collector (Apple Core metadata) | [scripts/itunes.py](scripts/itunes.py) |
-| Unified category taxonomy + raw→Core schema mapping | [scripts/schema.py](scripts/schema.py) |
-| Keyword extraction (trivial in slice 01; real engine slice 02) | [scripts/extract.py](scripts/extract.py) |
-| Placeholder scoring (real Competition/Relevance slice 02) | [scripts/score.py](scripts/score.py) |
+| HTTP response cache (~/.cache/aso-research/, 24h HTTP / 12h browser TTL) | [scripts/cache.py](scripts/cache.py) |
+| Shared politeness rule-set (≤1 req/s + jitter, backoff, robots, no stealth) | [scripts/politeness.py](scripts/politeness.py) |
+| iTunes Search + Lookup collector (Apple Core metadata) | [scripts/itunes.py](scripts/itunes.py) |
+| Apple subtitle + similar-apps collector (Playwright, 12h cache) | [scripts/apple_browser.py](scripts/apple_browser.py) |
+| Apple RSS Marketing-Tools charts collector | [scripts/apple_rss.py](scripts/apple_rss.py) |
+| Reddit `.json` qualitative-signal collector | [scripts/reddit.py](scripts/reddit.py) |
+| Apple Search-Suggest autocomplete collector | [scripts/search_suggest.py](scripts/search_suggest.py) |
+| Deep Apple collection orchestration (never-blocking, injectable) | [scripts/collect.py](scripts/collect.py) |
+| Unified category taxonomy + raw→Core+Slots schema mapping | [scripts/schema.py](scripts/schema.py) |
+| Keyword extraction (YAKE + TF-IDF position-weighted + suggest) | [scripts/extract.py](scripts/extract.py) |
+| Scoring (Competition/Relevance proxy, opportunity, split, is_gap) | [scripts/score.py](scripts/score.py) |
 | Stable serialization (byte-identical determinism) | [scripts/serialize.py](scripts/serialize.py) |
-| Minimal report assembly (2 sections in slice 01; 8 sections slice 03) | [scripts/report.py](scripts/report.py) |
+| Report assembly (Competitive Landscape + Keyword Report + Sources) | [scripts/report.py](scripts/report.py) |
 
 Read `pipeline.md` before running. `SKILL.md` is the always-on layer —
-keep it minimal; push per-stage detail into phase docs that later
-slices fill in.
+keep it minimal; push per-stage detail into phase docs.
 
 ## Quick start
 
@@ -62,11 +67,18 @@ stdout. **Open `report.md` and verify it** before declaring the run
 done. The canonical design source is the PRD at
 `.scratch/aso-research/PRD.md`.
 
-## Current scope (slice 01 — skeleton)
+## Current scope (slice 02 — deep Apple spine)
 
-This slice proves the whole loop on the thinnest possible end-to-end
-path: **Apple only**, **iTunes Search API only** (no Playwright, no
-charts, no Reddit), **trivial title-token extraction** with a
-**placeholder** relevance/competition signal, and a **2-section**
-report. The real engine (YAKE/TF-IDF), Apple subtitle, other stores,
-and the LLM interpretation land in later slices. Do not over-build here.
+Slice 02 deepens the deterministic spine end to end on **Apple only**:
+real keyword extraction (YAKE phrases + TF-IDF with position weighting
+Title ×5 · Subtitle ×3 · Description ×1, DE+EN stopwords, generics
+filter, min frequency ≥2, light morphology grouping, Apple Search-Suggest
+enrichment) and the real scoring engine (Competition = position-weighted
+share, Relevance = cosine TF-IDF + Search-Suggest boost, Opportunity +
+niche bonus, primary/long-tail split, `is_gap`). Collectors: iTunes
+Search + Lookup, Apple subtitle + similar-apps (Playwright), Apple RSS
+charts, Reddit `.json`, Apple Search-Suggest — all under the politeness
+rule-set, **never-blocking** (a failing source is marked "unavailable"),
+**no stealth plugins**. The report gains a real **Keyword Report**
+section labelled "Competition/Relevance signal" (never search volume).
+No Google Play, no Microsoft, no LLM yet (slices 03–05).
