@@ -357,7 +357,8 @@ class CollectMsTests(unittest.TestCase):
             return [{"id": "ms1", "title": "MS Habit", "description": "windows tool",
                      "category": "Health & Fitness", "free": True}]
 
-        out = collect.collect_ms(self.config, seed_terms=["habit"], search_fn=search_fn)
+        out = collect.collect_ms(self.config, seed_terms=["habit"],
+                                 search_fn=search_fn, detail_fn=lambda *a, **k: {})
         self.assertTrue(out["ms_entries"])
         for e in out["ms_entries"]:
             self.assertEqual(e["platform"], "ms")
@@ -381,7 +382,7 @@ class CollectMsTests(unittest.TestCase):
             return [{"id": "ms1", "title": "MS Habit", "description": "d", "free": True}]
 
         out = collect.collect_ms(self.config, seed_terms=["habit", "tracker"],
-                                 search_fn=search_fn)
+                                 search_fn=search_fn, detail_fn=lambda *a, **k: {})
         ids = [e["id"] for e in out["ms_entries"]]
         self.assertEqual(ids.count("ms1"), 1)
 
@@ -390,7 +391,8 @@ class CollectMsTests(unittest.TestCase):
         def search_fn(term, **_k):
             return [{"id": "ms1", "title": "MS Habit", "description": "d", "free": True}]
 
-        out = collect.collect_ms(self.config, seed_terms=["habit"], search_fn=search_fn)
+        out = collect.collect_ms(self.config, seed_terms=["habit"],
+                                 search_fn=search_fn, detail_fn=lambda *a, **k: {})
         self.assertNotIn("competitors", out)
         self.assertIn("ms_entries", out)
 
@@ -409,10 +411,78 @@ class CollectMsTests(unittest.TestCase):
             seed_terms=["habit"],
             search_fn=lambda term, **k: [{"id": "ms1", "title": "MS Habit",
                                           "description": "d", "free": True}],
+            detail_fn=lambda *a, **k: {},
         )
         a = collect.collect_ms(self.config, **kwargs)
         b = collect.collect_ms(self.config, **kwargs)
         self.assertEqual(a, b)
+
+    def test_search_to_detail_pipeline_with_both_fakes_injected(self):
+        """AC: injected-fake test verifies the search-to-detail pipeline.
+
+        The discover (search_fn) -> enrich (detail_fn) wire in collect_ms
+        must produce enriched MS entries when both sides succeed.
+        """
+        def search_fn(term, **_k):
+            # Simulate a search that returns multiple app cards.
+            return [
+                {"id": "9n7wbb04192f", "title": "Transkribieren - Speech to Text",
+                 "description": "card-level desc", "free": True},
+                {"id": "9pp0jqlbrmf8", "title": "Transcribe - Speech to Text",
+                 "description": "", "free": True},
+            ]
+
+        def detail_fn(app_ids, **_k):
+            # Enrich only the first; second deliberately missing.
+            return {"9n7wbb04192f": {
+                "id": "9n7wbb04192f",
+                "description": "Konvertieren Sie Audio in Text.",
+                "rating_avg": 4.6,
+                "rating_count": 7421,
+                "reviews_sample": ["Top!", "Sehr nützlich", "Empfehlenswert"],
+            }}
+
+        out = collect.collect_ms(
+            self.config, seed_terms=["spracherkennung"],
+            search_fn=search_fn, detail_fn=detail_fn,
+        )
+
+        # search returned 2 entries -> both in ms_entries
+        self.assertEqual(len(out["ms_entries"]), 2)
+        self.assertEqual(out["source_status"]["ms"]["status"], "ok")
+        self.assertEqual(out["source_status"]["ms"]["result_count"], 2)
+
+        # first entry enriched via detail_fn
+        found = {e["id"]: e for e in out["ms_entries"]}
+        self.assertIn("9n7wbb04192f", found)
+        e1 = found["9n7wbb04192f"]
+        self.assertIn("Konvertieren Sie Audio", e1["description"])
+        self.assertEqual(e1["rating_avg"], 4.6)
+        self.assertEqual(e1["rating_count"], 7421)
+        self.assertEqual(e1["reviews_sample"], ["Top!", "Sehr nützlich", "Empfehlenswert"])
+
+        # second entry keeps its search-level description (detail missing)
+        e2 = found["9pp0jqlbrmf8"]
+        self.assertEqual(e2["description"], "")
+
+    def test_search_to_detail_pipeline_empty_search_short_circuits(self):
+        """AC: zero results from search -> no detail call, source marked unavailable."""
+        detail_called = []
+
+        def search_fn(term, **_k):
+            return []
+
+        def detail_fn(app_ids, **_k):
+            detail_called.append(1)
+            return {}
+
+        out = collect.collect_ms(
+            self.config, seed_terms=["spracherkennung"],
+            search_fn=search_fn, detail_fn=detail_fn,
+        )
+        self.assertEqual(out["ms_entries"], [])
+        self.assertEqual(out["source_status"]["ms"]["status"], "unavailable")
+        self.assertEqual(detail_called, [])
 
 
 # ===========================================================================

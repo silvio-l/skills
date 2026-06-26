@@ -48,10 +48,10 @@ BROWSER_TTL = CACHE.BROWSER_TTL
 # The SPA renders app cards once these anchors/titles exist. Tolerant: try
 # several, take the first that matches (MS markup shifts over time).
 _RESULT_READY_SELECTORS = (
+    "a[href*='/detail/']",
     "[data-testid='searchPage']",
     "div[role='list']",
     "section[aria-label='Search results']",
-    "a[href*='/detail/']",
 )
 # A detail-page description selector (used when a card carries it).
 _DESC_SELECTORS = (
