@@ -30,13 +30,114 @@ marks the source "unavailable".
 from __future__ import annotations
 
 import json
+import os
 import re
-from typing import Callable, Dict, List, Optional
+import subprocess
+import sys
+from typing import Callable, Dict, List, Optional, Tuple
 
 import cache as CACHE
 import politeness as POLITE
 
 BROWSER_TTL = CACHE.BROWSER_TTL
+
+# Chromium bootstrap — idempotent per-process probe + install.
+_ensure_chromium_done = False
+_ensure_chromium_result: Optional[Tuple[bool, Optional[str]]] = None
+
+
+def _chromium_log(msg: str, *, log_file=None) -> None:
+    """Emit an observable [chromium] log line to the supplied file or stderr."""
+    target = log_file if log_file is not None else sys.stderr
+    print(f"[chromium] {msg}", file=target)
+
+
+def _ensure_chromium(
+    probe_fn=None,
+    install_fn=None,
+    *,
+    log_file=None,
+) -> Tuple[bool, Optional[str]]:
+    """Ensure Playwright's Chromium binary is present; install if missing.
+
+    Idempotent — the probe runs at most once per process. Returns
+    ``(available: bool, reason: str | None)``. A ``False`` return is a
+    never-blocking degradation: the caller skips browser work and reports
+    the reason upstream.
+
+    Both ``probe_fn() -> bool`` and ``install_fn() -> bool | (bool, str)``
+    are injectable so tests can simulate every state without a real browser.
+    """
+    global _ensure_chromium_done, _ensure_chromium_result
+    if _ensure_chromium_done:
+        _chromium_log("(cached) skip probe — already ran this process", log_file=log_file)
+        assert _ensure_chromium_result is not None
+        return _ensure_chromium_result
+
+    _ensure_chromium_done = True
+
+    if probe_fn is None:
+        def _default_probe() -> bool:
+            try:
+                from playwright.sync_api import sync_playwright
+            except Exception:
+                return False
+            try:
+                with sync_playwright() as pw:
+                    exe = pw.chromium.executable_path
+                    return bool(exe and os.path.exists(exe))
+            except Exception:
+                return False
+        probe_fn = _default_probe
+
+    try:
+        present = probe_fn()
+    except Exception as exc:
+        reason = f"{type(exc).__name__}: {exc}"
+        _chromium_log(f"probe error: {reason}", log_file=log_file)
+        _ensure_chromium_result = (False, reason)
+        return _ensure_chromium_result
+
+    if present:
+        _chromium_log("probe: present -> skip install", log_file=log_file)
+        _ensure_chromium_result = (True, None)
+        return _ensure_chromium_result
+
+    _chromium_log("probe: absent -> installing chromium...", log_file=log_file)
+
+    if install_fn is None:
+        def _default_install():
+            result = subprocess.run(
+                [sys.executable, "-m", "playwright", "install", "chromium"],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            return result.returncode == 0, result.stderr.strip() or result.stdout.strip()
+        install_fn = _default_install
+
+    try:
+        install_result = install_fn()
+    except Exception as exc:
+        reason = f"{type(exc).__name__}: {exc}"
+        _chromium_log(f"install error: {reason}", log_file=log_file)
+        _ensure_chromium_result = (False, reason)
+        return _ensure_chromium_result
+
+    if isinstance(install_result, bool):
+        ok, output = install_result, ""
+    else:
+        ok, output = install_result
+
+    if ok:
+        _chromium_log("install: ok", log_file=log_file)
+        _ensure_chromium_result = (True, None)
+    else:
+        reason = (output or "install failed").split("\n")[0].strip()[:120]
+        _chromium_log(f"install: failed — {reason}", log_file=log_file)
+        _ensure_chromium_result = (False, reason)
+
+    return _ensure_chromium_result
 # Tolerant subtitle selectors (Apple markup shifts; try several, take first).
 _SUBTITLE_SELECTORS = (
     "h2.product-header__subtitle",
@@ -124,6 +225,11 @@ def fetch_apple_app(
         from playwright.sync_api import sync_playwright
     except Exception:
         # Playwright unavailable -> never block; caller marks source unavailable.
+        return empty
+
+    ok, reason = _ensure_chromium()
+    if not ok:
+        _chromium_log(f"browser blocked: {reason}")
         return empty
 
     result = empty

@@ -42,6 +42,7 @@ from typing import Callable, Dict, List, Optional
 
 import cache as CACHE
 import politeness as POLITE
+from apple_browser import _ensure_chromium, _chromium_log
 
 BROWSER_TTL = CACHE.BROWSER_TTL
 # The SPA renders app cards once these anchors/titles exist. Tolerant: try
@@ -178,6 +179,11 @@ def fetch_ms_search(
         from playwright.sync_api import sync_playwright
     except Exception:
         # Playwright unavailable -> never block; caller marks source unavailable.
+        return []
+
+    ok, reason = _ensure_chromium()
+    if not ok:
+        _chromium_log(f"browser blocked: {reason}")
         return []
 
     rng = random.Random()
