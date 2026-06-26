@@ -31,7 +31,12 @@ The S1 representation schema (what the gate measures + S1/S2 read)::
       "condensed_profiles": [ <condensed profile>, ... ],  # strength-ordered
       "score_table": [ <scored keyword>, ... ],            # capped top-N
       "reddit_summaries": [ {subreddit, title, score}, ... ],
+      "qualitative_ms": [ {title, developer, category, ...}, ... ],  # slice 05
     }
+
+``qualitative_ms`` (slice 05) carries Microsoft Store entries as additional
+context for S1 only — never scored, never in ``condensed_profiles`` / the
+score table (which stay Apple+Play).
 """
 
 from __future__ import annotations
@@ -41,6 +46,7 @@ from typing import Dict, List, Optional
 # Caps that bound the representation before the gate even measures it.
 _SCORE_TABLE_CAP = 50  # top-50 keywords by opportunity (PRD: top 50-80 in report)
 _REDDIT_CAP = 10       # top-10 Reddit summaries feed S1's qualitative read
+_MS_CAP = 10           # top-10 MS entries feed S1 as qualitative context (slice 05)
 
 # Fields H1 is allowed to see (the raw metadata it condenses).
 _H1_INPUT_FIELDS = (
@@ -102,6 +108,7 @@ def build_llm_input(
     reddit_threads: List[Dict],
     *,
     config: Dict,
+    ms_entries: Optional[List[Dict]] = None,
 ) -> Dict:
     """Assemble the token-gated S1 representation from H1 outputs + artefacts.
 
@@ -111,6 +118,14 @@ def build_llm_input(
     table + Reddit are pre-capped so the representation is bounded before
     the gate measures it; the caller is expected to pass
     ``condensed_profiles`` in strength order (the gate trims the tail).
+
+    **MS qualitative context (slice 05):** ``ms_entries`` are carried under
+    ``qualitative_ms`` as *additional context* for S1 (Niche & Positioning
+    Analyst) — a short description snippet + Core facts per MS app, capped
+    and strength-ordered. They are structurally isolated: they NEVER enter
+    ``condensed_profiles`` or ``score_table`` (which stay Apple+Play), so the
+    MS data cannot influence keyword extraction or scoring. There is no MS
+    slot model.
     """
     own_app_id = (config.get("own_app_id") or "").strip() or None
     own_ids = {own_app_id} if own_app_id else set()
@@ -144,6 +159,23 @@ def build_llm_input(
         for t in (reddit_threads or [])[:_REDDIT_CAP]
     ]
 
+    # MS qualitative context: strength-ordered, capped, description snipped so
+    # raw MS prose stays bounded. Carried as context ONLY — never scored.
+    qualitative_ms: List[Dict] = []
+    for e in (ms_entries or []):
+        if not e:
+            continue
+        qualitative_ms.append({
+            "title": e.get("title", ""),
+            "developer": e.get("developer", ""),
+            "category": e.get("category", ""),
+            "rating_avg": e.get("rating_avg"),
+            "rating_count": e.get("rating_count", 0) or 0,
+            "description": (e.get("description") or "")[:500],
+        })
+    qualitative_ms.sort(key=lambda e: (-(e.get("rating_count") or 0), e.get("title", "")))
+    qualitative_ms = qualitative_ms[:_MS_CAP]
+
     return {
         "own_app_id": own_app_id,
         "meta": {
@@ -154,6 +186,7 @@ def build_llm_input(
         "condensed_profiles": flagged_profiles,
         "score_table": score_table,
         "reddit_summaries": reddit_summaries,
+        "qualitative_ms": qualitative_ms,
     }
 
 

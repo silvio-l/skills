@@ -30,6 +30,7 @@ from typing import Dict, List
 
 PLATFORM = "apple"
 PLAY_PLATFORM = "play"
+MS_PLATFORM = "ms"
 
 # Discovery slot: populated by the similar-apps collector (slice 02).
 _DEFAULT_CORE: Dict[str, object] = {
@@ -303,3 +304,65 @@ def merge_play_slots(
                 clean.append(s)
         merged["similar_app_ids"] = clean
     return merged
+
+
+# ---------------------------------------------------------------------------
+# Microsoft Store Core + description mapping (slice 05 — qualitative-only)
+# ---------------------------------------------------------------------------
+
+def infer_ms_price_model(raw: dict) -> str:
+    """Infer ``free`` / ``paid`` from the MS Store price fields.
+
+    MS Store scraping exposes a ``free`` boolean and/or a numeric ``price``;
+    we prefer the explicit boolean, then the numeric price. Mirrors the Play
+    inference shape.
+    """
+    if "free" in raw and raw["free"] is not None:
+        return "free" if bool(raw["free"]) else "paid"
+    price = raw.get("price")
+    if isinstance(price, (int, float)) and price > 0:
+        return "paid"
+    return "free"
+
+
+def map_ms_to_core(raw: dict) -> dict:
+    """Map one raw Microsoft Store app record onto MS Core + ``description``.
+
+    MS is a **qualitative-only** source (PRD "MS slots: description only"):
+    there is NO MS ASO slot model, so this record carries exactly one slot —
+    ``description`` — plus the Core fields and the discovery field. It is
+    structurally isolated from scoring: the dispatcher keeps MS entries out of
+    the extraction/scoring corpus and feeds them to S1 as qualitative context.
+
+    The raw dict is whatever the SPA-aware MS collector extracts from
+    ``apps.microsoft.com`` (id, title, description, publisher, category,
+    ratings, price, last update, screenshots). Missing fields degrade to safe
+    defaults rather than raising, so one oddly-shaped result cannot abort the
+    best-effort pass. The record intentionally carries NO Apple/Play slot keys.
+    """
+    app_id = raw.get("id") or raw.get("productId") or ""
+    title = raw.get("title") or raw.get("name") or ""
+    description = strip_html(raw.get("description") or "")
+    category = raw.get("category") or raw.get("primaryCategory") or raw.get("genre") or ""
+    screenshots = raw.get("screenshots") or raw.get("screenshotUrls") or []
+    rating_avg = raw.get("averageRating")
+    if rating_avg is None:
+        rating_avg = raw.get("rating_avg")
+    return {
+        # --- Core ---
+        "id": str(app_id) if app_id != "" else "",
+        "platform": MS_PLATFORM,
+        "store_url": raw.get("store_url") or raw.get("url") or "",
+        "title": title,
+        "developer": raw.get("publisher") or raw.get("developer") or "",
+        "category": map_category(category),
+        "rating_avg": rating_avg,
+        "rating_count": raw.get("ratingCount") or raw.get("rating_count") or 0,
+        "last_updated": raw.get("lastUpdateDate") or raw.get("last_updated") or "",
+        "price_model": infer_ms_price_model(raw),
+        "screenshot_count": len(screenshots),
+        # --- MS slot (description only — NO other slot model) ---
+        "description": description,
+        # --- Discovery slot ---
+        "similar_app_ids": [],
+    }

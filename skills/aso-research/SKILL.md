@@ -38,6 +38,7 @@ tokens), consistent with `ratchet-up` / `ship-to-*`.
 | Reddit `.json` qualitative-signal collector | [scripts/reddit.py](scripts/reddit.py) |
 | Apple Search-Suggest autocomplete collector | [scripts/search_suggest.py](scripts/search_suggest.py) |
 | Google Play collector (google-play-scraper via npx; search/charts/similar/suggest) | [scripts/play.py](scripts/play.py) |
+| Microsoft Store best-effort collector (Playwright, SPA-aware; qualitative-only) | [scripts/ms.py](scripts/ms.py) |
 | Deep Apple collection orchestration (never-blocking, injectable) | [scripts/collect.py](scripts/collect.py) |
 | Unified category taxonomy + raw→Core+Slots schema mapping | [scripts/schema.py](scripts/schema.py) |
 | Keyword extraction (YAKE + TF-IDF position-weighted + suggest) | [scripts/extract.py](scripts/extract.py) |
@@ -128,4 +129,18 @@ reusing the shared scoring engine and the LLM listing path:
 
 The LLM subagent mechanism itself (H1/S1/S2/H2 call flow, pinned models) is
 unchanged from slice 03 — only the listing/crosscheck now also covers the
-Play slot model. Microsoft scoring and resumability/diff remain later slices.
+Play slot model.
+
+- **Microsoft Store best-effort (slice 05).** `apps.microsoft.com` is a
+  single-page app, so the MS collector ([scripts/ms.py](scripts/ms.py)) drives
+  Playwright with `networkidle` + `wait_for_selector`. It collects MS Core
+  metadata + the `description` slot only — there is **no MS ASO slot model**.
+  MS is **qualitative-only and structurally isolated**: its entries
+  (`ms-entries.json`) are kept OUT of the scoring `competitors` corpus and
+  never reach keyword extraction/scoring; they are wired into the S1
+  representation (`llm/s1-input.json` → `qualitative_ms`) as additional
+  qualitative context. MS is the lowest-priority, most fragile source and is
+  **never-blocking** — on failure it is marked `"unavailable"`, the report
+  notes it, and Apple + Play results stay intact. Same shared politeness
+  rule-set as the other Playwright collectors (≤1 req/s + jitter, backoff on
+  429/503, robots.txt, no stealth). Resumability/diff remain a later slice.

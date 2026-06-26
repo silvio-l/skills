@@ -1,7 +1,7 @@
 # aso-research — Pipeline
 
 The staged, cacheable, resumable pipeline. Each slice of the PRD fills
-in more stages; this document records the **current (slice 03)** state
+in more stages; this document records the **current (slice 05)** state
 and the contracts later slices build on.
 
 ## Stages (deterministic → artefacts)
@@ -16,17 +16,23 @@ Input (structured YAML/JSON)
   │                          feeds niche competitors back into the corpus
   │                          Play Core + Slots (slice 04): short + full
   │                          description (tags dropped)
+  │                          MS Core + description (slice 05): SPA-aware
+  │                          Playwright (networkidle + wait_for_selector),
+  │                          qualitative-only — NOT in the scoring corpus
   ├ 2x  Deep channels      ── Apple RSS charts, Reddit .json,
   │                          Apple + Play Search-Suggest (slice 02/04) — never-blocking
   ├─ 30  Keyword Extract   ── YAKE phrases + TF-IDF position-weighted + suggest
   │                          (per-platform field tuples: Apple 5/3/1, Play 5/4/2)
+  │                          (MS never enters extraction — qualitative-only)
   ├─ 40  Score             ── Competition/Relevance proxy + opportunity + split + gap
-  │                          (shared engine, per-platform slot weights; unified table)
+  │                          (shared engine, per-platform slot weights; unified table;
+  │                          table stays Apple + Play — MS has no slot model)
   ├─ 50  Token-Budget Gate ── Python: measure + auto-trim the condensed LLM
   │                          representation under ~70k tokens (slice 03)
   ├─ 60  LLM Interpret     ── Agent-performed H1/S1/S2/H2 subagents (slice 03/04);
   │                          Claude-native, no external paid API, pinned models;
-  │                          S2/H2 emit a per-store listing (Apple + Play)
+  │                          S2/H2 emit a per-store listing (Apple + Play);
+  │                          S1 also receives MS as qualitative context (slice 05)
   └─ 80  Report            ── Python assembles the full 8-section report.md from
                               artefacts + subagent outputs (slice 03/04)
 ```
@@ -57,6 +63,13 @@ subagent interpretation steps.
   `google-play-scraper` (`summary` → short, `description` → long, both
   HTML-stripped). **`tags` are dropped** — not reliably extractable (verified
   in the feasibility probe); the Play record carries no `tags` key.
+
+- **MS slots (slice 05):** `description` only — **there is no MS ASO slot
+  model**. Collected best-effort via the SPA-aware Playwright collector
+  ([scripts/ms.py](scripts/ms.py): `networkidle` + `wait_for_selector`). MS is
+  **qualitative-only and structurally isolated**: MS records live in
+  `ms-entries.json` (never in the scoring `competition.json` corpus) and feed
+  S1 as `qualitative_ms` context. They never enter extraction or scoring.
 
 ## Unified category taxonomy
 

@@ -121,6 +121,8 @@ def build_report(
     # --- slice 04 Play listing (optional; absent -> Apple-only report) ---
     s2_play_output: Optional[Dict] = None,
     h2_play_output: Optional[Dict] = None,
+    # --- slice 05 MS best-effort (optional; qualitative-only, never scored) ---
+    ms_entries: Optional[List[Dict]] = None,
 ) -> str:
     """Assemble the 8-section ``report.md`` body as a string."""
     n_comp = len(competitors)
@@ -261,6 +263,18 @@ def build_report(
         for cat in sorted(clusters):
             titles = ", ".join(_md_escape(t) for t in clusters[cat][:6])
             lines.append(f"- **{cat}:** {titles}")
+    # Microsoft Store qualitative signal (slice 05) — best-effort, qualitative
+    # only. Surfaced when the MS source ran and returned entries; S1 reads it
+    # as additional context, it is never scored (no MS slot model).
+    if ms_entries and source_status.get("ms") == "ok":
+        ms_titles = ", ".join(_md_escape(e.get("title", "")) for e in ms_entries[:8])
+        lines.append("")
+        lines.append(
+            f"**Microsoft Store (qualitative, best-effort):** {len(ms_entries)} app(s) "
+            f"observed on apps.microsoft.com — {ms_titles}. This is additional "
+            f"qualitative context for positioning only (the MS Store is an SPA, "
+            f"collected best-effort); it does NOT enter keyword scoring."
+        )
     lines.append("")
 
     # === 4. Keyword Report ===
@@ -425,6 +439,24 @@ def build_report(
             "with Play's own position weighting (Title ×5 · Short ×4 · Long ×2) "
             "and Play autocomplete enriches the suggest set alongside Apple's."
         )
+    # Microsoft Store (slice 05) — best-effort + qualitative-only.
+    if source_status.get("ms") == "ok":
+        lines.append("")
+        lines.append(
+            "Microsoft Store metadata collected **best-effort** via Playwright "
+            "(``apps.microsoft.com`` is a single-page app, so collection uses "
+            "``networkidle`` + ``wait_for_selector``). MS carries the ``description`` "
+            "slot only — **there is no MS ASO slot model and MS data never enters "
+            "keyword extraction or scoring**. It is passed to the S1 Niche & "
+            "Positioning Analyst as additional qualitative context."
+        )
+    elif "ms" in source_status:
+        lines.append("")
+        lines.append(
+            "Microsoft Store was **unavailable** this run (best-effort, never-"
+            "blocking — the pipeline completed with Apple + Play results intact). "
+            "MS is qualitative-only and would not have entered scoring regardless."
+        )
     lines.append("")
     lines.append("**Honesty — what is a proxy vs what is real:**")
     lines.append(
@@ -466,6 +498,7 @@ def _source_split(source_status: Dict[str, str]):
         "apple_subtitle", "apple_similar", "apple_rss_charts",
         "reddit", "apple_search_suggest",
         "play_search", "play_charts", "play_similar", "play_search_suggest",
+        "ms",
     )
     ran, unavailable = [], []
     for src in order:

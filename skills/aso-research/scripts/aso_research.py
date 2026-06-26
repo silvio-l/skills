@@ -170,10 +170,11 @@ def _run_gate(run_dir: str) -> int:
         return 2
     keywords = _load_json(os.path.join(run_dir, "keywords.json")) or []
     reddit_threads = _load_json(os.path.join(run_dir, "reddit-threads.json")) or []
+    ms_entries = _load_json(os.path.join(run_dir, "ms-entries.json")) or []
     config = _load_json(os.path.join(run_dir, "run-config.json")) or {}
 
     rep = condense.build_llm_input(
-        condensed_profiles, keywords, reddit_threads, config=config
+        condensed_profiles, keywords, reddit_threads, config=config, ms_entries=ms_entries
     )
     trimmed, gate_report = llm_gate.apply_token_gate(rep, _gate_token_limit(config))
     os.makedirs(os.path.join(run_dir, "llm"), exist_ok=True)
@@ -199,6 +200,7 @@ def _assemble(run_dir: str) -> int:
     config = _load_json(os.path.join(run_dir, "run-config.json")) or {}
     summary = _load_json(os.path.join(run_dir, "run-summary.json")) or {}
     reddit_threads = _load_json(os.path.join(run_dir, "reddit-threads.json")) or []
+    ms_entries = _load_json(os.path.join(run_dir, "ms-entries.json")) or []
     source_status = summary.get("source_status") or {}
 
     # Agent-produced subagent outputs (all optional → deterministic fallback).
@@ -221,6 +223,7 @@ def _assemble(run_dir: str) -> int:
         condensed_profiles=condensed_profiles,
         s1_output=s1_output, s2_output=s2_output, h2_output=h2_output,
         s2_play_output=s2_play_output, h2_play_output=h2_play_output,
+        ms_entries=ms_entries,
     )
     with open(os.path.join(run_dir, "report.md"), "w", encoding="utf-8") as fh:
         fh.write(report_md)
@@ -229,7 +232,7 @@ def _assemble(run_dir: str) -> int:
     return 0
 
 
-def _write_report(run_dir, config, competitors, keywords, source_status, reddit_threads, now):
+def _write_report(run_dir, config, competitors, keywords, source_status, reddit_threads, now, ms_entries=None):
     """Write report.md from whatever subagent outputs already exist (if any)."""
     condensed_profiles = _load_json(os.path.join(run_dir, _H1_CONDENSED)) or []
     s1_output = _load_json(os.path.join(run_dir, _S1_ANALYSIS))
@@ -243,6 +246,7 @@ def _write_report(run_dir, config, competitors, keywords, source_status, reddit_
         condensed_profiles=condensed_profiles,
         s1_output=s1_output, s2_output=s2_output, h2_output=h2_output,
         s2_play_output=s2_play_output, h2_play_output=h2_play_output,
+        ms_entries=ms_entries or [],
     )
     with open(os.path.join(run_dir, "report.md"), "w", encoding="utf-8") as fh:
         fh.write(report_md)
@@ -331,6 +335,27 @@ def run(argv=None) -> int:
         file=sys.stderr,
     )
 
+    # --- Microsoft Store best-effort (slice 05; qualitative-only; never-blocking) ---
+    # MS is STRUCTURALLY ISOLATED: entries are kept OUT of the scoring
+    # `competitors` corpus and fed to S1 as qualitative context only.
+    ms = collect.collect_ms(
+        config,
+        seed_terms=config.get("seed_keywords") or [],
+        country=config.get("country", "de"),
+        cache_dir=args.cache_dir,
+        fresh=args.fresh,
+    )
+    ms_entries = ms["ms_entries"]
+    for src, status in ms["source_status"].items():
+        source_status[src] = status
+        if status != "ok":
+            print(f"[aso-research] source {src}: {status}", file=sys.stderr)
+    print(
+        f"[aso-research] ms best-effort: {len(ms_entries)} qualitative entr(y/ies) "
+        f"(not scored; feeds S1 as qualitative context)",
+        file=sys.stderr,
+    )
+
     scored = collect.extract_and_score(competitors, config, suggest_terms=suggest_terms)
     keywords = scored["keywords"]
     print(f"[aso-research] scored {len(keywords)} keyword(s)", file=sys.stderr)
@@ -339,6 +364,7 @@ def run(argv=None) -> int:
     serialize.dump_json(keywords, os.path.join(run_dir, "keywords.json"))
     serialize.dump_json(competitors, os.path.join(run_dir, "competition.json"))
     serialize.dump_json(reddit_threads, os.path.join(run_dir, "reddit-threads.json"))
+    serialize.dump_json(ms_entries, os.path.join(run_dir, "ms-entries.json"))
     serialize.dump_json(
         {
             "run_id": run_id_str,
@@ -354,9 +380,11 @@ def run(argv=None) -> int:
                 "play_charts",
                 "play_similar",
                 "play_search_suggest",
+                "ms_best_effort",
             ],
             "competitor_count": len(competitors),
             "keyword_count": len(keywords),
+            "ms_qualitative_count": len(ms_entries),
             "source_status": source_status,
         },
         os.path.join(run_dir, "run-summary.json"),
@@ -373,7 +401,7 @@ def run(argv=None) -> int:
     serialize.dump_json(h1_input, os.path.join(run_dir, "llm-input/h1-input.json"))
 
     # --- report.md (timestamp differs between runs by design) ---
-    _write_report(run_dir, config, competitors, keywords, source_status, reddit_threads, now)
+    _write_report(run_dir, config, competitors, keywords, source_status, reddit_threads, now, ms_entries=ms_entries)
     if not os.path.exists(os.path.join(run_dir, _H1_CONDENSED)):
         print(
             "[aso-research] next: run H1 → `--gate <run-dir>` → S1 → S2 → H2 "

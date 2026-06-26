@@ -407,3 +407,85 @@ def collect_play(
         "suggest_terms": suggest,
         "source_status": source_status,
     }
+
+
+# ---------------------------------------------------------------------------
+# Microsoft Store best-effort collection (slice 05 — qualitative-only)
+# ---------------------------------------------------------------------------
+
+def _ms_safe(fn, *args, **kwargs):
+    """Run an MS collector; on any exception return (None, error). Never raises."""
+    try:
+        return fn(*args, **kwargs), None
+    except Exception as exc:  # never-blocking
+        return None, exc
+
+
+def collect_ms(
+    config: Dict,
+    *,
+    seed_terms: Optional[List[str]] = None,
+    country: str = "de",
+    cache_dir: str = "",
+    fresh: bool = False,
+    # injectable collector (tests pass a fake; default hits the live module)
+    search_fn: Optional[Callable] = None,
+) -> Dict:
+    """Run the MS best-effort collection (SPA-aware, qualitative-only).
+
+    Returns::
+
+        {
+          "ms_entries":    [...MS Core+description records, deduped, sorted],
+          "source_status": {"ms": "ok"|"unavailable"},
+        }
+
+    **Structural isolation (the heart of slice 05):** MS entries are returned
+    under ``ms_entries`` and are NEVER merged into the scoring ``competitors``
+    corpus. They feed S1 (Niche & Positioning Analyst) as qualitative context
+    only — they do not enter keyword extraction or scoring, and there is no MS
+    slot model. The dispatcher writes them to ``ms-entries.json`` separately.
+
+    Never-blocking + lowest priority: MS is the most fragile source (SPA +
+    reachability). The search collector is injectable so the orchestration
+    (source-status tracking, never-blocking, dedup) is fully offline-testable
+    with fixtures — the live Playwright collector itself is not unit-tested.
+    A failing source is recorded ``"unavailable"`` and the run continues.
+    Mirrors :func:`collect_apple` / :func:`collect_play`.
+    """
+    import ms as ms_collector  # type: ignore
+
+    source_status: Dict[str, str] = {}
+    search_fn = search_fn or ms_collector.search
+
+    seed_terms = list(seed_terms or config.get("seed_keywords") or [])
+    if config.get("app_name"):
+        seed_terms = seed_terms + [config["app_name"]]
+
+    by_id: Dict[str, Dict] = {}
+    ms_entries: List[Dict] = []
+    ms_ok = False
+
+    # --- MS best-effort search (seed keywords + app name) ---
+    for term in seed_terms:
+        results, err = _ms_safe(
+            search_fn, term, country=country, cache_dir=cache_dir, fresh=fresh
+        )
+        if err is not None:
+            continue
+        ms_ok = True
+        for raw in results or []:
+            core = schema.map_ms_to_core(raw)
+            if not core.get("id") or core["id"] in by_id:
+                continue
+            by_id[core["id"]] = core
+            ms_entries.append(core)
+
+    # Reachable = at least one search call did not raise (even if 0 results).
+    source_status["ms"] = "ok" if (ms_ok or not seed_terms) else "unavailable"
+
+    ms_entries.sort(key=lambda c: (-(c.get("rating_count") or 0), str(c.get("id"))))
+    return {
+        "ms_entries": ms_entries,
+        "source_status": source_status,
+    }
