@@ -56,12 +56,14 @@ sys.dont_write_bytecode = True
 import cache as CACHE  # noqa: E402
 import collect  # noqa: E402
 import condense  # noqa: E402
+import diff as DIFF  # noqa: E402
 import input_config  # noqa: E402
 import itunes  # noqa: E402
 import llm_gate  # noqa: E402
 import report  # noqa: E402
 import run_id  # noqa: E402
 import serialize  # noqa: E402
+import stages  # noqa: E402
 
 
 # Subagent-output filenames the agent writes (read by --gate / --assemble).
@@ -98,6 +100,12 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--output-dir", default=None, help="run-output root (default: <cwd>/.aso-research)")
     p.add_argument("--cache-dir", default=CACHE.DEFAULT_CACHE_DIR, help=f"HTTP cache dir (default: {CACHE.DEFAULT_CACHE_DIR})")
     p.add_argument("--fresh", action="store_true", help="ignore cache, re-pull live")
+    p.add_argument(
+        "--compare-last",
+        action="store_true",
+        help="after the run, diff against the most recent prior run of the "
+             "same app in the output dir (writes diff-vs-last.md)",
+    )
     p.add_argument("--max-queries", type=int, default=3, help="cap on iTunes queries (default: 3)")
     # --- slice 03 LLM-phase stages ---
     p.add_argument(
@@ -252,6 +260,43 @@ def _write_report(run_dir, config, competitors, keywords, source_status, reddit_
         fh.write(report_md)
 
 
+# Channels the pipeline exercised (kept stable for run-summary consumers:
+# --assemble reads source_status, --compare-last reads keywords/competition).
+_RUN_CHANNELS = [
+    "itunes_search",
+    "apple_subtitle",
+    "apple_similar",
+    "apple_rss_charts",
+    "reddit",
+    "apple_search_suggest",
+    "play_search",
+    "play_charts",
+    "play_similar",
+    "play_search_suggest",
+    "ms_best_effort",
+]
+
+
+def _build_run_summary(
+    run_id_str, competitors, keywords, ms_entries, source_status, has_play, stage_timing
+):
+    """Pure run-summary builder (testable without network).
+
+    Carries the existing machine-readable fields plus ``stage_timing`` so
+    the ≤30-min soft target (US12) is observable per stage.
+    """
+    return {
+        "run_id": run_id_str,
+        "platforms": (["apple", "play"] if has_play else ["apple"]),
+        "channels": list(_RUN_CHANNELS),
+        "competitor_count": len(competitors),
+        "keyword_count": len(keywords),
+        "ms_qualitative_count": len(ms_entries),
+        "source_status": source_status,
+        "stage_timing": stage_timing,
+    }
+
+
 def run(argv=None) -> int:
     args = _build_arg_parser().parse_args(argv)
 
@@ -277,137 +322,156 @@ def run(argv=None) -> int:
     print(f"[aso-research] run-id: {run_id_str}", file=sys.stderr)
     print(f"[aso-research] run-dir: {run_dir}", file=sys.stderr)
     print(f"[aso-research] cache-dir: {args.cache_dir}", file=sys.stderr)
+    if args.fresh:
+        print("[aso-research] --fresh: bypassing cache + stage checkpoints", file=sys.stderr)
 
-    data = itunes.discover(
-        config,
-        cache_dir=args.cache_dir,
-        fresh=args.fresh,
-        max_queries=args.max_queries,
+    # Stages are idempotent (slice 06): each skips if its checkpoint is fresh,
+    # so a crash at stage N resumes at N (US9). --fresh bypasses every check.
+    runner = stages.StageRunner(run_dir, fresh=args.fresh)
+    seed_terms = config.get("seed_keywords") or []
+    country = config.get("country", "de")
+
+    # --- Stage: collect (the crawl — Apple + Play + MS; never-blocking) ---
+    def _collect():
+        data = itunes.discover(
+            config, cache_dir=args.cache_dir, fresh=args.fresh,
+            max_queries=args.max_queries,
+        )
+        competitors = data["competitors"]
+        print(
+            f"[aso-research] iTunes discovered {len(competitors)} competitor(s)",
+            file=sys.stderr,
+        )
+        deep = collect.collect_apple(
+            config, competitors, seed_terms=seed_terms, country=country,
+            cache_dir=args.cache_dir, fresh=args.fresh,
+        )
+        competitors = deep["competitors"]
+        suggest = deep["suggest_terms"]
+        src_status = deep["source_status"]
+        reddit_threads = deep["reddit_threads"]
+        for src, status in src_status.items():
+            if status != "ok":
+                print(f"[aso-research] source {src}: {status}", file=sys.stderr)
+        print(
+            f"[aso-research] deep apple: {len(competitors)} competitors "
+            f"({sum(1 for c in competitors if c.get('discovery') == 'niche_similar')} niche), "
+            f"{len(suggest)} suggest terms",
+            file=sys.stderr,
+        )
+        play = collect.collect_play(
+            config, seed_terms=seed_terms, country=country,
+            cache_dir=args.cache_dir, fresh=args.fresh,
+        )
+        play_competitors = play["competitors"]
+        play_suggest = play["suggest_terms"]
+        for src, status in play["source_status"].items():
+            src_status[src] = status
+            if status != "ok":
+                print(f"[aso-research] source {src}: {status}", file=sys.stderr)
+        competitors = competitors + play_competitors
+        suggest = suggest + [s for s in play_suggest if s not in suggest]
+        print(
+            f"[aso-research] deep play: {len(play_competitors)} competitors, "
+            f"{len(play_suggest)} play suggest terms "
+            f"({len(competitors)} total competitors, {len(suggest)} suggest)",
+            file=sys.stderr,
+        )
+        ms = collect.collect_ms(
+            config, seed_terms=seed_terms, country=country,
+            cache_dir=args.cache_dir, fresh=args.fresh,
+        )
+        ms_entries = ms["ms_entries"]
+        for src, status in ms["source_status"].items():
+            src_status[src] = status
+            if status != "ok":
+                print(f"[aso-research] source {src}: {status}", file=sys.stderr)
+        print(
+            f"[aso-research] ms best-effort: {len(ms_entries)} qualitative entr(y/ies) "
+            f"(not scored; feeds S1 as qualitative context)",
+            file=sys.stderr,
+        )
+        # Human-facing artefacts: written when the stage runs and left
+        # untouched on a skip (so a warm re-run keeps them byte-identical).
+        serialize.dump_json(competitors, os.path.join(run_dir, "competition.json"))
+        serialize.dump_json(reddit_threads, os.path.join(run_dir, "reddit-threads.json"))
+        serialize.dump_json(ms_entries, os.path.join(run_dir, "ms-entries.json"))
+        return {
+            "competitors": competitors,
+            "suggest_terms": suggest,
+            "reddit_threads": reddit_threads,
+            "ms_entries": ms_entries,
+            "source_status": src_status,
+            "has_play": bool(play_competitors),
+        }
+
+    collect_out, collect_status = runner.stage(
+        "collect", _collect, ttl=stages.DEFAULT_COLLECT_TTL
     )
+    competitors = collect_out["competitors"]
+    suggest_terms = collect_out["suggest_terms"]
+    reddit_threads = collect_out["reddit_threads"]
+    ms_entries = collect_out["ms_entries"]
+    source_status = collect_out["source_status"]
+    has_play = collect_out["has_play"]
+    print(f"[aso-research] collect stage: {collect_status}", file=sys.stderr)
 
-    competitors = data["competitors"]
-    print(f"[aso-research] iTunes discovered {len(competitors)} competitor(s)", file=sys.stderr)
+    # --- Stage: score (deterministic extract -> score over the corpus) ---
+    def _score():
+        scored = collect.extract_and_score(competitors, config, suggest_terms=suggest_terms)
+        serialize.dump_json(scored["keywords"], os.path.join(run_dir, "keywords.json"))
+        return {"keywords": scored["keywords"]}
 
-    # --- deep Apple channels (never-blocking; failing source -> unavailable) ---
-    deep = collect.collect_apple(
-        config,
-        competitors,
-        seed_terms=config.get("seed_keywords") or [],
-        country=config.get("country", "de"),
-        cache_dir=args.cache_dir,
-        fresh=args.fresh,
-    )
-    competitors = deep["competitors"]
-    suggest_terms = deep["suggest_terms"]
-    source_status = deep["source_status"]
-    reddit_threads = deep["reddit_threads"]
-    for src, status in source_status.items():
-        if status != "ok":
-            print(f"[aso-research] source {src}: {status}", file=sys.stderr)
+    score_out, score_status = runner.stage("score", _score, ttl=stages.DEFAULT_COMPUTE_TTL)
+    keywords = score_out["keywords"]
     print(
-        f"[aso-research] deep apple: {len(competitors)} competitors "
-        f"({sum(1 for c in competitors if c.get('discovery')=='niche_similar')} niche), "
-        f"{len(suggest_terms)} suggest terms",
+        f"[aso-research] scored {len(keywords)} keyword(s) ({score_status})",
         file=sys.stderr,
     )
 
-    # --- deep Play channels (slice 04; never-blocking; failing source -> unavailable) ---
-    play = collect.collect_play(
-        config,
-        seed_terms=config.get("seed_keywords") or [],
-        country=config.get("country", "de"),
-        cache_dir=args.cache_dir,
-        fresh=args.fresh,
-    )
-    play_competitors = play["competitors"]
-    play_suggest = play["suggest_terms"]
-    for src, status in play["source_status"].items():
-        source_status[src] = status
-        if status != "ok":
-            print(f"[aso-research] source {src}: {status}", file=sys.stderr)
-    # unified corpus + unified suggest set (Apple + Play autocomplete)
-    competitors = competitors + play_competitors
-    suggest_terms = suggest_terms + [s for s in play_suggest if s not in suggest_terms]
-    print(
-        f"[aso-research] deep play: {len(play_competitors)} competitors, "
-        f"{len(play_suggest)} play suggest terms "
-        f"({len(competitors)} total competitors, {len(suggest_terms)} suggest)",
-        file=sys.stderr,
-    )
+    # --- Stage: llm-inputs (run-config + H1 raw profiles) ---
+    def _llm_inputs():
+        run_config = {k: config[k] for k in input_config.CANONICAL_KEYS}
+        with open(os.path.join(run_dir, "run-config.yaml"), "w", encoding="utf-8") as fh:
+            fh.write(serialize.dumps_yaml(run_config))
+        serialize.dump_json(run_config, os.path.join(run_dir, "run-config.json"))
+        h1_input = condense.prepare_h1_input(competitors, own_app_id=config.get("own_app_id"))
+        serialize.dump_json(h1_input, os.path.join(run_dir, "llm-input/h1-input.json"))
+        return {"h1_input_count": len(h1_input)}
 
-    # --- Microsoft Store best-effort (slice 05; qualitative-only; never-blocking) ---
-    # MS is STRUCTURALLY ISOLATED: entries are kept OUT of the scoring
-    # `competitors` corpus and fed to S1 as qualitative context only.
-    ms = collect.collect_ms(
-        config,
-        seed_terms=config.get("seed_keywords") or [],
-        country=config.get("country", "de"),
-        cache_dir=args.cache_dir,
-        fresh=args.fresh,
-    )
-    ms_entries = ms["ms_entries"]
-    for src, status in ms["source_status"].items():
-        source_status[src] = status
-        if status != "ok":
-            print(f"[aso-research] source {src}: {status}", file=sys.stderr)
-    print(
-        f"[aso-research] ms best-effort: {len(ms_entries)} qualitative entr(y/ies) "
-        f"(not scored; feeds S1 as qualitative context)",
-        file=sys.stderr,
-    )
+    runner.stage("llm-inputs", _llm_inputs, ttl=stages.DEFAULT_COMPUTE_TTL)
 
-    scored = collect.extract_and_score(competitors, config, suggest_terms=suggest_terms)
-    keywords = scored["keywords"]
-    print(f"[aso-research] scored {len(keywords)} keyword(s)", file=sys.stderr)
+    # --- Stage: report (terminal; always runs — timestamp differs by design) ---
+    def _report():
+        _write_report(
+            run_dir, config, competitors, keywords, source_status,
+            reddit_threads, now, ms_entries=ms_entries,
+        )
+        return {}
 
-    # --- side artefacts (deterministic; no timestamp inside) ---
-    serialize.dump_json(keywords, os.path.join(run_dir, "keywords.json"))
-    serialize.dump_json(competitors, os.path.join(run_dir, "competition.json"))
-    serialize.dump_json(reddit_threads, os.path.join(run_dir, "reddit-threads.json"))
-    serialize.dump_json(ms_entries, os.path.join(run_dir, "ms-entries.json"))
-    serialize.dump_json(
-        {
-            "run_id": run_id_str,
-            "platforms": (["apple", "play"] if play_competitors else ["apple"]),
-            "channels": [
-                "itunes_search",
-                "apple_subtitle",
-                "apple_similar",
-                "apple_rss_charts",
-                "reddit",
-                "apple_search_suggest",
-                "play_search",
-                "play_charts",
-                "play_similar",
-                "play_search_suggest",
-                "ms_best_effort",
-            ],
-            "competitor_count": len(competitors),
-            "keyword_count": len(keywords),
-            "ms_qualitative_count": len(ms_entries),
-            "source_status": source_status,
-        },
-        os.path.join(run_dir, "run-summary.json"),
-    )
-
-    # --- run-config.yaml (human echo) + run-config.json (machine round-trip) ---
-    run_config = {k: config[k] for k in input_config.CANONICAL_KEYS}
-    with open(os.path.join(run_dir, "run-config.yaml"), "w", encoding="utf-8") as fh:
-        fh.write(serialize.dumps_yaml(run_config))
-    serialize.dump_json(run_config, os.path.join(run_dir, "run-config.json"))
-
-    # --- LLM-input artefact: H1 raw profiles (the agent condenses these) ---
-    h1_input = condense.prepare_h1_input(competitors, own_app_id=config.get("own_app_id"))
-    serialize.dump_json(h1_input, os.path.join(run_dir, "llm-input/h1-input.json"))
-
-    # --- report.md (timestamp differs between runs by design) ---
-    _write_report(run_dir, config, competitors, keywords, source_status, reddit_threads, now, ms_entries=ms_entries)
+    runner.stage("report", _report, ttl=stages.DEFAULT_COMPUTE_TTL, skippable=False)
     if not os.path.exists(os.path.join(run_dir, _H1_CONDENSED)):
         print(
             "[aso-research] next: run H1 → `--gate <run-dir>` → S1 → S2 → H2 "
             "→ `--assemble <run-dir>` (see pipeline.md LLM phase)",
             file=sys.stderr,
         )
+
+    # --- run-summary.json (machine-readable; carries per-stage timing) ---
+    summary = _build_run_summary(
+        run_id_str, competitors, keywords, ms_entries, source_status,
+        has_play, runner.timing(),
+    )
+    serialize.dump_json(summary, os.path.join(run_dir, "run-summary.json"))
+
+    # --- --compare-last: diff vs the most recent prior run of this app ---
+    if args.compare_last:
+        diff_md = DIFF.compare_last(run_dir, output_root, run_id_str)
+        with open(os.path.join(run_dir, "diff-vs-last.md"), "w", encoding="utf-8") as fh:
+            fh.write(diff_md)
+        has_deltas = "no prior run" not in diff_md.lower()
+        tag = "deltas written" if has_deltas else "no prior run to diff"
+        print(f"[aso-research] diff-vs-last.md: {tag}", file=sys.stderr)
 
     # Absolute path on stdout (machine-parseable).
     print(os.path.abspath(run_dir))

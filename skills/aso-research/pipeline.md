@@ -1,7 +1,7 @@
 # aso-research — Pipeline
 
 The staged, cacheable, resumable pipeline. Each slice of the PRD fills
-in more stages; this document records the **current (slice 05)** state
+in more stages; this document records the **current (slice 06)** state
 and the contracts later slices build on.
 
 ## Stages (deterministic → artefacts)
@@ -282,10 +282,12 @@ absent. The flag is deterministic (`condense.own_app_is_referenced`).
 - **Artefacts per run:** `report.md` (8 sections), `keywords.json`,
   `competition.json`, `reddit-threads.json`, `run-config.yaml`
   (human echo) + `run-config.json` (machine round-trip),
-  `run-summary.json` (includes `source_status`),
-  `llm-input/h1-input.json` (raw profiles for H1), and the agent-written
+  `run-summary.json` (includes `source_status` + `stage_timing`),
+  `llm-input/h1-input.json` (raw profiles for H1), the agent-written
   `llm/{h1-condensed,s1-input,gate-report,s1-analysis,s2-listing,
-  h2-crosscheck}.json`.
+  h2-crosscheck}.json`, the per-stage checkpoints
+  `stages/{collect,score,llm-inputs}.json` (slice 06 resumability), and
+  `diff-vs-last.md` (only when `--compare-last` is passed).
 
 ## Determinism
 
@@ -297,6 +299,69 @@ H1 output. The `report.md` timestamp differs between runs — that is
 expected and the only intentional non-determinism (besides the LLM stages
 themselves, which vary within reason). Proven by `tests/aso-research/
 test_determinism.py` (fixture) and by paired live runs over a warm cache.
+
+## Stage idempotency, --fresh, --compare-last (slice 06)
+
+Slice 06 promotes the slice-01 response cache into **stage-level
+idempotency** so the pipeline is resumable and diffable across runs
+(US9 / US10 / US18), and makes the ≤30-min soft target observable (US12).
+
+**Stage idempotency + crash-resume.** Each deterministic stage writes a
+single checkpoint artefact (`<run-dir>/stages/<stage>.json`) holding its
+serializable result, and re-uses it on a re-run when it is **fresh** (the
+HTTP/browser cache TTLs already in place). The runner
+([scripts/stages.py](scripts/stages.py) → `StageRunner`) is deliberately
+**not** a job DAG: stages are an ordered list, each gated on its own
+checkpoint; a skipped stage's bundled result is loaded straight from disk
+and fed to the next stage. So a crash at stage N means stages 1..N-1
+already wrote fresh checkpoints — the next run **resumes at N**, no
+re-crawl, no re-score. The stages:
+
+| stage | checkpoint | TTL | also writes |
+|---|---|---|---|
+| `collect` | `stages/collect.json` | browser 12h (crawl, most fragile) | `competition.json`, `reddit-threads.json`, `ms-entries.json` |
+| `score` | `stages/score.json` | HTTP 24h | `keywords.json` |
+| `llm-inputs` | `stages/llm-inputs.json` | HTTP 24h | `run-config.{yaml,json}`, `llm-input/h1-input.json` |
+| `report` | — (terminal, always runs) | — | `report.md` |
+
+The human-facing artefacts are written as a side effect *inside* the
+stage callable, so a skipped stage leaves them untouched — they stay
+byte-identical across a warm re-run (AC1 / US18). The report stage is
+never skipped (its timestamp differs by design) but still records timing.
+Checkpoints are written atomically (tmp + replace), so a crash mid-write
+never leaves a half checkpoint that would break resume.
+
+**`--fresh`.** Bypasses every freshness check (all stages re-run and
+overwrite) AND the underlying HTTP/browser response cache (it is passed
+through to every collector), forcing a full re-pull for the whole run.
+
+**`--compare-last`.** After a run, diffs the current run against the most
+recent **prior run of the same app** in the same output dir and writes
+`diff-vs-last.md` (US10). The diff operates on the machine-readable
+artefacts only — never free text — and is deterministic (identical run
+dirs → identical diff, US18):
+
+- **competitors entered/left** — by `(store id, platform)`;
+- **keywords risen/fallen** — by opportunity delta (top-N), plus
+  brand-new / gone terms (keyed on `(term, platform)`);
+- **listing-recommendation changes** — per store/slot recommended-text
+  deltas, read from `llm/s2-listing{,-play}.json` when present.
+
+With no prior run of the same app, it writes `_No prior run to diff…_`
+rather than erroring. "Most recent prior run" = the chronologically
+greatest run-id strictly less than the current one **with the same app
+slug** (`YYYYMMDD-HHMMSS-<app-slug>`); a different-app prior run is
+treated as "no prior run" (a cross-app diff is meaningless). Logic lives
+in [scripts/diff.py](scripts/diff.py).
+
+**≤30-min target (US12).** Per-stage wall-clock (`status` +
+`elapsed_seconds`) is recorded into `run-summary.json` → `stage_timing`
+so the soft target is **observable**; a skipped stage records
+`elapsed_seconds: 0.0` honestly. The live validation against a
+representative run is pending a real network+browser+LLM run (this slice
+implements the instrumentation and does not fabricate a timing number);
+the expected bottleneck is **politeness-bound** (≤1 req/s/domain across
+~40–60 apps/platform × 3 stores + 1 similar-hop), not LLM-bound.
 
 ## Dependencies
 
@@ -342,6 +407,14 @@ Offline-testable pure logic is covered by plain `unittest` under
   unified score-table keying, Play listing char-count validation (Title 30 /
   Short 80 / Long 4000), Play Search-Suggest, Play collection orchestration
   (injectable fakes), and Apple+Play determinism.
+- `test_stages.py` — stage-level idempotency (fresh → skip, callable not
+  re-invoked, artefact byte-identical; stale/missing → run), `--fresh`
+  bypass, crash-resume (stages 1..k skipped, k+1 runs), per-stage timing,
+  and run-summary timing instrumentation (slice 06).
+- `test_diff.py` — `--compare-last` prior-run discovery (same-app,
+  chronological, ignoring non-run dirs), competitor in/out, keyword
+  rise/fall/new/gone, listing-recommendation changes, the "no prior run"
+  notice, and diff determinism (slice 06).
 
 The LLM subagent steps (H1/S1/S2/H2) are **not** unit-tested
 (non-deterministic by design); their I/O schemas are asserted via the

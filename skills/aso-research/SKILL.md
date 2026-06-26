@@ -48,6 +48,8 @@ tokens), consistent with `ratchet-up` / `ship-to-*`.
 | H2 contradiction rubric + per-store slot char-count validation (Apple + Play) | [scripts/crosscheck.py](scripts/crosscheck.py) |
 | Stable serialization (byte-identical determinism) | [scripts/serialize.py](scripts/serialize.py) |
 | Report assembly (full 8 sections from artefacts + subagent outputs) | [scripts/report.py](scripts/report.py) |
+| Stage idempotency + crash-resume + per-stage timing (slice 06) | [scripts/stages.py](scripts/stages.py) |
+| Cross-run diff `--compare-last` (competitor/keyword/listing deltas) | [scripts/diff.py](scripts/diff.py) |
 
 Read `pipeline.md` before running. `SKILL.md` is the always-on layer —
 keep it minimal; push per-stage detail into phase docs.
@@ -144,3 +146,30 @@ Play slot model.
   notes it, and Apple + Play results stay intact. Same shared politeness
   rule-set as the other Playwright collectors (≤1 req/s + jitter, backoff on
   429/503, robots.txt, no stealth). Resumability/diff remain a later slice.
+
+## Current scope (slice 06 — resumability, --fresh, --compare-last)
+
+Slice 06 makes the pipeline **resumable and diffable** — reproducibility +
+iteration only, no new data sources, no scoring changes, no LLM-mechanism
+change:
+
+- **Stage idempotency + crash-resume (US9/US18).** Each deterministic stage
+  writes a checkpoint (`stages/<stage>.json`) and skips on a warm re-run
+  when it is fresh (HTTP 24h / browser 12h TTLs). A crash at stage N
+  resumes at N — no re-crawl, no re-score. Skipped stages' artefacts stay
+  byte-identical. The runner ([scripts/stages.py](scripts/stages.py)) is a
+  simple ordered stage list (not a job DAG), each gated on its own
+  checkpoint.
+- **`--fresh`.** Forces every stage to re-run and overwrite, bypassing
+  both the stage checkpoints and the underlying response cache for the
+  whole run.
+- **`--compare-last` (US10).** After a run, diffs the current run against
+  the most recent prior run **of the same app** in the output dir and
+  writes `diff-vs-last.md`: competitors entered/left, keywords
+  risen/fallen (opportunity delta) + new/gone, and per-store/slot listing
+  deltas — over the machine-readable artefacts, deterministically. With no
+  prior run it writes "_No prior run to diff…_" instead of erroring.
+- **≤30-min target (US12).** Per-stage wall-clock is recorded into
+  `run-summary.json` → `stage_timing` so the soft target is observable; the
+  live validation is pending a real run (instrumented, not fabricated —
+  expected bottleneck politeness-bound, not LLM-bound).
