@@ -5,15 +5,22 @@ This repo is the source of truth for my personal Claude Code skills. It is maint
 ## Workflow
 
 ```
-edit here → git commit → git push → npx skills@latest update -g -y
+edit here → commit on dev → push dev → merge dev into main (ff-only) → push main → npx skills@latest update -g -y
 ```
 
+**The skills CLI sources global skills from the `main` branch on GitHub (`origin/main`).** A skill edit is therefore not "live" globally until it is committed on `dev`, merged to `main`, and **both branches are pushed** — only then does `update -g` pick it up. Skipping the merge/push is the #1 reason a freshly-edited skill does not refresh: `update` pulls a stale `main`, so you either see no change or fall back to a local-path `add`. **Every** skill change goes through the full `dev` → `main` roundtrip below, no exceptions.
+
 1. Edit skill files in this working copy (`~/Documents/Projekte/skills/`).
-2. Commit with [Conventional Commits](https://www.conventionalcommits.org/) — `feat(skill-name): …`, `fix(skill-name): …`, `docs: …`, `chore: …`.
-3. Push to `origin/main`.
-4. Refresh the global installation with **`update`**, not `add`:
+2. **Work on `dev`, never commit directly on `main`** (solo-dev branch guard — see the global `~/.claude/CLAUDE.md`; a `pre-commit` hook blocks commits on `main`/`master` once `dev` exists). Before any commit, confirm `HEAD` is on `dev`; if a `dev` branch does not yet exist, create it from `main` (`git switch -c dev`).
+3. Commit with [Conventional Commits](https://www.conventionalcommits.org/) — `feat(skill-name): …`, `fix(skill-name): …`, `docs: …`, `chore: …`. No `Co-Authored-By` trailer (enforced by `commit-msg`).
+4. **Publish both branches, in this order:**
+   - `git push origin dev` — publish the work.
+   - `git switch main && git merge --ff-only dev && git push origin main && git switch dev` — fast-forward `main` to match `dev` and publish it. `--ff-only` creates no merge commit; this ff-merge of `dev` into `main` is the only merge this repo ever does.
+5. **Then** refresh the global installation with **`update`**, not `add`:
    - `npx skills@latest update -g -y` — refresh all global skills (auto-detects the source repo per skill, pulls only what changed).
    - `npx skills@latest update <skill-name> -g -y` — refresh a single skill, e.g. `update humanize-text -g -y`.
+
+   Run this only **after step 4** (both branches pushed, `main` current) — otherwise `update` pulls a stale `main` and the edit silently does not land.
 
    **Do not use `add … -g` to refresh.** On the current `skills` CLI (≥1.5.x) global `add` fails with `PromptScript: PromptScript does not support global skill installation` for any skill that ships scripts (all of mine). `add` is for a *first-time* install only — and even then use it without `-g` (`npx skills@latest add silvio-l/skills`, which prompts for scope/skill/agent and installs project- or user-level). Once a skill is installed, `update` is the only working refresh path.
 
