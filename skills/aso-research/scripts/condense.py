@@ -109,6 +109,7 @@ def build_llm_input(
     *,
     config: Dict,
     ms_entries: Optional[List[Dict]] = None,
+    brand_conflicts: Optional[List[Dict]] = None,
 ) -> Dict:
     """Assemble the token-gated S1 representation from H1 outputs + artefacts.
 
@@ -187,6 +188,7 @@ def build_llm_input(
         "score_table": score_table,
         "reddit_summaries": reddit_summaries,
         "qualitative_ms": qualitative_ms,
+        "brand_conflicts": brand_conflicts or [],
     }
 
 

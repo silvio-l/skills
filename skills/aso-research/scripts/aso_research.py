@@ -53,6 +53,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.dont_write_bytecode = True
 
+import brand as BRAND  # noqa: E402
 import cache as CACHE  # noqa: E402
 import collect  # noqa: E402
 import condense  # noqa: E402
@@ -107,6 +108,12 @@ def _build_arg_parser() -> argparse.ArgumentParser:
              "same app in the output dir (writes diff-vs-last.md)",
     )
     p.add_argument("--max-queries", type=int, default=3, help="cap on iTunes queries (default: 3)")
+    p.add_argument(
+        "--brand-glossary", metavar="PATH",
+        dest="brand_glossary",
+        default=None,
+        help="path to a brand glossar (overrides convention discovery)",
+    )
     # --- slice 03 LLM-phase stages ---
     p.add_argument(
         "--gate", metavar="RUN_DIR",
@@ -179,10 +186,12 @@ def _run_gate(run_dir: str) -> int:
     keywords = _load_json(os.path.join(run_dir, "keywords.json")) or []
     reddit_threads = _load_json(os.path.join(run_dir, "reddit-threads.json")) or []
     ms_entries = _load_json(os.path.join(run_dir, "ms-entries.json")) or []
+    brand_conflicts = _load_json(os.path.join(run_dir, "brand-conflicts.json")) or []
     config = _load_json(os.path.join(run_dir, "run-config.json")) or {}
 
     rep = condense.build_llm_input(
-        condensed_profiles, keywords, reddit_threads, config=config, ms_entries=ms_entries
+        condensed_profiles, keywords, reddit_threads, config=config, ms_entries=ms_entries,
+        brand_conflicts=brand_conflicts,
     )
     trimmed, gate_report = llm_gate.apply_token_gate(rep, _gate_token_limit(config))
     os.makedirs(os.path.join(run_dir, "llm"), exist_ok=True)
@@ -210,6 +219,7 @@ def _assemble(run_dir: str) -> int:
     reddit_threads = _load_json(os.path.join(run_dir, "reddit-threads.json")) or []
     ms_entries = _load_json(os.path.join(run_dir, "ms-entries.json")) or []
     source_status = summary.get("source_status") or {}
+    brand_conflicts = _load_json(os.path.join(run_dir, "brand-conflicts.json")) or []
 
     # Agent-produced subagent outputs (all optional → deterministic fallback).
     s1_input = _load_json(os.path.join(run_dir, _S1_INPUT)) or {}
@@ -232,6 +242,7 @@ def _assemble(run_dir: str) -> int:
         s1_output=s1_output, s2_output=s2_output, h2_output=h2_output,
         s2_play_output=s2_play_output, h2_play_output=h2_play_output,
         ms_entries=ms_entries,
+        brand_conflicts=brand_conflicts,
     )
     with open(os.path.join(run_dir, "report.md"), "w", encoding="utf-8") as fh:
         fh.write(report_md)
@@ -240,7 +251,7 @@ def _assemble(run_dir: str) -> int:
     return 0
 
 
-def _write_report(run_dir, config, competitors, keywords, source_status, reddit_threads, now, ms_entries=None):
+def _write_report(run_dir, config, competitors, keywords, source_status, reddit_threads, now, ms_entries=None, brand_conflicts=None):
     """Write report.md from whatever subagent outputs already exist (if any)."""
     condensed_profiles = _load_json(os.path.join(run_dir, _H1_CONDENSED)) or []
     s1_output = _load_json(os.path.join(run_dir, _S1_ANALYSIS))
@@ -255,6 +266,7 @@ def _write_report(run_dir, config, competitors, keywords, source_status, reddit_
         s1_output=s1_output, s2_output=s2_output, h2_output=h2_output,
         s2_play_output=s2_play_output, h2_play_output=h2_play_output,
         ms_entries=ms_entries or [],
+        brand_conflicts=brand_conflicts or [],
     )
     with open(os.path.join(run_dir, "report.md"), "w", encoding="utf-8") as fh:
         fh.write(report_md)
@@ -432,6 +444,25 @@ def run(argv=None) -> int:
         file=sys.stderr,
     )
 
+    # --- Brand conflict detection (pure, no stage checkpoint) ---
+    brand_conflicts: list = []
+    glossar_path = BRAND.resolve_glossar(
+        os.getcwd(), flag_path=args.brand_glossary,
+    )
+    if glossar_path:
+        glossar = BRAND.parse_glossar(glossar_path)
+        brand_conflicts = BRAND.detect_conflicts(keywords, glossar)
+        serialize.dump_json(
+            brand_conflicts, os.path.join(run_dir, "brand-conflicts.json"),
+        )
+        print(
+            f"[aso-research] brand: {len(brand_conflicts)} conflict(s) "
+            f"in {glossar_path}",
+            file=sys.stderr,
+        )
+    else:
+        print("[aso-research] brand: no glossar found — skipping", file=sys.stderr)
+
     # --- Stage: llm-inputs (run-config + H1 raw profiles) ---
     def _llm_inputs():
         run_config = {k: config[k] for k in input_config.CANONICAL_KEYS}
@@ -449,6 +480,7 @@ def run(argv=None) -> int:
         _write_report(
             run_dir, config, competitors, keywords, source_status,
             reddit_threads, now, ms_entries=ms_entries,
+            brand_conflicts=brand_conflicts,
         )
         return {}
 

@@ -130,6 +130,8 @@ def build_report(
     h2_play_output: Optional[Dict] = None,
     # --- slice 05 MS best-effort (optional; qualitative-only, never scored) ---
     ms_entries: Optional[List[Dict]] = None,
+    # --- slice 05 P3 Brand conflicts (optional; absent -> no subsection) ---
+    brand_conflicts: Optional[List[Dict]] = None,
 ) -> str:
     """Assemble the 8-section ``report.md`` body as a string."""
     n_comp = len(competitors)
@@ -336,6 +338,42 @@ def build_report(
                 f"**Coverage gaps** (competitors own in Title, seed lacks): {gap_terms}"
             )
             lines.append("")
+
+    # --- Brand Conflicts (slice 05 P3) ---
+    if brand_conflicts:
+        lines.append("### Brand Conflicts")
+        lines.append("")
+        lines.append(
+            "Keywords matching terms forbidden by the project's brand glossar "
+            "(Anti-Vokabular). Each conflict carries the canonical replacement "
+            "and four strategies — **none auto-applied**, decisions stay with the "
+            "project owner."
+        )
+        lines.append("")
+        header = _row(
+            [
+                "Keyword", "Forbidden Match", "Replacement",
+                "Opportunity", "Relevance", "Strategies",
+            ]
+        )
+        sep = _row(["---"] * 6)
+        lines.append(header)
+        lines.append(sep)
+        for c in brand_conflicts:
+            strat_list = ", ".join(c.get("strategies", []))
+            lines.append(
+                _row(
+                    [
+                        _md_escape(c.get("term", "")),
+                        _md_escape(c.get("forbidden_match", "")),
+                        _md_escape(c.get("replacement", "") or "—"),
+                        str(c.get("opportunity", 0)),
+                        str(c.get("relevance", 0)),
+                        strat_list,
+                    ]
+                )
+            )
+        lines.append("")
 
     # === 5. Opportunities ===
     lines.append("## 5. Opportunities")
