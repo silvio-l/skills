@@ -9,8 +9,10 @@ visual design elements, brand conflicts, source health, determinism.
 """
 
 import datetime
+import os
 import pathlib
 import sys
+import tempfile
 import unittest
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -698,6 +700,53 @@ class FullLandscapeTests(unittest.TestCase):
         for name in sections:
             with self.subTest(section=name):
                 self.assertIn(name, html, f"missing section: {name}")
+
+
+# ---------------------------------------------------------------------------
+# Assemble step — report.html file output
+# ---------------------------------------------------------------------------
+
+class AssembleStepTests(unittest.TestCase):
+    """AC: assemble step writes report.html to disk."""
+
+    def test_assemble_writes_report_html_file(self):
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW,
+            s1_output=_s1(), s2_output=_s2(), h2_output=_h2_ok(),
+        )
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "report.html")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(html)
+            self.assertTrue(os.path.isfile(path))
+            self.assertGreater(os.path.getsize(path), 0)
+
+    def test_assemble_html_contains_german(self):
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW,
+            s1_output=_s1(), s2_output=_s2(), h2_output=_h2_ok(),
+        )
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "report.html")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(html)
+            with open(path, encoding="utf-8") as fh:
+                content = fh.read()
+            self.assertIn("Zusammenfassung", content)
+
+    def test_assemble_html_contains_glossary(self):
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW,
+            s1_output=_s1(), s2_output=_s2(), h2_output=_h2_ok(),
+        )
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "report.html")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(html)
+            with open(path, encoding="utf-8") as fh:
+                content = fh.read()
+            self.assertIn("Glossar", content)
+            self.assertIn("Relevanz", content)
 
 
 if __name__ == "__main__":
