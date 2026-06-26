@@ -53,6 +53,7 @@ STRATEGIES: Dict[str, str] = {
 
 _GLOSSAR_BY_CONVENTION = (
     "brand-glossary.ts",
+    "brand-glossary.js",
     ".brandignore",
     "BRAND_WORDS.md",
     "docs/brand-glossary.ts",
@@ -69,16 +70,20 @@ def resolve_glossar(cwd: str, *, flag_path: Optional[str] = None) -> Optional[st
 
     *flag_path* overrides convention discovery. If the flag points to a
     non-existent file ``None`` is returned.
+
+    Walks up from *cwd* to root, checking each directory for glossar
+    filenames. The closest ancestor wins (cwd first, then parent, etc.).
     """
     if flag_path:
         p = pathlib.Path(flag_path)
         return str(p.resolve()) if p.is_file() else None
 
-    base = pathlib.Path(cwd)
-    for name in _GLOSSAR_BY_CONVENTION:
-        candidate = base / name
-        if candidate.is_file():
-            return str(candidate.resolve())
+    base = pathlib.Path(cwd).resolve()
+    for ancestor in (base, *base.parents):
+        for name in _GLOSSAR_BY_CONVENTION:
+            candidate = ancestor / name
+            if candidate.is_file():
+                return str(candidate.resolve())
     return None
 
 

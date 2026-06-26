@@ -90,6 +90,45 @@ class GlossarDiscoveryTests(unittest.TestCase):
         found = brand.resolve_glossar(self.tmpdir)
         self.assertIsNone(found)
 
+    def test_resolve_finds_brand_glossary_js_by_convention(self):
+        (pathlib.Path(self.tmpdir) / "brand-glossary.js").write_text("// js\n")
+        found = brand.resolve_glossar(self.tmpdir)
+        self.assertIsNotNone(found)
+        self.assertTrue(found.endswith("brand-glossary.js"))
+
+    def test_resolve_finds_glossar_in_parent_dir(self):
+        (pathlib.Path(self.tmpdir) / "brand-glossary.ts").write_text(
+            'export const x = "y" as const;'
+        )
+        sub = pathlib.Path(self.tmpdir) / "sub"
+        sub.mkdir()
+        found = brand.resolve_glossar(str(sub))
+        self.assertIsNotNone(found)
+        self.assertTrue(found.endswith("brand-glossary.ts"))
+
+    def test_resolve_finds_glossar_multiple_levels_up(self):
+        (pathlib.Path(self.tmpdir) / ".brandignore").write_text("Diktieren\n")
+        sub = pathlib.Path(self.tmpdir) / "a" / "b"
+        sub.mkdir(parents=True)
+        found = brand.resolve_glossar(str(sub))
+        self.assertIsNotNone(found)
+        self.assertTrue(found.endswith(".brandignore"))
+
+    def test_resolve_prefers_closer_ancestor(self):
+        (pathlib.Path(self.tmpdir) / ".brandignore").write_text("root\n")
+        sub = pathlib.Path(self.tmpdir) / "sub"
+        sub.mkdir()
+        (sub / ".brandignore").write_text("sub\n")
+        found = brand.resolve_glossar(str(sub))
+        self.assertIsNotNone(found)
+        self.assertEqual(pathlib.Path(found).resolve(), (sub / ".brandignore").resolve())
+
+    def test_resolve_returns_none_when_ancestors_have_no_glossar(self):
+        sub = pathlib.Path(self.tmpdir) / "deep" / "nested"
+        sub.mkdir(parents=True)
+        found = brand.resolve_glossar(str(sub))
+        self.assertIsNone(found)
+
     def test_first_match_wins_among_conventions(self):
         (pathlib.Path(self.tmpdir) / "brand-glossary.ts").write_text(
             'export const x = "y" as const;'
