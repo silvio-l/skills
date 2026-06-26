@@ -508,8 +508,9 @@ def collect_ms(
     country: str = "de",
     cache_dir: str = "",
     fresh: bool = False,
-    # injectable collector (tests pass a fake; default hits the live module)
+    # injectable collectors (tests pass fakes; defaults hit the live modules)
     search_fn: Optional[Callable] = None,
+    detail_fn: Optional[Callable] = None,
 ) -> Dict:
     """Run the MS best-effort collection (SPA-aware, qualitative-only).
 
@@ -526,17 +527,23 @@ def collect_ms(
     only — they do not enter keyword extraction or scoring, and there is no MS
     slot model. The dispatcher writes them to ``ms-entries.json`` separately.
 
+    After search discovery, a detail-page fetcher enriches each entry with
+    description, rating_avg, rating_count, and a bounded review sample.
+    The detail fetcher is never-blocking (per-entry failures are tolerated)
+    and bounded by a per-run cap. Its results are cached (browser TTL).
+
     Never-blocking + lowest priority: MS is the most fragile source (SPA +
-    reachability). The search collector is injectable so the orchestration
-    (source-status tracking, never-blocking, dedup) is fully offline-testable
-    with fixtures — the live Playwright collector itself is not unit-tested.
-    A failing source is recorded ``"unavailable"`` and the run continues.
-    Mirrors :func:`collect_apple` / :func:`collect_play`.
+    reachability). Both the search and detail collectors are injectable so the
+    orchestration (source-status tracking, never-blocking, dedup) is fully
+    offline-testable with fixtures — the live Playwright collector itself is
+    not unit-tested. A failing source is recorded ``"unavailable"`` and the
+    run continues. Mirrors :func:`collect_apple` / :func:`collect_play`.
     """
     import ms as ms_collector  # type: ignore
 
     source_status: Dict[str, Dict] = {}
     search_fn = search_fn or ms_collector.search
+    detail_fn = detail_fn or (lambda ids, *a, **k: ms_collector.enrich(ids, *a, **k))
 
     seed_terms = list(seed_terms or config.get("seed_keywords") or [])
     if config.get("app_name"):
@@ -561,6 +568,34 @@ def collect_ms(
                 continue
             by_id[core["id"]] = core
             ms_entries.append(core)
+
+    # --- MS detail-page enrichment (never-blocking, per-run cap) ---
+    if ms_entries:
+        import ms as _ms_mod
+        detail_cap = getattr(_ms_mod, "_DETAIL_CAP", 15)
+        detail_ids = [e["id"] for e in ms_entries][:detail_cap]
+        detail_enriched, detail_err = _ms_safe(
+            detail_fn, detail_ids,
+            cache_dir=cache_dir, fresh=fresh,
+        )
+        if detail_enriched:
+            for entry in ms_entries:
+                eid = entry["id"]
+                if eid in detail_enriched:
+                    enriched = detail_enriched[eid]
+                    if isinstance(enriched, dict):
+                        desc = enriched.get("description")
+                        if desc:
+                            entry["description"] = schema.strip_html(str(desc))
+                        rating_avg = enriched.get("rating_avg")
+                        if rating_avg is not None:
+                            entry["rating_avg"] = rating_avg
+                        rating_count = enriched.get("rating_count")
+                        if rating_count:
+                            entry["rating_count"] = rating_count
+                        reviews = enriched.get("reviews_sample")
+                        if reviews:
+                            entry["reviews_sample"] = list(reviews)[:3]
 
     if ms_entries or not seed_terms:
         source_status["ms"] = _ok_status(len(ms_entries))

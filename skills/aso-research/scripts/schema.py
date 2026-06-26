@@ -348,6 +348,7 @@ def map_ms_to_core(raw: dict) -> dict:
     rating_avg = raw.get("averageRating")
     if rating_avg is None:
         rating_avg = raw.get("rating_avg")
+    reviews_sample = raw.get("reviews_sample") or raw.get("reviewsSample") or []
     return {
         # --- Core ---
         "id": str(app_id) if app_id != "" else "",
@@ -365,4 +366,6 @@ def map_ms_to_core(raw: dict) -> dict:
         "description": description,
         # --- Discovery slot ---
         "similar_app_ids": [],
+        # --- Optional qualitative slots ---
+        "reviews_sample": list(reviews_sample)[:3],
     }

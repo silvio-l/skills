@@ -60,9 +60,44 @@ _DESC_SELECTORS = (
     ".description",
 )
 # MS Store detail URLs look like /detail/<productId> or /store/detail/<productId>.
-_DETAIL_ID_RE = re.compile(r"/detail/(?:xpfpz?tt|9[a-z0-9]+)/?([A-Za-z0-9]{6,})")
+# The full product ID (e.g. 9n7wbb04192f) is the complete path segment after /detail/.
+_DETAIL_ID_RE = re.compile(r"/(?:store/)?detail/([A-Za-z0-9]{8,})")
 _DETAIL_HREF_RE = re.compile(r"/detail/[A-Za-z0-9]+")
 _APP_CAP = 15  # deckel-limited best-effort; MS is the lowest-priority store
+_DETAIL_CAP = 15  # per-run cap on detail page fetches
+
+# Detail-page selectors — tolerant: try several, take the first that matches.
+_DETAIL_DESC_SELECTORS = (
+    "[data-testid='description']",
+    "[id='description']",
+    ".description",
+    "section[aria-label*='description' i]",
+    "section[aria-label*='Description']",
+    "[data-testid='productDescription']",
+    "div[class*='description']",
+)
+_DETAIL_RATING_SELECTORS = (
+    "[data-testid='rating']",
+    "[aria-label*='rated' i]",
+    "[aria-label*='star' i]",
+    "div[class*='rating'] [class*='number']",
+    "[data-testid='ratingValue']",
+    ".c-rating",
+)
+_DETAIL_RATING_COUNT_SELECTORS = (
+    "[data-testid='ratingCount']",
+    "[aria-label*='rating' i]",
+    "[aria-label*='ratings' i]",
+    "[data-testid='totalRatings']",
+    ".c-rating + span",
+)
+_DETAIL_REVIEW_SELECTORS = (
+    "[data-testid='review']",
+    "[data-testid='reviewText']",
+    ".review-text",
+    ".review-content",
+    "div[class*='review'] p",
+)
 
 
 def _search_url(query: str, *, country: str, language: str) -> str:
@@ -73,13 +108,19 @@ def _search_url(query: str, *, country: str, language: str) -> str:
 
 
 def _extract_id(href: str) -> str:
-    """Best-effort product id from an MS detail href (last path segment)."""
+    """Best-effort product id from an MS detail href (last path segment).
+
+    Returns the full product ID (e.g. ``9n7wbb04192f``) for both
+    ``/detail/<id>`` and ``/store/detail/<id>`` shapes. The fallback
+    rejects fragments shorter than 6 chars to avoid capturing path
+    components like ``detail``.
+    """
     m = _DETAIL_ID_RE.search(href or "")
     if m:
         return m.group(1)
     if "/detail/" in (href or ""):
         tail = href.rstrip("/").rsplit("/", 1)[-1]
-        if tail and "?" not in tail:
+        if tail and len(tail) >= 8 and "?" not in tail:
             return tail
     return ""
 
@@ -260,6 +301,248 @@ def search(
         ))
     except Exception:
         return []
+
+
+def _scrape_detail(page, app_id: str) -> Dict:
+    """Run the extraction JS inside an already-rendered Playwright detail page.
+
+    Returns a dict with description, rating_avg, rating_count, and up to 3
+    review snippets. Every field degrades safely — a missing selector produces
+    an empty default rather than an error.
+    """
+    result: Dict = {
+        "id": app_id,
+        "description": "",
+        "rating_avg": None,
+        "rating_count": 0,
+        "reviews_sample": [],
+    }
+
+    try:
+        desc_texts = []
+        for sel in _DETAIL_DESC_SELECTORS:
+            try:
+                els = page.query_selector_all(sel)
+                texts = []
+                for el in els:
+                    t = el.evaluate("e => (e.innerText||'').trim()")
+                    if t:
+                        texts.append(t)
+                if texts:
+                    desc_texts = texts
+                    break
+            except Exception:
+                continue
+        if desc_texts:
+            result["description"] = " ".join(desc_texts)
+    except Exception:
+        pass
+
+    try:
+        for sel in _DETAIL_RATING_SELECTORS:
+            try:
+                el = page.query_selector(sel)
+                if el is not None:
+                    text = el.evaluate("e => (e.innerText||'').trim()")
+                    if text:
+                        val = text.replace(",", ".").replace("(", "").replace(")", "").strip()
+                        try:
+                            result["rating_avg"] = float(val)
+                            break
+                        except (ValueError, TypeError):
+                            continue
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    try:
+        for sel in _DETAIL_RATING_COUNT_SELECTORS:
+            try:
+                el = page.query_selector(sel)
+                if el is not None:
+                    text = el.evaluate("e => (e.innerText||'').trim()")
+                    if text:
+                        nums = re.findall(r"(\d[\d.,]*)", text)
+                        if nums:
+                            clean = nums[0].replace(",", "").replace(".", "")
+                            try:
+                                result["rating_count"] = int(clean)
+                                break
+                            except (ValueError, TypeError):
+                                continue
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    try:
+        reviews: List[str] = []
+        for sel in _DETAIL_REVIEW_SELECTORS:
+            try:
+                els = page.query_selector_all(sel)
+                for el in els[:3]:
+                    t = el.evaluate("e => (e.innerText||'').trim()")
+                    if t and len(t) > 10:
+                        reviews.append(t[:500])
+                if reviews:
+                    break
+            except Exception:
+                continue
+        result["reviews_sample"] = reviews[:3]
+    except Exception:
+        pass
+
+    return result
+
+
+def _detail_url(app_id: str) -> str:
+    return f"https://apps.microsoft.com/detail/{app_id}"
+
+
+def fetch_ms_detail(
+    app_ids: List[str],
+    *,
+    cache_dir: str = CACHE.DEFAULT_CACHE_DIR,
+    ttl: float = BROWSER_TTL,
+    now: Optional[float] = None,
+    fresh: bool = False,
+    cap: int = _DETAIL_CAP,
+) -> Dict[str, Dict]:
+    """Scrape MS Store detail pages for a list of app IDs (SPA-aware, cache-backed).
+
+    Uses ``networkidle`` **+** ``wait_for_selector`` because apps.microsoft.com
+    is a single-page app. Per-run cap limits total detail fetches. Never raises —
+    returns a dict mapping app_id -> enriched fields; a missing entry means the
+    detail page could not be scraped.
+    """
+    import time as _time
+    import random
+
+    result: Dict[str, Dict] = {}
+    if not app_ids:
+        return result
+
+    now_ts = _time.time() if now is None else now
+    capped = list(app_ids)[:cap]
+
+    fresh_ids: List[str] = []
+    for app_id in capped:
+        url = _detail_url(app_id)
+        key = CACHE.cache_key("BROWSER", url, {})
+        path = CACHE.cache_path(cache_dir, key)
+        if not fresh and CACHE.is_fresh(path, ttl, now_ts):
+            cached = CACHE.read_cache(path)
+            if cached is not None:
+                try:
+                    result[app_id] = json.loads(cached.decode("utf-8"))
+                    continue
+                except Exception:
+                    pass
+        fresh_ids.append(app_id)
+
+    if not fresh_ids:
+        return result
+
+    for app_id in fresh_ids:
+        url = _detail_url(app_id)
+        if not POLITE.robots_allows(url):
+            continue
+
+    try:
+        from playwright.sync_api import sync_playwright
+    except Exception:
+        return result
+
+    ok, reason = _ensure_chromium()
+    if not ok:
+        _chromium_log(f"browser blocked: {reason}")
+        return result
+
+    rng = random.Random()
+    try:
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(headless=True)
+            context = browser.new_context(
+                locale=POLITE.LOCALE,
+                user_agent=POLITE.USER_AGENT,
+                extra_http_headers={"Accept-Language": POLITE.ACCEPT_LANGUAGE},
+            )
+            page = context.new_page()
+            for app_id in fresh_ids:
+                url = _detail_url(app_id)
+                detail: Optional[Dict] = None
+                try:
+                    POLITE.RateLimiter().wait(url)
+                    resp = None
+                    for attempt in range(POLITE.MAX_RETRIES):
+                        try:
+                            resp = page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                            status = getattr(resp, "status", 200) if resp else 200
+                            if status in POLITE.RETRY_STATUS:
+                                page.wait_for_timeout(int(POLITE.backoff_delay(attempt, rng=rng) * 1000))
+                                continue
+                            break
+                        except Exception:
+                            if attempt == POLITE.MAX_RETRIES - 1:
+                                break
+                    try:
+                        page.wait_for_load_state("networkidle", timeout=20000)
+                    except Exception:
+                        pass
+                    ready = False
+                    detail_ready_selectors = (
+                        "[data-testid='productDetails']",
+                        "[data-testid='ProductDescription']",
+                        "h1",
+                        "main",
+                        ".description",
+                        "[data-testid='reviewRating']",
+                    )
+                    for sel in detail_ready_selectors:
+                        try:
+                            page.wait_for_selector(sel, timeout=12000)
+                            ready = True
+                            break
+                        except Exception:
+                            continue
+                    if ready:
+                        detail = _scrape_detail(page, app_id)
+                except Exception:
+                    pass
+
+                if detail is not None:
+                    result[app_id] = detail
+                    try:
+                        key = CACHE.cache_key("BROWSER", url, {})
+                        path = CACHE.cache_path(cache_dir, key)
+                        CACHE.write_cache(path, json.dumps(detail).encode("utf-8"), now=now_ts)
+                    except Exception:
+                        pass
+            browser.close()
+    except Exception:
+        pass
+
+    return result
+
+
+def enrich(
+    app_ids: List[str],
+    *,
+    cache_dir: str = "",
+    fresh: bool = False,
+    detail_fn: Optional[Callable[..., Dict[str, Dict]]] = None,
+) -> Dict[str, Dict]:
+    """Return enriched data for a list of MS app IDs (SPA-aware, never-blocking).
+
+    The injected ``detail_fn`` (default :func:`fetch_ms_detail`) lets the
+    orchestration run offline with a recorded fixture.
+    """
+    do_fetch = detail_fn or fetch_ms_detail
+    try:
+        return do_fetch(app_ids, cache_dir=cache_dir, fresh=fresh)
+    except Exception:
+        return {}
 
 
 if __name__ == "__main__":  # pragma: no cover — manual live-smoke entry
