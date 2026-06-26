@@ -653,16 +653,16 @@ def _html_source_card(key, label, entry):
     if status == "ok":
         if result_count is not None and result_count == 0:
             css_class = "ok-empty"
-            count_str = "0 results"
+            count_str = "0 Ergebnisse"
         elif result_count is not None:
             css_class = "ok"
-            count_str = f"{result_count} result(s)"
+            count_str = f"{result_count} Ergebnis(se)"
         else:
             css_class = "ok"
-            count_str = "ran"
+            count_str = "lief"
     else:
         css_class = "unavailable"
-        count_str = "unavailable"
+        count_str = "nicht verfügbar"
 
     note_cell = f'<span class="note">{reason}</span>' if reason else ""
     return (
@@ -674,18 +674,37 @@ def _html_source_card(key, label, entry):
     )
 
 
+def _html_score_cell(score, max_score=100):
+    """Render a score cell with an inline bar indicator."""
+    pct = min(max(int(score), 0), max_score)
+    return (
+        f'<td class="score-cell">'
+        f'<div class="score-bar"><div class="score-fill" style="width:{pct}%"></div></div>'
+        f'<span class="score-num">{pct}</span>'
+        f'</td>'
+    )
+
+
+_SPLIT_LABELS_DE = {
+    "primary-candidate": "Primär",
+    "long-tail-candidate": "Long-Tail",
+}
+
+
 def _html_keyword_table(keywords, *, include_platform=False):
-    """Render the keyword table as an HTML snippet."""
+    """Render the keyword table as an HTML snippet with score bars."""
     rows = []
     for k in keywords[:_KEYWORD_REPORT_LIMIT]:
+        split_key = k.get("split", "")
+        split_label = _SPLIT_LABELS_DE.get(split_key, split_key.replace("-candidate", ""))
         cells = [
             f"<td>{_html_esc(k.get('term', ''))}</td>",
-            f"<td>{k.get('competition', 0)}</td>",
-            f"<td>{k.get('relevance', 0)}</td>",
-            f"<td>{k.get('opportunity', 0)}</td>",
-            f"<td>{_html_esc(k.get('split', '').replace('-candidate', ''))}</td>",
-            f"<td>{'yes' if k.get('is_gap') else ''}</td>",
-            f"<td>{'yes' if k.get('suggest') else ''}</td>",
+            _html_score_cell(k.get("competition", 0)),
+            _html_score_cell(k.get("relevance", 0)),
+            _html_score_cell(k.get("opportunity", 0)),
+            f"<td>{_html_esc(split_label)}</td>",
+            f"<td>{'ja' if k.get('is_gap') else ''}</td>",
+            f"<td>{'ja' if k.get('suggest') else ''}</td>",
         ]
         if include_platform:
             cells.insert(1, f"<td>{_html_esc(k.get('platform', 'apple'))}</td>")
@@ -693,18 +712,19 @@ def _html_keyword_table(keywords, *, include_platform=False):
 
     header_cells = [
         "<th>Keyword</th>",
-        *(["<th>Platform</th>"] if include_platform else []),
-        "<th>Competition</th>",
-        "<th>Relevance</th>",
-        "<th>Opportunity</th>",
-        "<th>Split</th>",
-        "<th>Gap</th>",
+        *(["<th>Plattform</th>"] if include_platform else []),
+        "<th>Wettbewerb</th>",
+        "<th>Relevanz</th>",
+        "<th>Chance</th>",
+        "<th>Kategorie</th>",
+        "<th>Lücke</th>",
         "<th>Suggest</th>",
     ]
+    colspan = 7 + (1 if include_platform else 0)
     return (
         f'<table class="kw-table">'
         f'<thead><tr>{"".join(header_cells)}</tr></thead>'
-        f'<tbody>{"".join(rows) if rows else "<tr><td colspan=7>No keywords scored.</td></tr>"}'
+        f'<tbody>{"".join(rows) if rows else f"<tr><td colspan={colspan}>Keine Keywords bewertet.</td></tr>"}'
         f'</tbody></table>'
     )
 
@@ -712,8 +732,13 @@ def _html_keyword_table(keywords, *, include_platform=False):
 def _html_bucket_card(title, keywords, accent_class):
     """Render an opportunity-bucket card as an HTML snippet."""
     terms = ", ".join(_html_esc(k["term"]) for k in keywords) if keywords else "&mdash;"
+    css_map = {
+        "schnelle-gewinne": "schnelle-gewinne",
+        "nischen-hebel": "nischen-hebel",
+        "abdeckungsluecken": "abdeckungsluecken",
+    }
     return (
-        f'<div class="bucket-card {accent_class}">'
+        f'<div class="bucket-card {css_map.get(accent_class, accent_class)}">'
         f'<h4>{_html_esc(title)}</h4>'
         f'<p>{terms}</p>'
         f'</div>'
@@ -739,8 +764,8 @@ def _html_listing_slots(s2_output, h2_output, *, store_label="Apple", slot_limit
     if not s2_output or not s2_output.get("slots"):
         return (
             f'<p class="pending">'
-            f'<em>{_html_esc(store_label)} listing recommendation pending &mdash; '
-            f'run the S2 Listing Strategist (Sonnet) subagent.</em>'
+            f'<em>{_html_esc(store_label)} Listing-Empfehlung ausstehend &mdash; '
+            f'S2 Listing-Stratege (Sonnet) Subagent ausführen.</em>'
             f'</p>'
         )
     parts = []
@@ -751,15 +776,15 @@ def _html_listing_slots(s2_output, h2_output, *, store_label="Apple", slot_limit
         rec_count = rec.get("char_count", len(rec.get("text", "")))
         parts.append(
             f'<div class="listing-slot">'
-            f'<strong>{name}</strong> (recommended): '
-            f'<code>{rec_text}</code> <span class="char-count">({rec_count} chars)</span>'
+            f'<strong>{name}</strong> (empfohlen): '
+            f'<code>{rec_text}</code> <span class="char-count">({rec_count} Zeichen)</span>'
         )
         alts = slot.get("alternatives") or []
         for i, alt in enumerate(alts[:2], start=1):
             alt_text = _html_esc(alt.get("text", ""))
             alt_count = alt.get("char_count", len(alt.get("text", "")))
             parts.append(
-                f'<span class="alt">alt {i}: <code>{alt_text}</code> ({alt_count} chars)</span>'
+                f'<span class="alt">Alt {i}: <code>{alt_text}</code> ({alt_count} Zeichen)</span>'
             )
         parts.append("</div>")
     if h2_output:
@@ -767,100 +792,111 @@ def _html_listing_slots(s2_output, h2_output, *, store_label="Apple", slot_limit
         note = _html_esc(h2_output.get("note", ""))
         parts.append(
             f'<div class="h2-crosscheck">'
-            f'<strong>H2 cross-check ({_html_esc(store_label)}):</strong> {status} &mdash; {note}'
+            f'<strong>H2-Cross-Check ({_html_esc(store_label)}):</strong> {status} &mdash; {note}'
             f'</div>'
         )
     return "\n".join(parts)
 
 
 _HTML_CSS = r"""
-body{margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Oxygen,Ubuntu,Cantarell,sans-serif;color:#1e293b;background:#f1f5f9;line-height:1.6}
+body{margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:#1A1D23;background:#F7F8FA;line-height:1.6}
 .container{max-width:960px;margin:0 auto;padding:24px 20px 60px}
 
-header{background:#1a365d;color:#fff;padding:28px 24px;border-radius:8px;margin-bottom:24px}
-header h1{font-size:1.6rem;margin:0 0 6px;font-weight:700}
-header .meta{font-size:.85rem;color:#94a3b8}
-header .modus{display:inline-block;background:#334155;color:#cbd5e1;padding:2px 8px;border-radius:4px;font-size:.75rem;margin-top:6px}
-header .en-caveat{background:#fef3c7;color:#92400e;padding:6px 12px;border-radius:4px;margin-top:10px;font-size:.8rem;display:inline-block}
+header{background:linear-gradient(135deg,#4338CA 0%,#3730A3 100%);color:#fff;padding:32px 28px;border-radius:10px;margin-bottom:24px}
+header h1{font-family:Georgia,ui-serif,serif;font-size:1.75rem;margin:0 0 8px;font-weight:400;letter-spacing:-0.01em}
+header .meta{font-size:.8rem;color:rgba(255,255,255,.65)}
+header .modus{display:inline-block;background:rgba(255,255,255,.12);color:rgba(255,255,255,.85);padding:3px 10px;border-radius:4px;font-size:.75rem;margin-top:8px}
+header .en-caveat{background:#FEF3C7;color:#92400E;padding:6px 12px;border-radius:4px;margin-top:10px;font-size:.8rem;display:inline-block}
 
-section{background:#fff;border-radius:8px;padding:24px;margin-bottom:20px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
-section h2{font-size:1.25rem;margin:0 0 16px;color:#1a365d;border-bottom:2px solid #e2e8f0;padding-bottom:8px}
-section h3{font-size:1.05rem;margin:18px 0 10px;color:#334155}
-section h4{font-size:.95rem;margin:0 0 6px;color:#1a365d}
+section{background:#fff;border-radius:10px;padding:28px;margin-bottom:20px;box-shadow:0 1px 2px rgba(0,0,0,.04),0 2px 8px rgba(0,0,0,.04);border:1px solid #E5E7EB}
+section h2{font-family:Georgia,ui-serif,serif;font-size:1.3rem;margin:0 0 18px;color:#4338CA;font-weight:400;letter-spacing:-0.01em;border-bottom:2px solid #EEF2FF;padding-bottom:10px}
+section h3{font-size:1.05rem;margin:20px 0 10px;color:#3730A3;font-family:Georgia,ui-serif,serif;font-weight:400}
+section h4{font-size:.9rem;margin:0 0 6px;color:#4338CA}
 
 .source-board{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-bottom:12px}
-.source-card{border-radius:6px;padding:12px 14px;display:flex;flex-direction:column;gap:4px}
-.source-card.ok{background:#ecfdf5;border:1px solid #a7f3d0}
-.source-card.ok-empty{background:#f8fafc;border:1px solid #cbd5e1}
-.source-card.unavailable{background:#fef3c7;border:1px solid #fcd34d}
-.source-label{font-size:.8rem;font-weight:600;color:#475569}
-.source-status{font-size:.75rem;font-weight:700;text-transform:uppercase}
+.source-card{border-radius:8px;padding:12px 14px;display:flex;flex-direction:column;gap:4px;border:1px solid #E5E7EB}
+.source-card.ok{background:#ECFDF5;border-color:#A7F3D0}
+.source-card.ok-empty{background:#F9FAFB;border-color:#E5E7EB}
+.source-card.unavailable{background:#FEF3C7;border-color:#FDE68A}
+.source-label{font-size:.72rem;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:.04em}
+.source-status{font-size:.75rem;font-weight:700}
 .source-card.ok .source-status{color:#059669}
-.source-card.ok-empty .source-status{color:#64748b}
-.source-card.unavailable .source-status{color:#92400e}
-.source-card .note{font-size:.7rem;color:#64748b;word-break:break-word}
-.source-summary{font-size:.8rem;color:#475569;margin-top:8px}
+.source-card.ok-empty .source-status{color:#6B7280}
+.source-card.unavailable .source-status{color:#92400E}
+.source-card .note{font-size:.68rem;color:#6B7280;word-break:break-word}
+.source-summary{font-size:.78rem;color:#6B7280;margin-top:8px}
 
-.exec-summary p{font-size:.9rem;color:#334155;margin:6px 0}
-.exec-summary .kpi-row{display:flex;flex-wrap:wrap;gap:12px;margin-top:12px}
-.exec-summary .kpi{background:#f1f5f9;border-radius:6px;padding:10px 14px;min-width:100px}
-.exec-summary .kpi .kpi-label{font-size:.7rem;color:#64748b;text-transform:uppercase;letter-spacing:.05em}
-.exec-summary .kpi .kpi-value{font-size:1.1rem;font-weight:700;color:#1a365d}
+.kpi-row{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px}
+.kpi{background:#F7F8FA;border-radius:8px;padding:12px 16px;min-width:100px;border:1px solid #E5E7EB}
+.kpi-label{font-size:.68rem;color:#6B7280;text-transform:uppercase;letter-spacing:.05em;display:block}
+.kpi-value{font-size:1.2rem;font-weight:700;color:#4338CA;font-variant-numeric:tabular-nums}
 
 .comp-table{width:100%;border-collapse:collapse;font-size:.85rem}
-.comp-table th{text-align:left;padding:8px 10px;background:#f1f5f9;font-weight:600;color:#475569;font-size:.75rem;text-transform:uppercase}
-.comp-table td{padding:8px 10px;border-bottom:1px solid #f1f5f9}
-.comp-table tr:hover{background:#f8fafc}
+.comp-table th{text-align:left;padding:8px 10px;background:#F7F8FA;font-weight:600;color:#6B7280;font-size:.72rem;text-transform:uppercase;letter-spacing:.04em}
+.comp-table td{padding:8px 10px;border-bottom:1px solid #F3F4F6}
+.comp-table tr:hover{background:#FAFBFC}
 
 .bucket-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
-.bucket-card{border-radius:8px;padding:16px;border:1px solid #e2e8f0}
-.bucket-card.quick-win{background:#ecfdf5;border-color:#a7f3d0}
-.bucket-card.niche-lever{background:#eff6ff;border-color:#bfdbfe}
-.bucket-card.coverage-gap{background:#fef3c7;border-color:#fcd34d}
-.bucket-card h4{font-size:.85rem}
-.bucket-card p{font-size:.8rem;color:#475569;margin:4px 0 0}
+.bucket-card{border-radius:10px;padding:18px;border:1px solid #E5E7EB}
+.bucket-card.schnelle-gewinne{background:#ECFDF5;border-color:#A7F3D0}
+.bucket-card.nischen-hebel{background:#EEF2FF;border-color:#C7D2FE}
+.bucket-card.abdeckungsluecken{background:#FEF3C7;border-color:#FDE68A}
+.bucket-card h4{font-size:.85rem;margin-bottom:6px}
+.bucket-card p{font-size:.8rem;color:#6B7280;margin:4px 0 0}
 
 .kw-table{width:100%;border-collapse:collapse;font-size:.85rem;margin-top:8px}
-.kw-table th{text-align:left;padding:6px 8px;background:#f1f5f9;font-weight:600;color:#475569;font-size:.75rem;text-transform:uppercase}
-.kw-table td{padding:6px 8px;border-bottom:1px solid #f1f5f9}
-.kw-table tr:hover{background:#f8fafc}
+.kw-table th{text-align:left;padding:6px 10px;background:#F7F8FA;font-weight:600;color:#6B7280;font-size:.72rem;text-transform:uppercase;letter-spacing:.04em}
+.kw-table td{padding:6px 10px;border-bottom:1px solid #F3F4F6;font-variant-numeric:tabular-nums}
+.kw-table tr:hover{background:#FAFBFC}
 
-.brand-panel{border:2px solid #dc2626;border-radius:8px;padding:20px;background:#fef2f2;margin-top:16px}
-.brand-panel h3{color:#991b1b;margin-top:0}
-.brand-panel .brand-note{font-size:.8rem;color:#7f1d1d;margin-bottom:14px}
+.score-cell{min-width:95px;white-space:nowrap}
+.score-bar{display:inline-block;width:64px;height:6px;background:#E5E7EB;border-radius:3px;vertical-align:middle;margin-right:6px;overflow:hidden}
+.score-fill{height:100%;background:#4338CA;border-radius:3px;transition:width .3s ease}
+.score-num{font-size:.8rem;font-weight:600;color:#1A1D23;vertical-align:middle;font-variant-numeric:tabular-nums}
+
+.brand-panel{border:2px solid #991B1B;border-radius:10px;padding:22px;background:#FEF2F2;margin-top:16px}
+.brand-panel h3{color:#991B1B;margin-top:0}
+.brand-note{font-size:.8rem;color:#991B1B;margin-bottom:14px}
 .brand-table{width:100%;border-collapse:collapse;font-size:.85rem}
-.brand-table th{text-align:left;padding:6px 8px;background:#fecaca;font-weight:600;color:#991b1b;font-size:.75rem;text-transform:uppercase}
-.brand-table td{padding:6px 8px;border-bottom:1px solid #fecaca}
-tr.brand-conflict{background:#fef2f2}
-tr.brand-conflict:hover{background:#fee2e2}
-.badge-danger{display:inline-block;background:#dc2626;color:#fff;padding:1px 6px;border-radius:3px;font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.03em}
-.strat-cell{max-width:260px;font-size:.78rem;color:#475569}
+.brand-table th{text-align:left;padding:6px 10px;background:#FECACA;font-weight:600;color:#991B1B;font-size:.72rem;text-transform:uppercase;letter-spacing:.04em}
+.brand-table td{padding:6px 10px;border-bottom:1px solid #FECACA}
+tr.brand-conflict{background:#FEF2F2}
+tr.brand-conflict:hover{background:#FEE2E2}
+.badge-danger{display:inline-block;background:#991B1B;color:#fff;padding:1px 7px;border-radius:4px;font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.03em}
+.strat-cell{max-width:260px;font-size:.78rem;color:#6B7280}
 
-.listing-slot{margin:6px 0;font-size:.9rem}
-.listing-slot code{background:#f1f5f9;padding:1px 5px;border-radius:3px;font-size:.85rem}
-.char-count{color:#64748b;font-size:.8rem}
-.listing-slot .alt{display:block;margin-left:20px;font-size:.85rem;color:#64748b}
-.h2-crosscheck{font-size:.85rem;margin-top:12px;padding:8px 12px;background:#f0fdf4;border-radius:4px;color:#166534}
-.listing-store{margin-bottom:20px}
-.pending{color:#64748b;font-size:.85rem;font-style:italic}
+.listing-slot{margin:6px 0;font-size:.88rem}
+.listing-slot code{background:#F3F4F6;padding:1px 6px;border-radius:4px;font-size:.82rem;font-family:"SF Mono",ui-monospace,monospace}
+.char-count{color:#6B7280;font-size:.78rem}
+.listing-slot .alt{display:block;margin-left:20px;font-size:.82rem;color:#6B7280}
+.h2-crosscheck{font-size:.82rem;margin-top:12px;padding:8px 14px;background:#ECFDF5;border-radius:6px;color:#065F46}
+.listing-store{margin-bottom:22px}
+.pending{color:#6B7280;font-size:.82rem;font-style:italic}
 
-.meth-list{font-size:.85rem;color:#334155;margin:6px 0 12px 20px}
-.meth-list li{margin:4px 0}
+.glossary-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px}
+.glossary-card{padding:16px;border-radius:8px;background:#F7F8FA;border:1px solid #E5E7EB}
+.glossary-card dt{font-size:.85rem;font-weight:700;color:#4338CA;margin-bottom:4px}
+.glossary-card dd{font-size:.78rem;color:#6B7280;margin:0;line-height:1.5}
 
-threats-list{font-size:.85rem;color:#334155}
-threats-list li{margin:4px 0}
+.meth-list{font-size:.82rem;color:#1A1D23;margin:6px 0 12px 20px}
+.meth-list li{margin:6px 0}
 
-.positioning-list{font-size:.85rem;color:#334155;margin:6px 0 12px 20px}
-.positioning-list li{margin:4px 0}
-.positioning-sub{font-size:.8rem;color:#64748b;margin:4px 0 12px 20px}
-.positioning-sub li{margin:2px 0}
+ul li{font-size:.85rem;color:#1A1D23;margin:4px 0}
 
 @media(max-width:640px){
-  .container{padding:12px 8px}
-  header{padding:18px 14px}
-  section{padding:16px}
+  .container{padding:12px 10px}
+  header{padding:22px 16px}
+  section{padding:18px}
   .source-board{grid-template-columns:repeat(auto-fill,minmax(140px,1fr))}
   .bucket-grid{grid-template-columns:1fr}
+  .glossary-grid{grid-template-columns:1fr}
+  .kpi-row{gap:8px}
+  .kpi{min-width:80px;padding:10px 12px}
+  .kpi-value{font-size:1rem}
+}
+
+@media(prefers-reduced-motion:reduce){
+  .score-fill{transition:none}
 }
 """.strip()
 
@@ -908,11 +944,11 @@ def build_report_html(
 
     parts: List[str] = []
     parts.append("<!DOCTYPE html>")
-    parts.append('<html lang="en">')
+    parts.append('<html lang="de">')
     parts.append("<head>")
     parts.append(f'<meta charset="utf-8">')
     parts.append(f'<meta name="viewport" content="width=device-width,initial-scale=1">')
-    parts.append(f"<title>ASO Research — {_html_esc(config['app_name'])}</title>")
+    parts.append(f"<title>ASO-Recherche — {_html_esc(config['app_name'])}</title>")
     parts.append(f"<style>{_HTML_CSS}</style>")
     parts.append("</head>")
     parts.append("<body>")
@@ -920,21 +956,21 @@ def build_report_html(
 
     # --- Header ---
     parts.append("<header>")
-    parts.append(f"<h1>ASO Research &mdash; {_html_esc(config['app_name'])}</h1>")
-    parts.append(f'<div class="meta">Generated: {_html_esc(generated)}</div>')
-    modus_label = f"Mode A (post-launch) &mdash; {_html_esc(own_app_id)}" if modus_a else "Mode B (pre-launch)"
+    parts.append(f"<h1>ASO-Recherche &mdash; {_html_esc(config['app_name'])}</h1>")
+    parts.append(f'<div class="meta">Erstellt: {_html_esc(generated)}</div>')
+    modus_label = f"Modus A (nach Launch) &mdash; {_html_esc(own_app_id)}" if modus_a else "Modus B (Pre-Launch)"
     parts.append(f'<span class="modus">{modus_label}</span>')
     if en_without_us:
         parts.append(
-            '<div class="en-caveat">&#9888; Language is EN but country is not US &mdash; '
-            'EN listing recommendations below are derived from a non-US market crawl and '
-            'should NOT be treated as EN-market (US) findings.</div>'
+            '<div class="en-caveat">&#9888; Sprache ist EN, Land aber nicht US &mdash; '
+            'die EN-Listing-Empfehlungen stammen aus einem Nicht-US-Markt-Crawl und '
+            'sollten NICHT als EN-Markt(US)-Ergebnisse behandelt werden.</div>'
         )
     parts.append("</header>")
 
-    # --- Source Health Board ---
+    # --- Quellenstatus ---
     parts.append("<section>")
-    parts.append("<h2>Source Health</h2>")
+    parts.append("<h2>Quellenstatus</h2>")
     parts.append('<div class="source-board">')
     for key, label in _HTML_SOURCE_ORDER:
         entry = source_status.get(key)
@@ -945,53 +981,53 @@ def build_report_html(
     ran, unavailable = _source_split(source_status)
     parts.append(
         f'<div class="source-summary">'
-        f'<strong>Sources that ran:</strong> {", ".join(ran) if ran else "iTunes Search API"}'
+        f'<strong>Verfügbare Quellen:</strong> {", ".join(ran) if ran else "iTunes Search API"}'
     )
     if unavailable:
         parts.append(
-            f'<br><strong>Sources unavailable</strong> (never-blocking): {", ".join(unavailable)}'
+            f'<br><strong>Nicht verfügbar</strong> (nie blockierend): {", ".join(unavailable)}'
         )
     parts.append("</div>")
     parts.append("</section>")
 
-    # --- Executive Summary ---
+    # --- Zusammenfassung ---
     parts.append("<section>")
-    parts.append("<h2>Executive Summary</h2>")
+    parts.append("<h2>Zusammenfassung</h2>")
     cat = config.get("category", "other")
     lang = config.get("language", "de")
     country = config.get("country", "de")
-    parts.append(f"<p><strong>Category:</strong> {_html_esc(cat)} &middot; "
-                 f"<strong>Country / language:</strong> {country} / {lang}</p>")
+    parts.append(f"<p><strong>Kategorie:</strong> {_html_esc(cat)} &middot; "
+                 f"<strong>Land / Sprache:</strong> {country} / {lang}</p>")
     seeds = config.get("seed_keywords") or []
     if seeds:
-        parts.append(f"<p><strong>Seed keywords:</strong> {', '.join(_html_esc(s) for s in seeds)}</p>")
+        parts.append(f"<p><strong>Seed-Keywords:</strong> {', '.join(_html_esc(s) for s in seeds)}</p>")
     parts.append('<div class="kpi-row">')
-    parts.append(f'<div class="kpi"><span class="kpi-label">Apple Competitors</span><span class="kpi-value">{len(apple_comps)}</span></div>')
+    parts.append(f'<div class="kpi"><span class="kpi-label">Apple-Wettbewerber</span><span class="kpi-value">{len(apple_comps)}</span></div>')
     if has_play:
-        parts.append(f'<div class="kpi"><span class="kpi-label">Play Competitors</span><span class="kpi-value">{len(play_comps)}</span></div>')
-    parts.append(f'<div class="kpi"><span class="kpi-label">Niche</span><span class="kpi-value">{len(niche)}</span></div>')
+        parts.append(f'<div class="kpi"><span class="kpi-label">Play-Wettbewerber</span><span class="kpi-value">{len(play_comps)}</span></div>')
+    parts.append(f'<div class="kpi"><span class="kpi-label">Nische</span><span class="kpi-value">{len(niche)}</span></div>')
     parts.append(f'<div class="kpi"><span class="kpi-label">Keywords</span><span class="kpi-value">{len(keywords)}</span></div>')
-    parts.append(f'<div class="kpi"><span class="kpi-label">Primary</span><span class="kpi-value">{len(primary)}</span></div>')
-    parts.append(f'<div class="kpi"><span class="kpi-label">Long-tail</span><span class="kpi-value">{len(longtail)}</span></div>')
-    parts.append(f'<div class="kpi"><span class="kpi-label">Coverage Gaps</span><span class="kpi-value">{len(gaps)}</span></div>')
+    parts.append(f'<div class="kpi"><span class="kpi-label">Primär</span><span class="kpi-value">{len(primary)}</span></div>')
+    parts.append(f'<div class="kpi"><span class="kpi-label">Long-Tail</span><span class="kpi-value">{len(longtail)}</span></div>')
+    parts.append(f'<div class="kpi"><span class="kpi-label">Lücken</span><span class="kpi-value">{len(gaps)}</span></div>')
     parts.append("</div>")
-    parts.append(f"<p style='margin-top:12px;font-size:.85rem'><strong>Top keywords:</strong> {_html_esc(top_kw)}</p>")
+    parts.append(f"<p style='margin-top:12px;font-size:.85rem'><strong>Top-Keywords:</strong> {_html_esc(top_kw)}</p>")
     if s1_output and s1_output.get("dominant_themes"):
         themes = ", ".join(_html_esc(t) for t in s1_output["dominant_themes"][:5])
-        parts.append(f"<p style='font-size:.85rem'><strong>Dominant themes (S1):</strong> {themes}</p>")
+        parts.append(f"<p style='font-size:.85rem'><strong>Dominante Themen (S1):</strong> {themes}</p>")
     parts.append("</section>")
 
-    # --- Competitive Landscape ---
+    # --- Wettbewerbslandschaft ---
     parts.append("<section>")
-    parts.append("<h2>Competitive Landscape</h2>")
+    parts.append("<h2>Wettbewerbslandschaft</h2>")
     if not competitors:
-        parts.append("<p><em>No competitors discovered for this seed.</em></p>")
+        parts.append("<p><em>Keine Wettbewerber zu diesem Seed gefunden.</em></p>")
     else:
         rows = []
         for c in competitors:
             rating = c.get("rating_avg")
             rating_str = f"{float(rating):.1f}" if isinstance(rating, (int, float)) else "—"
-            source = "niche" if c.get("discovery") == "niche_similar" else "chart/search"
+            source = "Nische" if c.get("discovery") == "niche_similar" else "Chart/Suche"
             sub = c.get("subtitle") or ""
             title = _html_esc(c.get("title", ""))
             if sub:
@@ -1010,37 +1046,37 @@ def build_report_html(
         parts.append(
             '<table class="comp-table">'
             '<thead><tr>'
-            '<th>Title</th><th>Developer</th><th>Category</th>'
-            '<th>Rating</th><th># Ratings</th><th>Price</th><th>Source</th>'
+            '<th>Titel</th><th>Entwickler</th><th>Kategorie</th>'
+            '<th>Bewertung</th><th># Bewertungen</th><th>Preis</th><th>Quelle</th>'
             '</tr></thead>'
             f'<tbody>{"".join(rows)}</tbody></table>'
         )
     parts.append("</section>")
 
-    # --- Positioning Map ---
+    # --- Positionierungsmap ---
     parts.append("<section>")
-    parts.append("<h2>Positioning Map</h2>")
+    parts.append("<h2>Positionierungsmap</h2>")
     if s1_output:
         for key, label in (
-            ("niches", "Niches"),
-            ("dominant_themes", "Dominant themes"),
-            ("leader_positioning", "Leader positioning patterns"),
-            ("audiences", "Audiences"),
+            ("niches", "Nischen"),
+            ("dominant_themes", "Dominante Themen"),
+            ("leader_positioning", "Positionierung der Marktführer"),
+            ("audiences", "Zielgruppen"),
         ):
             values = s1_output.get(key) or []
             if values:
                 joined = "; ".join(_html_esc(v) for v in values[:8])
                 parts.append(f"<li><strong>{_html_esc(label)}:</strong> {joined}</li>")
         if reddit_threads:
-            parts.append("<p style='margin-top:12px'><strong>Qualitative grounding (Reddit):</strong></p>")
+            parts.append("<p style='margin-top:12px'><strong>Qualitative Untermauerung (Reddit):</strong></p>")
             for t in reddit_threads[:6]:
                 sub = t.get("subreddit") or "—"
-                parts.append(f"<li class='positioning-sub'>r/{_html_esc(sub)} — {_html_esc(t.get('title', ''))}</li>")
+                parts.append(f"<li style='font-size:.8rem;color:#6B7280;margin:2px 0'>r/{_html_esc(sub)} — {_html_esc(t.get('title', ''))}</li>")
     else:
         parts.append(
-            "<p><em>Full LLM positioning analysis pending (run the S1 Niche &amp; "
-            "Positioning Analyst, Sonnet). Deterministic category clustering "
-            "below as a placeholder read.</em></p>"
+            "<p><em>Vollständige LLM-Positionierungsanalyse ausstehend (S1 Nische &amp; "
+            "Positionierungs-Analyst, Sonnet ausführen). Deterministische Kategorie-"
+            "Clusterung unten als Platzhalter.</em></p>"
         )
         clusters: Dict[str, List[str]] = {}
         for c in competitors:
@@ -1055,29 +1091,29 @@ def build_report_html(
     if ms_entries and _entry_is_ok(source_status.get("ms")):
         ms_titles = ", ".join(_html_esc(e.get("title", "")) for e in ms_entries[:8])
         parts.append(
-            f"<p style='font-size:.85rem;margin-top:12px;color:#475569'>"
-            f"<strong>Microsoft Store (qualitative, best-effort):</strong> {len(ms_entries)} app(s) "
-            f"observed &mdash; {ms_titles}. This is additional qualitative context only; "
-            f"it does NOT enter keyword scoring."
+            f"<p style='font-size:.85rem;margin-top:12px;color:#6B7280'>"
+            f"<strong>Microsoft Store (qualitativ, Best-Effort):</strong> {len(ms_entries)} App(s) "
+            f"beobachtet &mdash; {ms_titles}. Rein qualitativer Kontext; "
+            f"fließt NICHT in das Keyword-Scoring ein."
             f"</p>"
         )
     parts.append("</section>")
 
-    # --- Keyword Report ---
+    # --- Keyword-Bericht ---
     parts.append("<section>")
-    parts.append("<h2>Keyword Report</h2>")
+    parts.append("<h2>Keyword-Bericht</h2>")
     parts.append(
-        '<p style="font-size:.85rem;color:#64748b">'
-        "Scores are a deterministic <strong>Competition/Relevance signal</strong> &mdash; a proxy, "
-        "<strong>never</strong> search volume. Competition = position-weighted slot share "
-        "(Apple: Title &times;5 &middot; Subtitle &times;3 &middot; Description &times;1; "
-        "Play: Title &times;5 &middot; Short &times;4 &middot; Long &times;2); "
-        "Relevance = cosine TF-IDF to the seed concept (+15 Apple/Play Search-Suggest boost); "
-        "Opportunity = Relevance &times; (100 &minus; Competition) (+10 niche bonus)."
+        '<p style="font-size:.85rem;color:#6B7280">'
+        "Die Werte sind ein deterministisches <strong>Wettbewerbs-/Relevanz-Signal</strong> &mdash; ein Proxy, "
+        "<strong>kein</strong> echtes Suchvolumen. Wettbewerb = positionsgewichteter Slot-Anteil "
+        "(Apple: Titel &times;5 &middot; Untertitel &times;3 &middot; Beschreibung &times;1; "
+        "Play: Titel &times;5 &middot; Kurzbeschreibung &times;4 &middot; Langbeschreibung &times;2); "
+        "Relevanz = Cosinus-TF-IDF zum Seed-Konzept (+15 Apple/Play Search-Suggest-Bonus); "
+        "Chance = Relevanz &times; (100 &minus; Wettbewerb) (+10 Nischen-Bonus)."
         "</p>"
     )
     if not keywords:
-        parts.append("<p><em>No keywords scored (empty competitor corpus).</em></p>")
+        parts.append("<p><em>Keine Keywords bewertet (leerer Wettbewerber-Korpus).</em></p>")
     else:
         if has_play and play_kws:
             parts.append("<h3>Apple</h3>")
@@ -1091,58 +1127,58 @@ def build_report_html(
             gap_terms = ", ". join(_html_esc(k["term"]) for k in gaps[:15])
             parts.append(
                 f"<p style='font-size:.85rem;margin-top:12px'>"
-                f"<strong>Coverage gaps</strong> (competitors own in Title, seed lacks): {gap_terms}"
+                f"<strong>Abdeckungslücken</strong> (Wettbewerber führen im Titel, Seed nicht): {gap_terms}"
                 f"</p>"
             )
 
-    # Brand Conflicts
+    # Markenkonflikte
     if brand_conflicts:
         parts.append(
             '<div class="brand-panel">'
-            '<h3>&#9888; Brand Conflicts</h3>'
+            '<h3>&#9888; Markenkonflikte</h3>'
             '<p class="brand-note">'
-            "Keywords matching terms forbidden by the project's brand glossar "
-            "(Anti-Vokabular). Each conflict carries the canonical replacement "
-            "and four strategies &mdash; <strong>none auto-applied</strong>, "
-            "decisions stay with the project owner."
+            "Keywords, die Begriffe aus dem Anti-Vokabular des Projekts enthalten. "
+            "Jeder Konflikt zeigt die kanonische Ersetzung und vier Strategien "
+            "&mdash; <strong>keine automatisch angewandt</strong>, "
+            "die Entscheidung liegt beim Projektinhaber."
             "</p>"
             '<table class="brand-table">'
             '<thead><tr>'
-            '<th>Keyword</th><th>Forbidden Match</th><th>Replacement</th>'
-            '<th>Opp.</th><th>Rel.</th><th>Strategies</th>'
+            '<th>Keyword</th><th>Verbotener Treffer</th><th>Ersetzung</th>'
+            '<th>Chance</th><th>Rel.</th><th>Strategien</th>'
             '</tr></thead>'
             f'<tbody>{"".join(_html_brand_conflict_row(c) for c in brand_conflicts)}</tbody>'
             '</table></div>'
         )
     parts.append("</section>")
 
-    # --- Opportunities ---
+    # --- Chancen ---
     parts.append("<section>")
-    parts.append("<h2>Opportunities</h2>")
+    parts.append("<h2>Chancen</h2>")
     buckets = _opportunity_buckets(keywords)
     parts.append('<div class="bucket-grid">')
     parts.append(_html_bucket_card(
-        f"Quick wins (Opp. &ge; {_QUICK_WIN_OPP_MIN}, Comp. &le; {_QUICK_WIN_COMP_MAX})",
-        buckets["quick_win"], "quick-win"))
+        f"Schnelle Gewinne (Chance &ge; {_QUICK_WIN_OPP_MIN}, Wettb. &le; {_QUICK_WIN_COMP_MAX})",
+        buckets["quick_win"], "schnelle-gewinne"))
     parts.append(_html_bucket_card(
-        f"Niche levers (Comp. &le; {_NICHE_LEVER_COMP_MAX}, Rel. &ge; {_NICHE_LEVER_REL_MIN})",
-        buckets["niche_lever"], "niche-lever"))
+        f"Nischen-Hebel (Wettb. &le; {_NICHE_LEVER_COMP_MAX}, Rel. &ge; {_NICHE_LEVER_REL_MIN})",
+        buckets["niche_lever"], "nischen-hebel"))
     parts.append(_html_bucket_card(
-        "Coverage gaps (competitors own in Title, seed lacks)",
-        buckets["coverage_gap"], "coverage-gap"))
+        "Abdeckungslücken (Wettbewerber führen im Titel, Seed nicht)",
+        buckets["coverage_gap"], "abdeckungsluecken"))
     parts.append("</div>")
     if s1_output and s1_output.get("missing_themes"):
         missing = "; ".join(_html_esc(t) for t in s1_output["missing_themes"][:8])
         parts.append(
             f"<p style='margin-top:14px;font-size:.85rem'>"
-            f"<strong>Missing themes (S1):</strong> {missing}"
+            f"<strong>Fehlende Themen (S1):</strong> {missing}"
             f"</p>"
         )
     parts.append("</section>")
 
-    # --- Risks / Threats ---
+    # --- Risiken / Bedrohungen ---
     parts.append("<section>")
-    parts.append("<h2>Risks / Threats</h2>")
+    parts.append("<h2>Risiken / Bedrohungen</h2>")
     if s1_output and s1_output.get("threats"):
         parts.append("<ul>")
         for t in s1_output["threats"][:10]:
@@ -1151,36 +1187,36 @@ def build_report_html(
     else:
         top_comp = sorted(keywords, key=lambda k: -int(k.get("competition", 0)))[:8]
         parts.append(
-            "<p><em>Full LLM threat read pending (run S1). Highest-competition terms "
-            "below as a deterministic threat proxy.</em></p>"
+            "<p><em>Vollständige LLM-Bedrohungsanalyse ausstehend (S1 ausführen). "
+            "Begriffe mit höchstem Wettbewerb unten als deterministischer Proxy.</em></p>"
         )
         parts.append("<ul>")
         for k in top_comp:
             parts.append(
                 f"<li><strong>{_html_esc(k.get('term', ''))}</strong> &mdash; "
-                f"competition signal {k.get('competition', 0)}</li>"
+                f"Wettbewerbssignal {k.get('competition', 0)}</li>"
             )
         parts.append("</ul>")
     parts.append("</section>")
 
-    # --- Listing Recommendation ---
+    # --- Listing-Empfehlung ---
     parts.append("<section>")
-    parts.append("<h2>Listing Recommendation</h2>")
+    parts.append("<h2>Listing-Empfehlung</h2>")
 
     parts.append('<div class="listing-store">')
     parts.append("<h3>Apple</h3>")
     if en_without_us:
         parts.append(
             '<div class="en-caveat" style="margin-bottom:12px">&#9888; '
-            'Language is EN but country is not US &mdash; the EN listing '
-            'recommendations below are derived from a non-US market crawl and should '
-            'NOT be treated as EN-market (US) findings.</div>'
+            'Sprache ist EN, Land aber nicht US &mdash; die EN-Listing-Empfehlungen '
+            'stammen aus einem Nicht-US-Markt-Crawl und sollten NICHT als '
+            'EN-Markt(US)-Ergebnisse behandelt werden.</div>'
         )
-    limits = "Title 30 / Subtitle 30 / Keyword Field 100"
+    limits = "Titel 30 / Untertitel 30 / Keyword-Feld 100"
     parts.append(
-        f'<p style="font-size:.85rem;color:#64748b">'
-        f'1 recommended + 2 alternatives per Apple slot ({limits}), '
-        f'validated by the H2 cross-check.</p>'
+        f'<p style="font-size:.85rem;color:#6B7280">'
+        f'1 empfohlen + 2 Alternativen pro Apple-Slot ({limits}), '
+        f'validiert durch den H2-Cross-Check.</p>'
     )
     parts.append(_html_listing_slots(s2_output, h2_output, store_label="Apple"))
     parts.append("</div>")
@@ -1189,10 +1225,10 @@ def build_report_html(
         parts.append('<div class="listing-store">')
         parts.append("<h3>Google Play</h3>")
         parts.append(
-            '<p style="font-size:.85rem;color:#64748b">'
-            "1 recommended + 2 alternatives per Play slot (Title 30 / Short 80 / "
-            "Long 4000), optimised for Play's own ranking model, validated by the "
-            "H2 cross-check.</p>"
+            '<p style="font-size:.85rem;color:#6B7280">'
+            "1 empfohlen + 2 Alternativen pro Play-Slot (Titel 30 / Kurzbeschreibung 80 / "
+            "Langbeschreibung 4000), optimiert für Plays Ranking-Modell, validiert durch den "
+            "H2-Cross-Check.</p>"
         )
         parts.append(_html_listing_slots(s2_play_output, h2_play_output,
                                           store_label="Google Play"))
@@ -1200,7 +1236,7 @@ def build_report_html(
 
     # Modus A self-audit
     if modus_a:
-        parts.append("<h3>Self-audit (Modus A)</h3>")
+        parts.append("<h3>Selbstaudit (Modus A)</h3>")
         if s1_output and s1_output.get("own_app_audit"):
             audit = s1_output["own_app_audit"]
             items = audit if isinstance(audit, list) else [audit]
@@ -1217,76 +1253,131 @@ def build_report_html(
             parts.append("</ul>")
         else:
             parts.append(
-                f"<p><em>Own app `{_html_esc(own_app_id)}` carried as a reference entry; "
-                f"run S1/S2 with the own-app context to populate the self-audit comparison.</em></p>"
+                f"<p><em>Eigene App `{_html_esc(own_app_id)}` als Referenzeintrag geführt; "
+                f"S1/S2 mit Own-App-Kontext ausführen, um den Selbstaudit zu befüllen.</em></p>"
             )
     parts.append("</section>")
 
-    # --- Methodology ---
+    # --- Methodik ---
     parts.append("<section>")
-    parts.append("<h2>Methodology</h2>")
+    parts.append("<h2>Methodik</h2>")
     parts.append(
-        "<p style='font-size:.85rem;color:#334155'>"
-        "Apple <strong>Core + Slots</strong> metadata collected (subtitle via Playwright, "
-        "description from the iTunes API, keyword_hints inferred by inversion &mdash; "
-        "never the hidden 100-char field). Keyword extraction: YAKE phrases + "
-        "TF-IDF with position weighting (Title &times;5 &middot; Subtitle &times;3 "
-        "&middot; Description &times;1) + Apple Search-Suggest enrichment; DE+EN "
-        "stopwords, generics filtered, light morphology grouping."
+        "<p style='font-size:.85rem;color:#1A1D23'>"
+        "Apple <strong>Core + Slots</strong>-Metadaten gesammelt (Untertitel via Playwright, "
+        "Beschreibung aus der iTunes-API, keyword_hints durch Inversion abgeleitet &mdash; "
+        "niemals das versteckte 100-Zeichen-Feld). Keyword-Extraktion: YAKE-Phrasen + "
+        "TF-IDF mit Positionsgewichtung (Titel &times;5 &middot; Untertitel &times;3 "
+        "&middot; Beschreibung &times;1) + Apple Search-Suggest-Anreicherung; DE+EN-"
+        "Stopwörter, Generika gefiltert, leichte Morphologie-Gruppierung."
         "</p>"
     )
     if has_play:
         parts.append(
-            "<p style='font-size:.85rem;color:#334155'>"
-            "Google Play <strong>Core + Slots</strong> metadata collected via "
-            "google-play-scraper (search, charts, similar-apps): Title + "
-            "Short Description (80, strong ranking factor) + Long Description "
-            "(4000, fully indexed). Play <strong>tags are not collected</strong> "
-            "(not reliably extractable). Play keywords flow into the SAME shared "
-            "scoring engine with Play's own position weighting (Title &times;5 "
-            "&middot; Short &times;4 &middot; Long &times;2) and Play autocomplete "
-            "enriches the suggest set alongside Apple's."
+            "<p style='font-size:.85rem;color:#1A1D23'>"
+            "Google Play <strong>Core + Slots</strong>-Metadaten gesammelt via "
+            "google-play-scraper (Suche, Charts, Similar-Apps): Titel + "
+            "Kurzbeschreibung (80, starker Ranking-Faktor) + Langbeschreibung "
+            "(4000, vollständig indexiert). Play-<strong>Tags werden nicht erfasst</strong> "
+            "(nicht zuverlässig extrahierbar). Play-Keywords fließen in DIESELBE "
+            "Scoring-Engine mit Play-eigener Positionsgewichtung (Titel &times;5 "
+            "&middot; Kurzbeschreibung &times;4 &middot; Langbeschreibung &times;2) "
+            "und Play-Autocomplete ergänzt das Suggest-Set."
             "</p>"
         )
     if _entry_is_ok(source_status.get("ms")):
         parts.append(
-            "<p style='font-size:.85rem;color:#334155'>"
-            "Microsoft Store metadata collected <strong>best-effort</strong> via Playwright "
-            "(<code>apps.microsoft.com</code> is a single-page app, so collection uses "
-            "<code>networkidle</code> + <code>wait_for_selector</code>). MS carries the "
-            "<code>description</code> slot only &mdash; <strong>there is no MS ASO slot model "
-            "and MS data never enters keyword extraction or scoring</strong>. It is passed "
-            "to the S1 Niche &amp; Positioning Analyst as additional qualitative context."
+            "<p style='font-size:.85rem;color:#1A1D23'>"
+            "Microsoft Store-Metadaten <strong>per Best-Effort</strong> via Playwright gesammelt "
+            "(<code>apps.microsoft.com</code> ist eine Single-Page-App, daher mit "
+            "<code>networkidle</code> + <code>wait_for_selector</code>). MS hat nur den "
+            "<code>description</code>-Slot &mdash; <strong>es gibt kein MS-ASO-Slot-Modell "
+            "und MS-Daten fließen niemals in Keyword-Extraktion oder Scoring ein</strong>. "
+            "Sie werden als zusätzlicher qualitativer Kontext an den S1-Analysten übergeben."
             "</p>"
         )
     elif "ms" in source_status:
         parts.append(
-            "<p style='font-size:.85rem;color:#334155'>"
-            "Microsoft Store was <strong>unavailable</strong> this run (best-effort, "
-            "never-blocking &mdash; the pipeline completed with Apple + Play results intact). "
-            "MS is qualitative-only and would not have entered scoring regardless."
+            "<p style='font-size:.85rem;color:#1A1D23'>"
+            "Microsoft Store war in diesem Durchlauf <strong>nicht verfügbar</strong> (Best-Effort, "
+            "nie blockierend &mdash; die Pipeline wurde mit Apple + Play-Ergebnissen abgeschlossen). "
+            "MS ist rein qualitativ und wäre ohnehin nicht ins Scoring eingeflossen."
             "</p>"
         )
-    parts.append("<p style='font-size:.85rem;color:#1a365d'><strong>Honesty &mdash; what is a proxy vs what is real:</strong></p>")
+    parts.append("<p style='font-size:.85rem;color:#4338CA'><strong>Ehrlichkeit &mdash; was ist ein Proxy, was ist echt:</strong></p>")
     parts.append(
         "<ul class='meth-list'>"
-        "<li>Competition / Relevance / Opportunity are <strong>deterministic proxy "
-        "signals</strong>, explicitly <strong>not real search volume or difficulty</strong> &mdash; they "
-        "are labelled &quot;signal&quot; throughout. The only free <em>real-search</em> signals "
-        "are Apple + Play Search-Suggest autocomplete (a +15 Relevance boost).</li>"
-        "<li>Keyword counts come from the collected competitor corpus, not from a "
-        "proprietary search-volume panel.</li>"
-        "<li><strong>LLM phase (Claude-native, no paid API keys):</strong> the deterministic "
-        "spine prepares a token-budget-gated, condensed representation (~70k "
-        "token cap, chars/4 estimate); the H1 (Haiku) Metadata-Condenser, S1 "
-        "(Sonnet) Niche &amp; Positioning Analyst, S2 (Sonnet) Listing Strategist, "
-        "and H2 (Haiku) Cross-Checker interpret it &mdash; every subagent call sets "
-        "its model explicitly. Politeness: &le;1 req/s/domain + jitter, "
-        "exponential backoff on 429/503 (max 3 then skip), robots.txt "
-        "respected, <strong>no stealth plugins</strong>. HTTP cache 24h / browser cache 12h "
-        "at <code>~/.cache/aso-research/</code>.</li>"
+        "<li>Wettbewerb / Relevanz / Chance sind <strong>deterministische Proxy-"
+        "Signale</strong>, ausdrücklich <strong>kein echtes Suchvolumen und keine echte Difficulty</strong> &mdash; "
+        "sie werden durchgängig als &quot;Signal&quot; bezeichnet. Die einzigen kostenlosen "
+        "<em>Echtsuche</em>-Signale sind Apple- und Play-Search-Suggest-Autovervollständigung "
+        "(ein +15-Relevanz-Bonus).</li>"
+        "<li>Keyword-Zahlen stammen aus dem gesammelten Wettbewerber-Korpus, nicht aus "
+        "einem proprietären Suchvolumen-Panel.</li>"
+        "<li><strong>LLM-Phase (Claude-nativ, keine kostenpflichtigen API-Keys):</strong> "
+        "das deterministische Grundgerüst bereitet eine Token-Budget-begrenzte, "
+        "kondensierte Repräsentation vor (~70k Token-Cap, Zeichen/4-Schätzung); "
+        "der H1 (Haiku) Metadaten-Kondensierer, S1 (Sonnet) Nischen- &amp; Positionierungs-"
+        "Analyst, S2 (Sonnet) Listing-Stratege und H2 (Haiku) Cross-Checker "
+        "interpretieren sie &mdash; jeder Subagent-Aufruf setzt sein Modell explizit. "
+        "Höflichkeit: &le;1 Anfrage/s/Domain + Jitter, exponentielles Backoff bei "
+        "429/503 (max. 3, dann überspringen), robots.txt respektiert, "
+        "<strong>keine Stealth-Plugins</strong>. HTTP-Cache 24h / Browser-Cache 12h "
+        "unter <code>~/.cache/aso-research/</code>.</li>"
         "</ul>"
     )
+    parts.append("</section>")
+
+    # --- Glossar ---
+    parts.append("<section>")
+    parts.append("<h2>Glossar</h2>")
+    parts.append('<div class="glossary-grid">')
+    glossary_terms = [
+        ("Relevanz",
+         "Maß für die thematische Nähe eines Keywords zum Produktkonzept. "
+         "Berechnet als gewichtete TF-IDF-Ähnlichkeit zu den Seed-Keywords — "
+         "je höher, desto passender zum Produkt."),
+        ("Chance (Opportunity)",
+         "Kombinierter Kennwert aus Relevanz und Wettbewerb. Je relevanter ein "
+         "Keyword und je weniger umkämpft, desto höher die Chance. Der wichtigste "
+         "Sortierwert für Listing-Entscheidungen."),
+        ("Suchvolumen",
+         "Im Report bewusst NICHT enthalten — wir nutzen stattdessen einen "
+         "Wettbewerbs-/Relevanz-Proxy. Echtes Suchvolumen müsste über Apple "
+         "Search Ads oder Drittanbieter (z. B. Sensor Tower) bezogen werden."),
+        ("Primärkandidat (Primary)",
+         "Keyword mit hoher Relevanz zum Produkt — taucht prominent in Wettbewerber-"
+         "Titeln und/oder -Untertiteln auf. Ideale Kandidaten für den eigenen "
+         "Titel oder Untertitel."),
+        ("Long-Tail-Kandidat",
+         "Spezifischere, weniger umkämpfte Keyword-Kombination aus mehreren Wörtern. "
+         "Niedrigerer Wettbewerb, dafür auch geringere Sichtbarkeit — gut für "
+         "Beschreibungstexte und das Keyword-Feld."),
+        ("Qualitativer Kanal",
+         "Eine Datenquelle, die bewusst NICHT in das Scoring einfließt, sondern "
+         "als Kontext für die LLM-Analyse dient (z. B. Microsoft Store, "
+         "Reddit-Threads). Liefert Tiefe, aber keine Zahlen."),
+        ("Markenkonflikt (Brand Conflict)",
+         "Ein Keyword, das Begriffe aus dem Anti-Vokabular des Projekts enthält — "
+         "z. B. Konkurrenzmarken oder unerwünschte Assoziationen. Wird im Report "
+         "rot markiert; die Entscheidung über die Verwendung bleibt beim "
+         "Projektinhaber."),
+        ("Anti-Vokabular",
+         "Eine projektspezifische Liste verbotener Begriffe (Markennamen, "
+         "unerwünschte Assoziationen), die in Keywords und Listings vermieden "
+         "werden sollen."),
+        ("Seed-Keywords",
+         "Die vom Nutzer vorgegebenen Startbegriffe, mit denen die Recherche "
+         "beginnt. Ausgehend davon werden Wettbewerber gefunden und der "
+         "Keyword-Korpus aufgebaut."),
+    ]
+    for term, definition in glossary_terms:
+        parts.append(
+            f'<div class="glossary-card">'
+            f'<dt>{_html_esc(term)}</dt>'
+            f'<dd>{_html_esc(definition)}</dd>'
+            f'</div>'
+        )
+    parts.append("</div>")
     parts.append("</section>")
 
     parts.append("</div>")  # .container

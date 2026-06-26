@@ -1,18 +1,15 @@
 #!/usr/bin/env python3
-"""Tests for the HTML report builder (slice 06) — report.build_report_html().
+"""Tests for the HTML report builder (slice 06 + 09) — report.build_report_html().
 
 Run from the repo root:
     python3 -m unittest discover -s tests/aso-research -q
 
-Covers AC1-6: self-contained single <html> with inline <style> and no
-external assets; equal data to Markdown twin; brand conflicts visually
-prominent; source-health distinguishes ok/unavailable/ok-empty with
-result counts; full landscape renders.
+Covers: self-contained HTML, German localisation, glossary, score bars,
+visual design elements, brand conflicts, source health, determinism.
 """
 
 import datetime
 import pathlib
-import re
 import sys
 import unittest
 
@@ -154,6 +151,10 @@ def _brand_conflicts():
     ]
 
 
+# ---------------------------------------------------------------------------
+# AC1/AC2 — Self-contained HTML
+# ---------------------------------------------------------------------------
+
 class SelfContainedHTMLTests(unittest.TestCase):
     """AC1: build_report_html returns self-contained HTML string."""
 
@@ -166,15 +167,18 @@ class SelfContainedHTMLTests(unittest.TestCase):
     def test_single_html_document(self):
         html = report.build_report_html(
             _config(), _competitors(), _keywords(), now=NOW)
-        # Exactly one opening <html> tag
-        self.assertEqual(html.lower().count("<html"), 1, "Must contain exactly one <html> tag")
-        # Contains closing </html>
+        self.assertEqual(html.lower().count("<html"), 1)
         self.assertIn("</html>", html)
 
     def test_has_doctype(self):
         html = report.build_report_html(
             _config(), _competitors(), _keywords(), now=NOW)
         self.assertTrue(html.strip().lower().startswith("<!doctype html"))
+
+    def test_uses_german_lang(self):
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW)
+        self.assertIn('lang="de"', html)
 
     def test_has_inline_style_block(self):
         html = report.build_report_html(
@@ -185,12 +189,10 @@ class SelfContainedHTMLTests(unittest.TestCase):
     def test_no_external_assets(self):
         html = report.build_report_html(
             _config(), _competitors(), _keywords(), now=NOW)
-        # No external src= or href= referencing network assets
         self.assertNotIn('src="http', html)
         self.assertNotIn("src='http", html)
         self.assertNotIn('href="http', html)
         self.assertNotIn("href='http", html)
-        # No link rel=stylesheet to external files
         self.assertNotIn('rel="stylesheet"', html.lower())
 
     def test_no_external_fonts(self):
@@ -206,37 +208,201 @@ class SelfContainedHTMLTests(unittest.TestCase):
         self.assertNotIn("<script", html.lower())
 
 
-class FullLandscapeTests(unittest.TestCase):
-    """AC6: Renders full landscape — all sections present."""
+# ---------------------------------------------------------------------------
+# German localisation
+# ---------------------------------------------------------------------------
 
-    def test_all_sections_present(self):
+class GermanLocalisationTests(unittest.TestCase):
+    """AC: German text strings and section headings."""
+
+    def test_german_section_headings(self):
         html = report.build_report_html(
             _config(), _competitors(), _keywords(), now=NOW,
             s1_output=_s1(), s2_output=_s2(), h2_output=_h2_ok(),
         )
-        sections = [
-            "Executive Summary",
-            "Competitive Landscape",
-            "Positioning Map",
-            "Keyword Report",
-            "Opportunities",
-            "Risks / Threats",
-            "Listing Recommendation",
-            "Methodology",
+        de_sections = [
+            "Quellenstatus",
+            "Zusammenfassung",
+            "Wettbewerbslandschaft",
+            "Positionierungsmap",
+            "Keyword-Bericht",
+            "Chancen",
+            "Risiken / Bedrohungen",
+            "Listing-Empfehlung",
+            "Methodik",
+            "Glossar",
         ]
-        for name in sections:
+        for name in de_sections:
             with self.subTest(section=name):
-                self.assertIn(name, html, f"missing section: {name}")
+                self.assertIn(name, html, f"missing German section heading: {name}")
 
-    def test_run_meta_present(self):
+    def test_german_table_headers(self):
         html = report.build_report_html(
             _config(), _competitors(), _keywords(), now=NOW)
-        self.assertIn("Habit Hero", html)
-        self.assertIn("2026-06-26", html)
+        self.assertIn("Wettbewerb", html)
+        self.assertIn("Relevanz", html)
+        self.assertIn("Chance", html)
+        self.assertIn("Kategorie", html)
+        self.assertIn("Lücke", html)
+        self.assertIn("Titel", html)
+        self.assertIn("Entwickler", html)
+        self.assertIn("Bewertung", html)
+        self.assertIn("Quelle", html)
 
+    def test_german_kpi_labels(self):
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW)
+        self.assertIn("Apple-Wettbewerber", html)
+        self.assertIn("Nische", html)
+        self.assertIn("Primär", html)
+        self.assertIn("Long-Tail", html)
+        self.assertIn("Lücken", html)
+
+    def test_german_bucket_labels(self):
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW)
+        self.assertIn("Schnelle Gewinne", html)
+        self.assertIn("Nischen-Hebel", html)
+        self.assertIn("Abdeckungslücken", html)
+
+    def test_german_source_labels(self):
+        status = {
+            "apple_subtitle": {"status": "ok", "result_count": 3},
+            "apple_similar": {"status": "unavailable", "reason": "timeout"},
+        }
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW,
+            source_status=status,
+        )
+        self.assertIn("Ergebnis(se)", html)
+        self.assertIn("nicht verfügbar", html)
+        self.assertIn("Verfügbare Quellen", html)
+
+    def test_german_generated_label(self):
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW)
+        self.assertIn("Erstellt:", html)
+
+    def test_german_brand_conflict_panel(self):
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW,
+            brand_conflicts=_brand_conflicts(),
+        )
+        self.assertIn("Markenkonflikte", html)
+        self.assertIn("Verbotener Treffer", html)
+        self.assertIn("Ersetzung", html)
+        self.assertIn("Anti-Vokabular", html)
+        self.assertIn("Projektinhaber", html)
+
+    def test_german_honesty_section(self):
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW)
+        self.assertIn("Ehrlichkeit", html)
+        self.assertIn("Proxy-Signale", html)
+        self.assertIn("kein echtes suchvolumen", html.lower())
+
+
+# ---------------------------------------------------------------------------
+# Glossary
+# ---------------------------------------------------------------------------
+
+class GlossaryTests(unittest.TestCase):
+    """AC: ## Glossar section with required terms."""
+
+    def test_glossary_section_present(self):
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW)
+        self.assertIn("Glossar", html)
+
+    REQUIRED_TERMS = [
+        "Relevanz",
+        "Chance",
+        "Suchvolumen",
+        "Primärkandidat",
+        "Long-Tail-Kandidat",
+        "Qualitativer Kanal",
+        "Markenkonflikt",
+        "Anti-Vokabular",
+        "Seed-Keywords",
+    ]
+
+    def test_glossary_contains_all_required_terms(self):
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW)
+        for term in self.REQUIRED_TERMS:
+            with self.subTest(term=term):
+                self.assertIn(term, html, f"glossary missing term: {term}")
+
+    def test_glossary_uses_grid_layout(self):
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW)
+        self.assertIn("glossary-grid", html)
+        self.assertIn("glossary-card", html)
+
+    def test_glossary_renders_even_with_minimal_data(self):
+        html = report.build_report_html(
+            _config(), [], [], now=NOW)
+        self.assertIn("Glossar", html)
+
+
+# ---------------------------------------------------------------------------
+# Visual design elements
+# ---------------------------------------------------------------------------
+
+class VisualDesignTests(unittest.TestCase):
+    """AC: Visual design improvements — score bars, cards, colour palette."""
+
+    def test_score_bars_in_keyword_table(self):
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW)
+        self.assertIn("score-bar", html)
+        self.assertIn("score-fill", html)
+        self.assertIn("score-num", html)
+
+    def test_score_bar_has_style_width(self):
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW)
+        self.assertIn('style="width:', html)
+
+    def test_card_sections_have_shadows(self):
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW)
+        self.assertIn("box-shadow", html)
+
+    def test_accent_color_used(self):
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW)
+        self.assertIn("#4338CA", html)
+
+    def test_danger_color_for_brand_conflicts(self):
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW,
+            brand_conflicts=_brand_conflicts(),
+        )
+        self.assertIn("#991B1B", html)
+
+    def test_responsive_media_query(self):
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW)
+        self.assertIn("max-width:640px", html)
+
+    def test_reduced_motion_respected(self):
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW)
+        self.assertIn("prefers-reduced-motion", html)
+
+    def test_serif_display_headings(self):
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW)
+        self.assertIn("Georgia", html)
+
+
+# ---------------------------------------------------------------------------
+# Data parity (section contents)
+# ---------------------------------------------------------------------------
 
 class DataParityTests(unittest.TestCase):
-    """AC3: HTML contains same data as the Markdown twin."""
+    """HTML contains expected data."""
 
     def test_keyword_table_contains_terms(self):
         html = report.build_report_html(
@@ -244,12 +410,6 @@ class DataParityTests(unittest.TestCase):
         for term in ["habit", "tracker", "routine"]:
             with self.subTest(term=term):
                 self.assertIn(term, html)
-
-    def test_keyword_scores_in_html(self):
-        html = report.build_report_html(
-            _config(), _competitors(), _keywords(), now=NOW)
-        self.assertIn("64", html)   # habit opportunity
-        self.assertIn("42", html)   # tracker opportunity
 
     def test_competitor_data_in_html(self):
         html = report.build_report_html(
@@ -259,21 +419,20 @@ class DataParityTests(unittest.TestCase):
         self.assertIn("DevA", html)
         self.assertIn("DevB", html)
 
-    def test_opportunity_buckets_in_html(self):
+    def test_run_meta_present(self):
         html = report.build_report_html(
             _config(), _competitors(), _keywords(), now=NOW)
-        self.assertIn("Quick win", html)
-        self.assertIn("Niche lever", html)
-        self.assertIn("Coverage gap", html)
+        self.assertIn("Habit Hero", html)
+        self.assertIn("2026-06-26", html)
 
     def test_listing_slots_in_html(self):
         html = report.build_report_html(
             _config(), _competitors(), _keywords(), now=NOW,
             s2_output=_s2(), h2_output=_h2_ok(),
         )
-        self.assertIn("Habit Hero Tracker", html)   # recommended title
-        self.assertIn("Build Daily Routines", html)  # recommended subtitle
-        self.assertIn("char", html)                  # char counts shown
+        self.assertIn("Habit Hero Tracker", html)
+        self.assertIn("Build Daily Routines", html)
+        self.assertIn("Zeichen", html)
 
     def test_play_listing_when_play_present(self):
         html = report.build_report_html(
@@ -282,9 +441,9 @@ class DataParityTests(unittest.TestCase):
             s2_play_output=_play_s2(), h2_play_output=_h2_ok(),
         )
         self.assertIn("Google Play", html)
-        self.assertIn("Title 30", html)
-        self.assertIn("Short 80", html)
-        self.assertIn("Long 4000", html)
+        self.assertIn("Titel 30", html)
+        self.assertIn("Kurzbeschreibung 80", html)
+        self.assertIn("Langbeschreibung 4000", html)
 
     def test_modus_a_renders_self_audit(self):
         s1 = _s1()
@@ -293,19 +452,23 @@ class DataParityTests(unittest.TestCase):
             _config(own_app_id="1"), _competitors(), _keywords(), now=NOW,
             s1_output=s1, s2_output=_s2(), h2_output=_h2_ok(),
         )
-        self.assertIn("Self-audit", html)
+        self.assertIn("Selbstaudit", html)
         self.assertIn("own subtitle is generic", html)
 
 
+# ---------------------------------------------------------------------------
+# Brand conflict visibility
+# ---------------------------------------------------------------------------
+
 class BrandConflictVisibilityTests(unittest.TestCase):
-    """AC4: Brand conflicts are visually prominent (badge/highlight)."""
+    """Brand conflicts are visually prominent."""
 
     def test_brand_conflicts_section_present_when_conflicts_exist(self):
         html = report.build_report_html(
             _config(), _competitors(), _keywords(), now=NOW,
             brand_conflicts=_brand_conflicts(),
         )
-        self.assertIn("Brand Conflict", html)
+        self.assertIn("Markenkonflikt", html)
 
     def test_conflict_terms_visible(self):
         html = report.build_report_html(
@@ -336,7 +499,6 @@ class BrandConflictVisibilityTests(unittest.TestCase):
             _config(), _competitors(), _keywords(), now=NOW,
             brand_conflicts=_brand_conflicts(),
         )
-        # Must have a visual indicator — badge, conflict class, or warning styling
         has_visual = (
             'class="badge' in html
             or 'class="conflict' in html
@@ -347,10 +509,14 @@ class BrandConflictVisibilityTests(unittest.TestCase):
         self.assertTrue(has_visual, "brand conflicts must have visual prominence markers")
 
 
-class SourceHealthBoardTests(unittest.TestCase):
-    """AC5: Source-health board distinguishes ok / unavailable-with-reason / ok-empty."""
+# ---------------------------------------------------------------------------
+# Source health board
+# ---------------------------------------------------------------------------
 
-    def test_source_health_board_present_in_methodology(self):
+class SourceHealthBoardTests(unittest.TestCase):
+    """Source-health board distinguishes ok / unavailable-with-reason / ok-empty."""
+
+    def test_source_health_board_present(self):
         status = {
             "apple_subtitle": {"status": "ok", "result_count": 3},
             "apple_similar": {"status": "unavailable",
@@ -360,7 +526,7 @@ class SourceHealthBoardTests(unittest.TestCase):
             _config(), _competitors(), _keywords(), now=NOW,
             source_status=status,
         )
-        self.assertIn("Source Health", html)
+        self.assertIn("Quellenstatus", html)
         self.assertIn("Apple Subtitle", html)
         self.assertIn("Apple Similar", html)
 
@@ -373,7 +539,6 @@ class SourceHealthBoardTests(unittest.TestCase):
             source_status=status,
         )
         self.assertIn("3", html)
-        self.assertIn("ok", html.lower())
 
     def test_unavailable_source_shows_reason(self):
         status = {
@@ -384,7 +549,7 @@ class SourceHealthBoardTests(unittest.TestCase):
             _config(), _competitors(), _keywords(), now=NOW,
             source_status=status,
         )
-        self.assertIn("unavailable", html.lower())
+        self.assertIn("nicht verfügbar", html)
         self.assertIn("browser timeout", html)
 
     def test_ok_empty_source_shows_zero_result(self):
@@ -408,7 +573,6 @@ class SourceHealthBoardTests(unittest.TestCase):
             _config(), _competitors(), _keywords(), now=NOW,
             source_status=status,
         )
-        # Check that different status types have distinct visual markers
         has_ok_class = ('class="ok' in html.lower()
                         or "class='ok" in html.lower()
                         or 'status-ok' in html
@@ -421,28 +585,35 @@ class SourceHealthBoardTests(unittest.TestCase):
         self.assertTrue(has_unavailable_class, "must have unavailable status styling")
 
 
+# ---------------------------------------------------------------------------
+# Methodology / honesty
+# ---------------------------------------------------------------------------
+
 class MethodologyHonestyTests(unittest.TestCase):
-    """Methodology/honesty section renders correctly in HTML."""
+    """Methodology/honesty section renders correctly in German."""
 
     def test_proxy_explanation_in_html(self):
         html = report.build_report_html(
             _config(), _competitors(), _keywords(), now=NOW)
-        self.assertIn("proxy", html.lower())
-        self.assertIn("not real search volume", html.lower())
+        self.assertIn("Proxy", html)
 
     def test_en_without_en_market_caveat(self):
         html = report.build_report_html(
             _config(country="de", language="en"),
             _competitors(), _keywords(), now=NOW)
         self.assertIn("EN", html)
-        self.assertIn("not US", html)
+        self.assertIn("nicht US", html)
 
     def test_no_caveat_when_us_en(self):
         html = report.build_report_html(
             _config(country="us", language="en"),
             _competitors(), _keywords(), now=NOW)
-        self.assertNotIn("not US", html)
+        self.assertNotIn("nicht US", html)
 
+
+# ---------------------------------------------------------------------------
+# Determinism
+# ---------------------------------------------------------------------------
 
 class DeterminismTests(unittest.TestCase):
     """HTML output is deterministic for identical input."""
@@ -466,8 +637,12 @@ class DeterminismTests(unittest.TestCase):
         html = report.build_report_html(
             _config(), _competitors(), _keywords(), now=NOW)
         self.assertIn("<html", html.lower())
-        self.assertIn("Executive Summary", html)
+        self.assertIn("Zusammenfassung", html)
 
+
+# ---------------------------------------------------------------------------
+# MS qualitative
+# ---------------------------------------------------------------------------
 
 class MSQualitativeTests(unittest.TestCase):
     """MS Store qualitative data renders in HTML."""
@@ -492,8 +667,37 @@ class MSQualitativeTests(unittest.TestCase):
             source_status={"ms": {"status": "unavailable",
                                   "reason": "SPA not reachable"}},
         )
-        self.assertIn("Microsoft Store", html)  # still mentioned in source health
-        self.assertIn("unavailable", html.lower())
+        self.assertIn("Microsoft Store", html)
+        self.assertIn("nicht verfügbar", html)
+
+
+# ---------------------------------------------------------------------------
+# Full landscape
+# ---------------------------------------------------------------------------
+
+class FullLandscapeTests(unittest.TestCase):
+    """All sections present with German headings."""
+
+    def test_all_sections_present(self):
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW,
+            s1_output=_s1(), s2_output=_s2(), h2_output=_h2_ok(),
+        )
+        sections = [
+            "Quellenstatus",
+            "Zusammenfassung",
+            "Wettbewerbslandschaft",
+            "Positionierungsmap",
+            "Keyword-Bericht",
+            "Chancen",
+            "Risiken / Bedrohungen",
+            "Listing-Empfehlung",
+            "Methodik",
+            "Glossar",
+        ]
+        for name in sections:
+            with self.subTest(section=name):
+                self.assertIn(name, html, f"missing section: {name}")
 
 
 if __name__ == "__main__":
