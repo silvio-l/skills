@@ -9,20 +9,26 @@ and the contracts later slices build on.
 ```
 Input (structured YAML/JSON)
   ├─ 10  Store Discovery   ── iTunes Search API + Lookup (slice 01/02)
+  │                        ── google-play-scraper: search + charts + similar (slice 04)
   ├─ 20  Metadata Collect  ── Apple Core + Slots (slice 02): subtitle via
   │                          Playwright, description from iTunes,
   │                          keyword_hints by inversion; similar-apps hop
   │                          feeds niche competitors back into the corpus
+  │                          Play Core + Slots (slice 04): short + full
+  │                          description (tags dropped)
   ├ 2x  Deep channels      ── Apple RSS charts, Reddit .json,
-  │                          Apple Search-Suggest (slice 02) — never-blocking
+  │                          Apple + Play Search-Suggest (slice 02/04) — never-blocking
   ├─ 30  Keyword Extract   ── YAKE phrases + TF-IDF position-weighted + suggest
+  │                          (per-platform field tuples: Apple 5/3/1, Play 5/4/2)
   ├─ 40  Score             ── Competition/Relevance proxy + opportunity + split + gap
+  │                          (shared engine, per-platform slot weights; unified table)
   ├─ 50  Token-Budget Gate ── Python: measure + auto-trim the condensed LLM
   │                          representation under ~70k tokens (slice 03)
-  ├─ 60  LLM Interpret     ── Agent-performed H1/S1/S2/H2 subagents (slice 03);
-  │                          Claude-native, no external paid API, pinned models
+  ├─ 60  LLM Interpret     ── Agent-performed H1/S1/S2/H2 subagents (slice 03/04);
+  │                          Claude-native, no external paid API, pinned models;
+  │                          S2/H2 emit a per-store listing (Apple + Play)
   └─ 80  Report            ── Python assembles the full 8-section report.md from
-                             artefacts + subagent outputs (slice 03)
+                              artefacts + subagent outputs (slice 03/04)
 ```
 
 Slice 03 adds the **brain**: the token-budget gate, the four LLM
@@ -45,6 +51,12 @@ subagent interpretation steps.
     subtitle terms), never the hidden 100-char field.
 - **Discovery field:** `similar_app_ids[]` feeds the similar-apps hop;
   discovered niche competitors carry `discovery: "niche_similar"`.
+
+- **Play slots (slice 04):** `short_description` (80 chars, strong ranking
+  factor) and `full_description` (4000 chars, fully indexed), collected via
+  `google-play-scraper` (`summary` → short, `description` → long, both
+  HTML-stripped). **`tags` are dropped** — not reliably extractable (verified
+  in the feasibility probe); the Play record carries no `tags` key.
 
 ## Unified category taxonomy
 
@@ -72,23 +84,40 @@ grouping (singular/plural/declension merged via variant-set stemming +
 umlaut normalisation; most frequent original form kept as the display
 term).
 
-## Scoring (slice 02 — Competition/Relevance proxy, NOT real volume)
+## Scoring (slice 02/04 — Competition/Relevance proxy, NOT real volume)
 
-- **Competition (0–100):** `round(100 × (5×title_share + 3×sub_share + 1×desc_share) / 9)`.
+The Competition/Relevance engine is **shared** across platforms. Each platform
+maps its own slots into the same math via a per-platform slot-weight map
+(``score.APPLE_SLOT_WEIGHTS`` / ``score.PLAY_SLOT_WEIGHTS``); the extraction
+engine mirrors those weights (``extract.APPLE_FIELDS`` / ``PLAY_FIELDS``) so
+Play's TF-IDF position weighting follows Play's model, not Apple's.
+
+- **Competition (0–100):** ``round(100 * Σ(weight_slot * hits_slot / n_docs) / Σweights)``.
+  - Apple weights: Title ×5 · Subtitle ×3 · Description ×1 (sum 9) — Apple's
+    description is only *weakly* indexed.
+  - Play weights: Title ×5 · Short ×4 · Long ×2 (sum 11) — Play's Short
+    Description is a strong ranking factor and the Long Description is *fully*
+    indexed, so both outweigh Apple's weakly-indexed description. Documented
+    under the slice-04 ``decisions:`` block.
 - **Relevance (0–100):** cosine TF-IDF similarity to the seed
-  description, scaled to 100, **+15** if the term appears in Apple
+  description, scaled to 100, **+15** if the term appears in Apple **or** Play
   Search-Suggest autocomplete; clamped to [0, 100].
-- **Opportunity:** `round(Relevance × (100 − Competition) / 100)`,
+- **Opportunity:** ``round(Relevance × (100 − Competition) / 100)``,
   **+10 niche bonus** if `Competition < 20 AND Relevance > 50` (strict).
 - **Split:** `primary-candidate` (Relevance ≥ 50) vs `long-tail-candidate`.
 - **`is_gap`:** competitors own the term in their Title but the seed
   concept lacks it.
 
+Every scored row is tagged ``platform`` (``"apple"`` / ``"play"``) so the
+**unified** ``keywords.json`` carries both verticals in one table. The table
+is sorted by ``(-opportunity, -relevance, term, platform)`` — a total
+deterministic order (a term may appear once per platform).
+
 The exact boundary decisions live in named pure functions
-(`competition_score`, `niche_bonus_applies`, `opportunity_score`,
-`split_label`) so the strict thresholds are unit-tested directly. The
-report labels these **"Competition/Relevance signal"** — never search
-volume.
+(``competition_score`` / ``competition_score_weighted``,
+``niche_bonus_applies``, ``opportunity_score``, ``split_label``) so the strict
+thresholds are unit-tested directly. The report labels these
+**"Competition/Relevance signal"** — never search volume.
 
 ## Bot-detection & rate-limit policy (politeness rule-set)
 
@@ -173,17 +202,29 @@ gate measures `s1-input.json`, which carries only condensed fields).
 S1 must flag **missing themes** and **threats to monitor**, grounded in
 the Reddit qualitative summaries (US14).
 
-**S2 listing** (`llm/s2-listing.json`) — Apple slots only here (Play is
-slice 04). Exactly **1 recommended + 2 alternatives** per slot, each with
-an accurate `char_count` fitting Apple's limits out of the box (Title 30 /
-Subtitle 30 / hidden Keyword Field 100):
+**S2 listing** (`llm/s2-listing.json`) — Apple slots. Exactly **1 recommended
++ 2 alternatives** per slot, each with an accurate `char_count` fitting
+Apple's limits out of the box (Title 30 / Subtitle 30 / hidden Keyword Field
+100):
 
 ```json
 {"store": "apple", "slots": [
   {"slot": "title",        "recommended": {"text": "…", "char_count": N},
-                          "alternatives": [{"text": "…", "char_count": N}, …]},
+                           "alternatives": [{"text": "…", "char_count": N}, …]},
   {"slot": "subtitle",     "recommended": {…}, "alternatives": […, …]},
   {"slot": "keyword_field","recommended": {…}, "alternatives": […, …]}
+]}
+```
+
+Slice 04 adds a **second** listing for the Play slot model
+(`llm/s2-listing-play.json`), optimised for Play's own ranking model (Title 30
+/ Short 80 / Long 4000):
+
+```json
+{"store": "play", "slots": [
+  {"slot": "title", "recommended": {…}, "alternatives": […, …]},
+  {"slot": "short", "recommended": {…}, "alternatives": […, …]},
+  {"slot": "long",  "recommended": {…}, "alternatives": […, …]}
 ]}
 ```
 
@@ -199,8 +240,10 @@ checks at runtime:
 ```
 
 A recommended keyword is a contradiction when its Opportunity < 20 **or**
-Competition > 70 **or** (Keyword Field only) it is absent from the scored
-set. Rejected contradictions are reported, not silently passed.
+Competition > 70 **or** (Apple Keyword Field only) it is absent from the scored
+set. Play has no keyword-list slot, so an unscored word in a Play prose slot is
+branding, not a contradiction. Rejected contradictions are reported, not
+silently passed. The Play cross-check writes `llm/h2-crosscheck-play.json`.
 
 ### Modus A / B (no separate code path)
 
@@ -280,7 +323,12 @@ Offline-testable pure logic is covered by plain `unittest` under
   validation.
 - `test_report_llm.py` — full 8-section assembly (all sections present,
   methodology proxy/source honesty, Modus A/B self-audit, listing
-  1+2-per-slot char counts).
+  1+2-per-slot char counts, Play listing section).
+- `test_play.py` — Play schema mapping (short/full description populated,
+  tags absent), Play slot weighting in the shared engine (Apple unchanged),
+  unified score-table keying, Play listing char-count validation (Title 30 /
+  Short 80 / Long 4000), Play Search-Suggest, Play collection orchestration
+  (injectable fakes), and Apple+Play determinism.
 
 The LLM subagent steps (H1/S1/S2/H2) are **not** unit-tested
 (non-deterministic by design); their I/O schemas are asserted via the

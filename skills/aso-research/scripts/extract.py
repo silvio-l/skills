@@ -35,6 +35,43 @@ import math
 import re
 from typing import Dict, Iterable, List, Mapping, Sequence
 
+# ---------------------------------------------------------------------------
+# Per-platform field tuples (slice 04 — shared, field-driven engine)
+# ---------------------------------------------------------------------------
+# Each platform declares its slots as ``(field_name, tf_idf_position_weight)``.
+# The extraction engine is field-driven: it reads ``doc[field_name]``, records
+# per-doc hits under ``<field>_docs``, and weights TF by the field weight.
+# Output candidates carry ``<field>_hits`` for every field, so the (also
+# shared) scorer can read the platform's hit counts with the platform's
+# weights. Apple's default tuple reproduces slice 02 byte-for-byte.
+
+APPLE_FIELDS: tuple = (("title", 5), ("subtitle", 3), ("description", 1))
+# Play slots: Title x5 · Short x4 (strong ranking factor) · Long x2 (fully
+# indexed). Mirrors score.PLAY_SLOT_WEIGHTS; kept here so extraction applies
+# Play's TF-IDF position weighting, not Apple's.
+PLAY_FIELDS: tuple = (("title", 5), ("short", 4), ("long", 2))
+
+
+def fields_for(platform: str) -> tuple:
+    """Resolve the per-platform ``(field, weight)`` tuple (Apple default)."""
+    return PLAY_FIELDS if platform == "play" else APPLE_FIELDS
+
+
+def _field_names(fields: Sequence) -> List[str]:
+    return [f for f, _ in fields]
+
+
+def _phrase_fields(fields: Sequence) -> List[tuple]:
+    """The high-signal fields YAKE phrases are built from (top-2 by weight).
+
+    For Apple that is Title + Subtitle (matches slice 02); for Play Title +
+    Short. The long / weakly-indexed field is excluded — phrases there are
+    noise for ASO. Sentence-base [0.0, 0.5] by rank is preserved.
+    """
+    ordered = sorted(enumerate(fields), key=lambda iw: (-iw[1][1], iw[0]))
+    return [fw for _, fw in ordered[:2]]
+
+
 _MIN_TOKEN_LEN = 3
 _MAX_PHRASE_LEN = 3  # YAKE candidate n-grams: bigrams + trigrams
 # Alphanumeric incl. Latin-1 supplement (covers äöü à-ÿ) plus ß (U+00DF,
@@ -238,7 +275,18 @@ def group_terms(
     *most frequent* original surface form as ``term`` and lists every
     surface variant under ``variants`` (sorted, unique). Hit sets and
     weighted frequencies are unioned/summed across the group.
+
+    Slice 04: the field set is discovered dynamically (every ``<field>_docs``
+    key present on the records), so the same function serves Apple
+    (``title_docs``/``subtitle_docs``/``description_docs``) and Play
+    (``title_docs``/``short_docs``/``long_docs``) without branching.
     """
+    fields = sorted({
+        k[: -len("_docs")]
+        for rec in term_records.values()
+        for k in rec
+        if k.endswith("_docs")
+    })
     groups: Dict[str, dict] = {}
     for surface, rec in term_records.items():
         key = morph_key(surface)
@@ -246,17 +294,14 @@ def group_terms(
             key,
             {
                 "variants": set(),
-                "title_docs": set(),
-                "subtitle_docs": set(),
-                "description_docs": set(),
                 "tf_weighted": 0,
                 "occurrences": 0,
+                **{f + "_docs": set() for f in fields},
             },
         )
         bucket["variants"].add(surface)
-        bucket["title_docs"] |= rec.get("title_docs", set())
-        bucket["subtitle_docs"] |= rec.get("subtitle_docs", set())
-        bucket["description_docs"] |= rec.get("description_docs", set())
+        for f in fields:
+            bucket[f + "_docs"] |= rec.get(f + "_docs", set())
         bucket["tf_weighted"] += rec.get("tf_weighted", 0)
         bucket["occurrences"] += rec.get("occurrences", 0)
 
@@ -268,17 +313,15 @@ def group_terms(
             v: term_records[v].get("occurrences", 0) for v in variants
         }
         display = max(variants, key=lambda v: (variant_freq[v], -ord(v[0])))
-        merged.append(
-            {
-                "term": display,
-                "variants": variants,
-                "title_docs": bucket["title_docs"],
-                "subtitle_docs": bucket["subtitle_docs"],
-                "description_docs": bucket["description_docs"],
-                "tf_weighted": bucket["tf_weighted"],
-                "occurrences": bucket["occurrences"],
-            }
-        )
+        rec = {
+            "term": display,
+            "variants": variants,
+            "tf_weighted": bucket["tf_weighted"],
+            "occurrences": bucket["occurrences"],
+        }
+        for f in fields:
+            rec[f + "_docs"] = bucket[f + "_docs"]
+        merged.append(rec)
     return merged
 
 
@@ -290,16 +333,18 @@ def extract_keywords(
     suggest_terms: Iterable[str] = (),
     min_freq: int = 2,
     max_phrases: int = 40,
+    fields: Sequence = None,
 ) -> List[Dict]:
     """Extract scored-candidate keyword records from competitor documents.
 
-    Each ``document`` is a mapping with ``title``, ``subtitle``,
-    ``description`` (any may be missing/empty). Returns one record per
-    candidate term, carrying the per-field doc-hit sets the scorer needs:
+    Each ``document`` is a mapping carrying the slot fields declared by
+    ``fields`` (default Apple: ``title``/``subtitle``/``description``; Play:
+    ``title``/``short``/``long``). Returns one record per candidate term,
+    carrying the per-field doc-hit counts (``<field>_hits``) the scorer needs:
 
         {
           "term", "variants", "is_phrase",
-          "title_hits", "subtitle_hits", "description_hits",
+          "<field>_hits" for each field,
           "tf_weighted", "doc_freq", "occurrences",
           "suggest",
         }
@@ -311,6 +356,9 @@ def extract_keywords(
     removed. ``suggest_terms`` are merged in as candidates.
     """
     docs = list(documents)
+    field_defs = tuple(fields) if fields is not None else APPLE_FIELDS
+    field_names = _field_names(field_defs)
+    phrase_field_defs = _phrase_fields(field_defs)
     generic = {g.lower() for g in generics if g} | PLATFORM_GENERICS
     blocked = STOPWORDS | generic
     suggest = {s.lower().strip() for s in suggest_terms if s and s.strip()}
@@ -322,38 +370,28 @@ def extract_keywords(
     phrase_sent_index: Dict[tuple, float] = {}
 
     for idx, doc in enumerate(docs):
-        title = doc.get("title", "") or ""
-        subtitle = doc.get("subtitle", "") or ""
-        description = doc.get("description", "") or ""
-
-        for weight, field in ((5, title), (3, subtitle), (1, description)):
+        for fname, weight in field_defs:
+            field_text = doc.get(fname, "") or ""
             field_unique = set()
-            for tok in _raw_tokens(field):
+            for tok in _raw_tokens(field_text):
                 if len(tok) < _MIN_TOKEN_LEN or tok in blocked:
                     continue
                 field_unique.add(tok)
             for tok in field_unique:
-                rec = single.setdefault(
-                    tok,
-                    {
-                        "title_docs": set(),
-                        "subtitle_docs": set(),
-                        "description_docs": set(),
-                        "tf_weighted": 0,
-                        "occurrences": 0,
-                    },
-                )
-                if weight == 5:
-                    rec["title_docs"].add(idx)
-                elif weight == 3:
-                    rec["subtitle_docs"].add(idx)
-                else:
-                    rec["description_docs"].add(idx)
+                rec = single.get(tok)
+                if rec is None:
+                    rec = {"tf_weighted": 0, "occurrences": 0}
+                    for fn in field_names:
+                        rec[fn + "_docs"] = set()
+                    single[tok] = rec
+                rec[fname + "_docs"].add(idx)
                 rec["tf_weighted"] += weight
                 rec["occurrences"] += 1
 
-        # YAKE phrases from title + subtitle (high-signal fields).
-        for field_text, sentence_base in ((title, 0.0), (subtitle, 0.5)):
+        # YAKE phrases from the high-signal fields (top-2 by weight).
+        for rank, (fname, _w) in enumerate(phrase_field_defs):
+            field_text = doc.get(fname, "") or ""
+            sentence_base = float(rank) * 0.5  # 0.0 then 0.5
             grams = _candidate_phrases(field_text)
             for gram, freq in grams.items():
                 # drop phrases whose every token is generic/stopword-ish
@@ -361,10 +399,9 @@ def extract_keywords(
                     continue
                 phrase_freq[gram] = phrase_freq.get(gram, 0) + freq
                 # earliest sentence index seen (deterministic: min)
-                idx_seen = sentence_base
                 prev = phrase_sent_index.get(gram)
-                if prev is None or idx_seen < prev:
-                    phrase_sent_index[gram] = idx_seen
+                if prev is None or sentence_base < prev:
+                    phrase_sent_index[gram] = sentence_base
 
     # ---- group single terms morphologically ----
     grouped_single = group_terms(single)
@@ -391,61 +428,49 @@ def extract_keywords(
         if rec["occurrences"] < min_freq:
             continue
         surface = rec["term"]
-        candidates.append(
-            {
-                "term": surface,
-                "variants": rec["variants"],
-                "is_phrase": False,
-                "title_hits": len(rec["title_docs"]),
-                "subtitle_hits": len(rec["subtitle_docs"]),
-                "description_hits": len(rec["description_docs"]),
-                "tf_weighted": rec["tf_weighted"],
-                "doc_freq": len(
-                    rec["title_docs"]
-                    | rec["subtitle_docs"]
-                    | rec["description_docs"]
-                ),
-                "occurrences": rec["occurrences"],
-                "suggest": surface in suggest,
-            }
-        )
+        cand = {
+            "term": surface,
+            "variants": rec["variants"],
+            "is_phrase": False,
+            "tf_weighted": rec["tf_weighted"],
+            "occurrences": rec["occurrences"],
+        }
+        all_docs: set = set()
+        for fn in field_names:
+            docs_set = rec.get(fn + "_docs", set())
+            cand[fn + "_hits"] = len(docs_set)
+            all_docs |= docs_set
+        cand["doc_freq"] = len(all_docs)
+        cand["suggest"] = surface in suggest
+        candidates.append(cand)
 
     # phrase candidates (bounded) -> recompute per-doc field hits
     for gram, freq in ranked_phrases[:max_phrases]:
         if freq < min_freq:
             continue
         phrase_str = " ".join(gram)
-        title_docs = set()
-        sub_docs = set()
-        desc_docs = set()
+        per_field_docs = {fn: set() for fn in field_names}
         tf_weighted = 0
         for idx, doc in enumerate(docs):
-            in_t = _phrase_in_field(doc.get("title", "") or "", gram)
-            in_s = _phrase_in_field(doc.get("subtitle", "") or "", gram)
-            in_d = _phrase_in_field(doc.get("description", "") or "", gram)
-            if in_t:
-                title_docs.add(idx)
-                tf_weighted += 5
-            if in_s:
-                sub_docs.add(idx)
-                tf_weighted += 3
-            if in_d:
-                desc_docs.add(idx)
-                tf_weighted += 1
-        candidates.append(
-            {
-                "term": phrase_str,
-                "variants": [phrase_str],
-                "is_phrase": True,
-                "title_hits": len(title_docs),
-                "subtitle_hits": len(sub_docs),
-                "description_hits": len(desc_docs),
-                "tf_weighted": tf_weighted,
-                "doc_freq": len(title_docs | sub_docs | desc_docs),
-                "occurrences": freq,
-                "suggest": phrase_str in suggest,
-            }
-        )
+            for fname, weight in field_defs:
+                if _phrase_in_field(doc.get(fname, "") or "", gram):
+                    per_field_docs[fname].add(idx)
+                    tf_weighted += weight
+        all_docs = set()
+        for fn in field_names:
+            all_docs |= per_field_docs[fn]
+        cand = {
+            "term": phrase_str,
+            "variants": [phrase_str],
+            "is_phrase": True,
+            "tf_weighted": tf_weighted,
+            "doc_freq": len(all_docs),
+            "occurrences": freq,
+            "suggest": phrase_str in suggest,
+        }
+        for fn in field_names:
+            cand[fn + "_hits"] = len(per_field_docs[fn])
+        candidates.append(cand)
 
     # ---- Search-Suggest enrichment: add terms not already present ----
     existing = {c["term"] for c in candidates}
@@ -460,13 +485,11 @@ def extract_keywords(
                 "term": s,
                 "variants": [s],
                 "is_phrase": len(toks) > 1,
-                "title_hits": 0,
-                "subtitle_hits": 0,
-                "description_hits": 0,
                 "tf_weighted": 0,
                 "doc_freq": 0,
                 "occurrences": 0,
                 "suggest": True,
+                **{fn + "_hits": 0 for fn in field_names},
             }
         )
 

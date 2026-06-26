@@ -70,6 +70,9 @@ _S1_INPUT = "llm/s1-input.json"
 _S1_ANALYSIS = "llm/s1-analysis.json"
 _S2_LISTING = "llm/s2-listing.json"
 _H2_CROSSCHECK = "llm/h2-crosscheck.json"
+# Slice 04: Play listing (separate store model, same S2/H2 mechanism).
+_S2_LISTING_PLAY = "llm/s2-listing-play.json"
+_H2_CROSSCHECK_PLAY = "llm/h2-crosscheck-play.json"
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
@@ -208,6 +211,8 @@ def _assemble(run_dir: str) -> int:
     s1_output = _load_json(os.path.join(run_dir, _S1_ANALYSIS))
     s2_output = _load_json(os.path.join(run_dir, _S2_LISTING))
     h2_output = _load_json(os.path.join(run_dir, _H2_CROSSCHECK))
+    s2_play_output = _load_json(os.path.join(run_dir, _S2_LISTING_PLAY))
+    h2_play_output = _load_json(os.path.join(run_dir, _H2_CROSSCHECK_PLAY))
 
     now = datetime.datetime.now()
     report_md = report.build_report(
@@ -215,6 +220,7 @@ def _assemble(run_dir: str) -> int:
         now=now, source_status=source_status, reddit_threads=reddit_threads,
         condensed_profiles=condensed_profiles,
         s1_output=s1_output, s2_output=s2_output, h2_output=h2_output,
+        s2_play_output=s2_play_output, h2_play_output=h2_play_output,
     )
     with open(os.path.join(run_dir, "report.md"), "w", encoding="utf-8") as fh:
         fh.write(report_md)
@@ -229,11 +235,14 @@ def _write_report(run_dir, config, competitors, keywords, source_status, reddit_
     s1_output = _load_json(os.path.join(run_dir, _S1_ANALYSIS))
     s2_output = _load_json(os.path.join(run_dir, _S2_LISTING))
     h2_output = _load_json(os.path.join(run_dir, _H2_CROSSCHECK))
+    s2_play_output = _load_json(os.path.join(run_dir, _S2_LISTING_PLAY))
+    h2_play_output = _load_json(os.path.join(run_dir, _H2_CROSSCHECK_PLAY))
     report_md = report.build_report(
         config, competitors, keywords,
         now=now, source_status=source_status, reddit_threads=reddit_threads,
         condensed_profiles=condensed_profiles,
         s1_output=s1_output, s2_output=s2_output, h2_output=h2_output,
+        s2_play_output=s2_play_output, h2_play_output=h2_play_output,
     )
     with open(os.path.join(run_dir, "report.md"), "w", encoding="utf-8") as fh:
         fh.write(report_md)
@@ -292,9 +301,33 @@ def run(argv=None) -> int:
         if status != "ok":
             print(f"[aso-research] source {src}: {status}", file=sys.stderr)
     print(
-        f"[aso-research] deep: {len(competitors)} competitors "
+        f"[aso-research] deep apple: {len(competitors)} competitors "
         f"({sum(1 for c in competitors if c.get('discovery')=='niche_similar')} niche), "
         f"{len(suggest_terms)} suggest terms",
+        file=sys.stderr,
+    )
+
+    # --- deep Play channels (slice 04; never-blocking; failing source -> unavailable) ---
+    play = collect.collect_play(
+        config,
+        seed_terms=config.get("seed_keywords") or [],
+        country=config.get("country", "de"),
+        cache_dir=args.cache_dir,
+        fresh=args.fresh,
+    )
+    play_competitors = play["competitors"]
+    play_suggest = play["suggest_terms"]
+    for src, status in play["source_status"].items():
+        source_status[src] = status
+        if status != "ok":
+            print(f"[aso-research] source {src}: {status}", file=sys.stderr)
+    # unified corpus + unified suggest set (Apple + Play autocomplete)
+    competitors = competitors + play_competitors
+    suggest_terms = suggest_terms + [s for s in play_suggest if s not in suggest_terms]
+    print(
+        f"[aso-research] deep play: {len(play_competitors)} competitors, "
+        f"{len(play_suggest)} play suggest terms "
+        f"({len(competitors)} total competitors, {len(suggest_terms)} suggest)",
         file=sys.stderr,
     )
 
@@ -309,7 +342,7 @@ def run(argv=None) -> int:
     serialize.dump_json(
         {
             "run_id": run_id_str,
-            "platforms": ["apple"],
+            "platforms": (["apple", "play"] if play_competitors else ["apple"]),
             "channels": [
                 "itunes_search",
                 "apple_subtitle",
@@ -317,6 +350,10 @@ def run(argv=None) -> int:
                 "apple_rss_charts",
                 "reddit",
                 "apple_search_suggest",
+                "play_search",
+                "play_charts",
+                "play_similar",
+                "play_search_suggest",
             ],
             "competitor_count": len(competitors),
             "keyword_count": len(keywords),

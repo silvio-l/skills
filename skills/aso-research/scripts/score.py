@@ -52,29 +52,92 @@ NICHE_COMPETITION_MAX = 20  # strict: Competition < 20
 NICHE_RELEVANCE_MIN = 50   # strict: Relevance > 50
 PRIMARY_RELEVANCE_MIN = 50  # split threshold: Relevance >= 50
 
-WEIGHT_TITLE = 5
-WEIGHT_SUBTITLE = 3
-WEIGHT_DESC = 1
-_WEIGHT_SUM = WEIGHT_TITLE + WEIGHT_SUBTITLE + WEIGHT_DESC  # 9
+# ---------------------------------------------------------------------------
+# Per-platform slot-weighting (slice 04 — generalised, shared engine)
+# ---------------------------------------------------------------------------
+# The Competition/Relevance engine is **shared** across platforms. Each
+# platform maps its own slots into the same Competition math via a
+# slot->weight map. The hits live on the extracted record under
+# ``<slot>_hits`` (built by :func:`extract.extract_keywords` from the same
+# field tuple). Weights are documented per platform so the distinct ASO
+# models are honoured (Apple weights its hidden Keyword Field + weakly-indexed
+# description; Play weights the strong Short Description + fully-indexed Long).
+
+# Apple (PRD verbatim): Title x5 · Subtitle x3 · Description x1 (sum 9).
+# Apple's description is only *weakly* indexed -> weight 1.
+APPLE_SLOT_WEIGHTS: Dict[str, int] = {
+    "title": 5,
+    "subtitle": 3,
+    "description": 1,
+}
+
+# Play (slice 04 decision, documented under the issue's ``decisions:``):
+# Title x5 (strongest, same as Apple) · Short Description x4 (a *strong*
+# ranking factor in Play's model — weighted higher than Apple's Subtitle x3)
+# · Long Description x2 (Play's long description is *fully* indexed, so it
+# contributes meaningfully — double Apple's weakly-indexed description x1).
+# Sum 11. Distinct from Apple's 5/3/1.
+PLAY_SLOT_WEIGHTS: Dict[str, int] = {
+    "title": 5,
+    "short": 4,
+    "long": 2,
+}
+
+# Backwards-compat module-level aliases for the Apple weights (PRD formula).
+WEIGHT_TITLE = APPLE_SLOT_WEIGHTS["title"]
+WEIGHT_SUBTITLE = APPLE_SLOT_WEIGHTS["subtitle"]
+WEIGHT_DESC = APPLE_SLOT_WEIGHTS["description"]
+_WEIGHT_SUM = sum(APPLE_SLOT_WEIGHTS.values())  # 9
+
+
+def slot_weights_for(platform: str) -> Dict[str, int]:
+    """Resolve the per-platform slot->weight map (Apple default)."""
+    if platform == "play":
+        return dict(PLAY_SLOT_WEIGHTS)
+    return dict(APPLE_SLOT_WEIGHTS)
 
 
 # ---------------------------------------------------------------------------
 # Exact-boundary pure decisions (unit-tested with integers)
 # ---------------------------------------------------------------------------
 
-def competition_score(title_hits: int, subtitle_hits: int, description_hits: int, n_docs: int) -> int:
-    """Position-weighted competition share, 0..100. 0 when no documents."""
+def competition_score_weighted(hits: Mapping[str, int], weights: Mapping[str, int], n_docs: int) -> int:
+    """Position-weighted competition share for an arbitrary slot model, 0..100.
+
+    Generalised core (slice 04): ``hits`` maps each slot name to its doc-hit
+    count; ``weights`` maps each slot name to its TF-IDF position weight. The
+    formula is the PRD Competition formula generalised over the slots::
+
+        100 * sum(weights[slot] * (hits[slot] / n_docs)) / sum(weights)
+
+    0 when ``n_docs <= 0``. Apple and Play both route through here with their
+    own slot maps, so the engine is shared, not duplicated.
+    """
     if n_docs <= 0:
         return 0
-    title_share = title_hits / n_docs
-    sub_share = subtitle_hits / n_docs
-    desc_share = description_hits / n_docs
-    raw = 100.0 * (
-        WEIGHT_TITLE * title_share
-        + WEIGHT_SUBTITLE * sub_share
-        + WEIGHT_DESC * desc_share
-    ) / _WEIGHT_SUM
+    weight_sum = sum(weights.values())
+    if weight_sum <= 0:
+        return 0
+    total = 0.0
+    for slot, weight in weights.items():
+        share = int(hits.get(slot, 0)) / n_docs
+        total += weight * share
+    raw = 100.0 * total / weight_sum
     return max(0, min(100, int(round(raw))))
+
+
+def competition_score(title_hits: int, subtitle_hits: int, description_hits: int, n_docs: int) -> int:
+    """Position-weighted Apple competition share, 0..100. 0 when no documents.
+
+    Backwards-compatible Apple entry point (slice 02 contract). Delegates to
+    the generalised :func:`competition_score_weighted` with the Apple slot
+    weights, so Apple's numeric outputs are **byte-identical** to slice 02.
+    """
+    return competition_score_weighted(
+        {"title": title_hits, "subtitle": subtitle_hits, "description": description_hits},
+        APPLE_SLOT_WEIGHTS,
+        n_docs,
+    )
 
 
 def niche_bonus_applies(competition: int, relevance: int) -> bool:
@@ -152,13 +215,22 @@ def score_keywords(
     seed_description: str,
     suggest_terms: Iterable[str] = (),
     n_docs: int,
+    platform: str = "apple",
+    slot_weights: Mapping[str, int] = None,
 ) -> List[Dict]:
     """Attach Competition/Relevance/Opportunity/split/is_gap to candidates.
 
     ``extracted`` are records from :func:`extract.extract_keywords`.
     ``n_docs`` normalises the shares (guard: 0 -> Competition 0).
     ``suggest_terms`` is the autocomplete set for the +15 relevance boost.
+
+    Slice 04: the engine is shared across platforms via the per-platform
+    ``slot_weights`` map (defaults to the platform's standard weights). Each
+    emitted row is tagged ``platform`` (``"apple"`` or ``"play"``) so the
+    unified score table (``keywords.json``) carries both verticals. The hit
+    fields read are ``<slot>_hits`` for every slot in the weight map.
     """
+    weights = dict(slot_weights) if slot_weights else slot_weights_for(platform)
     suggest = {s.lower().strip() for s in (suggest_terms or []) if s and s.strip()}
     seed_tokens = set(_description_tokens(seed_description))
 
@@ -172,11 +244,11 @@ def score_keywords(
     scored: List[Dict] = []
     for c in extracted:
         term = c["term"]
-        title_hits = int(c.get("title_hits", 0))
-        subtitle_hits = int(c.get("subtitle_hits", 0))
-        description_hits = int(c.get("description_hits", 0))
+        hits = {slot: int(c.get(slot + "_hits", 0)) for slot in weights}
+        # is_gap is driven by the Title slot (present on every platform).
+        title_hits = hits.get("title", int(c.get("title_hits", 0)))
 
-        competition = competition_score(title_hits, subtitle_hits, description_hits, n_docs)
+        competition = competition_score_weighted(hits, weights, n_docs)
         relevance = int(round(_cosine_relevance(seed_profile, term) * 100.0))
         if term in suggest:
             relevance += SUGGEST_BOOST
@@ -185,22 +257,25 @@ def score_keywords(
         opportunity = opportunity_score(competition, relevance)
         is_gap = title_hits > 0 and not _term_in_seed(term, seed_tokens)
 
-        scored.append(
-            {
-                "term": term,
-                "is_phrase": bool(c.get("is_phrase", False)),
-                "competition": competition,
-                "relevance": relevance,
-                "opportunity": opportunity,
-                "niche_bonus": NICHE_BONUS if niche_bonus_applies(competition, relevance) else 0,
-                "split": split_label(relevance),
-                "is_gap": is_gap,
-                "title_hits": title_hits,
-                "subtitle_hits": subtitle_hits,
-                "description_hits": description_hits,
-                "suggest": bool(c.get("suggest", False)) or term in suggest,
-            }
-        )
+        row: Dict = {
+            "term": term,
+            "platform": platform,
+            "is_phrase": bool(c.get("is_phrase", False)),
+            "competition": competition,
+            "relevance": relevance,
+            "opportunity": opportunity,
+            "niche_bonus": NICHE_BONUS if niche_bonus_applies(competition, relevance) else 0,
+            "split": split_label(relevance),
+            "is_gap": is_gap,
+            "suggest": bool(c.get("suggest", False)) or term in suggest,
+        }
+        # carry the per-slot hit counts (platform-specific field names)
+        for slot in weights:
+            row[slot + "_hits"] = hits[slot]
+        scored.append(row)
 
-    scored.sort(key=lambda e: (-e["opportunity"], -e["relevance"], e["term"]))
+    # Total deterministic order across platforms: a term may appear once per
+    # platform, so ``platform`` is the final tie-breaker (stable for an
+    # Apple-only corpus since every row shares the same platform value).
+    scored.sort(key=lambda e: (-e["opportunity"], -e["relevance"], e["term"], e["platform"]))
     return scored

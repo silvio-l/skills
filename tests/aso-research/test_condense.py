@@ -63,6 +63,20 @@ class PrepareH1InputTests(unittest.TestCase):
         h1 = condense.prepare_h1_input(comps, own_app_id=None)
         self.assertFalse(any(r["is_own_app"] for r in h1))
 
+    def test_play_description_falls_back_to_full_description(self):
+        """Slice 04: Play competitors reach H1 with their rich text."""
+        play = {
+            "id": "com.a", "platform": "play", "title": "Habit Hero",
+            "short_description": "daily habits", "full_description": "long rich text",
+            "category": "health_fitness", "developer": "Dev",
+            "rating_avg": 4.5, "rating_count": 10, "price_model": "free",
+        }
+        h1 = condense.prepare_h1_input([play])
+        rec = h1[0]
+        self.assertEqual(rec["description"], "long rich text")  # full_description fallback
+        self.assertEqual(rec["subtitle"], "daily habits")        # short_description fallback
+        self.assertEqual(rec["title"], "Habit Hero")
+
 
 class BuildLlmInputTests(unittest.TestCase):
     def test_representation_contains_no_raw_description(self):

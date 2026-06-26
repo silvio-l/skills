@@ -29,6 +29,7 @@ import apple_rss
 import extract
 import reddit
 import score
+import schema
 import search_suggest
 from schema import merge_apple_slots
 
@@ -192,31 +193,217 @@ def extract_and_score(
     config: Dict,
     suggest_terms: Optional[List[str]] = None,
 ) -> Dict:
-    """Run the real extract -> score engine over the deep competitor corpus."""
+    """Run the real extract -> score engine over the deep competitor corpus.
+
+    Slice 04: the corpus is partitioned by platform so each vertical flows
+    through the shared engine with its **own** slot model. Apple competitors
+    (Title/Subtitle/Description, weights 5/3/1) and Play competitors
+    (Title/Short/Long, weights 5/4/2) are extracted + scored separately, then
+    merged into one unified score table. Every row is tagged ``platform`` and
+    the table is sorted by ``(-opportunity, -relevance, term, platform)`` so
+    identical input is byte-identical (determinism AC). Apple-only corpora
+    behave exactly as in slice 02 (same fields, same weights, same order).
+    """
     generics = [
         config.get("category", ""),
         "apple", "ios", "iphone", "ipad",
+        "android", "google", "play",
         config.get("app_name", ""),
     ]
-    documents = [
-        {
-            "title": c.get("title", ""),
-            "subtitle": c.get("subtitle", ""),
-            "description": c.get("description", ""),
-        }
-        for c in competitors
-    ]
     suggest = list(suggest_terms or [])
-    extracted = extract.extract_keywords(
-        documents,
-        generics=generics,
-        seed_description=config.get("description") or "",
-        suggest_terms=suggest,
+    seed_description = config.get("description") or ""
+    seed_keywords = list(config.get("seed_keywords") or [])
+
+    apple_comps = [c for c in competitors if c.get("platform", "apple") == "apple"]
+    play_comps = [c for c in competitors if c.get("platform") == "play"]
+
+    merged: List[Dict] = []
+
+    if apple_comps:
+        apple_docs = [
+            {
+                "title": c.get("title", ""),
+                "subtitle": c.get("subtitle", ""),
+                "description": c.get("description", ""),
+            }
+            for c in apple_comps
+        ]
+        extracted = extract.extract_keywords(
+            apple_docs,
+            generics=generics,
+            seed_description=seed_description,
+            suggest_terms=suggest,
+        )
+        merged.extend(
+            score.score_keywords(
+                extracted,
+                seed_description=seed_description,
+                suggest_terms=suggest,
+                n_docs=len(apple_comps),
+                platform="apple",
+            )
+        )
+
+    if play_comps:
+        play_docs = [
+            {
+                "title": c.get("title", ""),
+                "short": c.get("short_description", ""),
+                "long": c.get("full_description", ""),
+            }
+            for c in play_comps
+        ]
+        extracted = extract.extract_keywords(
+            play_docs,
+            generics=generics,
+            seed_description=seed_description,
+            suggest_terms=suggest,
+            fields=extract.PLAY_FIELDS,
+        )
+        merged.extend(
+            score.score_keywords(
+                extracted,
+                seed_description=seed_description,
+                suggest_terms=suggest,
+                n_docs=len(play_comps),
+                platform="play",
+            )
+        )
+
+    merged.sort(key=lambda e: (-e["opportunity"], -e["relevance"], e["term"], e["platform"]))
+    return {"keywords": merged}
+
+
+# ---------------------------------------------------------------------------
+# Deep Play collection orchestration (slice 04)
+# ---------------------------------------------------------------------------
+
+PLAY_SUBTITLE_TOP_N = 0  # Play has no browser-only slot; placeholder for symmetry
+PLAY_SIMILAR_HOP_TOP_N = 5
+
+
+def _play_safe(fn, *args, **kwargs):
+    """Run a Play collector; on any exception return (None, error). Never raises."""
+    try:
+        return fn(*args, **kwargs), None
+    except Exception as exc:  # never-blocking
+        return None, exc
+
+
+def collect_play(
+    config: Dict,
+    *,
+    seed_terms: Optional[List[str]] = None,
+    country: str = "de",
+    cache_dir: str = "",
+    fresh: bool = False,
+    # injectable collectors (tests pass fakes; defaults hit the live module)
+    search_fn: Optional[Callable] = None,
+    lookup_fn: Optional[Callable] = None,
+    chart_fn: Optional[Callable] = None,
+    similar_fn: Optional[Callable] = None,
+    suggest_fn: Optional[Callable] = None,
+    similar_top_n: int = PLAY_SIMILAR_HOP_TOP_N,
+) -> Dict:
+    """Run the deep Play channels (search, charts, similar, suggest).
+
+    Returns::
+
+        {
+          "competitors":   [...Play Core records, deduped, sorted],
+          "suggest_terms": [...],                 # Play autocomplete
+          "source_status": {"play_search": "ok"|"unavailable", ...},
+        }
+
+    Every collector is injectable so the orchestration logic (dedup,
+    source-status tracking, never-blocking) is fully offline-testable with
+    fixtures — the live google-play-scraper collector itself is not
+    unit-tested. A failing source is recorded ``"unavailable"`` and the run
+    continues (never-blocking), mirroring :func:`collect_apple`.
+    """
+    import play as play_collector  # type: ignore
+
+    source_status: Dict[str, str] = {}
+    search_fn = search_fn or play_collector.search
+    lookup_fn = lookup_fn or play_collector.lookup
+    chart_fn = chart_fn or play_collector.charts
+    similar_fn = similar_fn or play_collector.similar
+    suggest_fn = suggest_fn or play_collector.collect_suggest
+
+    seed_terms = list(seed_terms or config.get("seed_keywords") or [])
+    if config.get("app_name"):
+        seed_terms = seed_terms + [config["app_name"]]
+
+    by_id: Dict[str, Dict] = {}
+    enriched: List[Dict] = []
+
+    # --- Play search (seed keywords + app name) ---
+    search_ok = False
+    for term in seed_terms:
+        results, err = _play_safe(search_fn, term, country=country, cache_dir=cache_dir, fresh=fresh)
+        if err is None:
+            search_ok = True
+            for raw in results or []:
+                core = schema.map_play_to_core(raw)
+                if not core.get("id") or core["id"] in by_id:
+                    continue
+                by_id[core["id"]] = core
+                enriched.append(core)
+    source_status["play_search"] = "ok" if (search_ok or not seed_terms) else "unavailable"
+
+    # --- Play category charts (deckel-limited) ---
+    chart_raw, cerr = _play_safe(
+        chart_fn, config.get("category", ""), country=country, cache_dir=cache_dir, fresh=fresh
     )
-    keywords = score.score_keywords(
-        extracted,
-        seed_description=config.get("description") or "",
-        suggest_terms=suggest,
-        n_docs=len(competitors),
+    source_status["play_charts"] = "unavailable" if cerr else "ok"
+    for raw in chart_raw or []:
+        core = schema.map_play_to_core(raw)
+        if not core.get("id") or core["id"] in by_id:
+            continue
+        core["discovery"] = "chart"
+        by_id[core["id"]] = core
+        enriched.append(core)
+
+    # --- Play similar-apps hop (1 hop from the strongest) -> niche competitors ---
+    hop_ok = False
+    niche_ids: List[str] = []
+    strongest = sorted(
+        enriched, key=lambda c: (-(c.get("rating_count") or 0), str(c.get("id")))
+    )[:similar_top_n]
+    for comp in strongest:
+        cid = comp.get("id")
+        if not cid:
+            continue
+        sims, err = _play_safe(similar_fn, cid, country=country, cache_dir=cache_dir, fresh=fresh)
+        if err is None:
+            hop_ok = True
+            for sid in sims or []:
+                if sid not in by_id and sid not in niche_ids:
+                    niche_ids.append(sid)
+    source_status["play_similar"] = "ok" if hop_ok else "unavailable"
+
+    for sid in niche_ids:
+        raw, err = _play_safe(lookup_fn, sid, country=country)
+        if err is not None or not raw:
+            continue
+        core = schema.map_play_to_core(raw)
+        if not core.get("id") or core["id"] in by_id:
+            continue
+        core = schema.merge_play_slots(core, similar_app_ids=[])
+        core["discovery"] = "niche_similar"
+        by_id[core["id"]] = core
+        enriched.append(core)
+
+    # --- Play Search-Suggest (autocomplete) ---
+    suggest, serr = _play_safe(
+        suggest_fn, seed_terms, country=country, cache_dir=cache_dir, fresh=fresh
     )
-    return {"keywords": keywords}
+    source_status["play_search_suggest"] = "unavailable" if serr else "ok"
+    suggest = suggest or []
+
+    enriched.sort(key=lambda c: (-(c.get("rating_count") or 0), str(c.get("id"))))
+    return {
+        "competitors": enriched,
+        "suggest_terms": suggest,
+        "source_status": source_status,
+    }

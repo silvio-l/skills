@@ -42,12 +42,36 @@ from typing import Dict, List
 OPPORTUNITY_MIN = 20   # recommended kw should clear this opportunity floor
 COMPETITION_MAX = 70   # recommended kw should stay under this competition ceiling
 
-# Apple slot model (PRD). S2 emits Apple slots here; Play is slice 04.
+# Apple slot model (PRD). S2 emits Apple slots here.
 APPLE_SLOTS: Dict[str, int] = {
     "title": 30,
     "subtitle": 30,
     "keyword_field": 100,
 }
+
+# Play slot model (PRD + slice 04): Title 30 · Short Description 80 · Long
+# Description 4000. Play has no hidden Keyword Field, so no slot is an
+# explicit keyword list — every Play slot is prose (an unscored word is
+# branding, not a contradiction).
+PLAY_SLOTS: Dict[str, int] = {
+    "title": 30,
+    "short": 80,
+    "long": 4000,
+}
+
+# Slots whose recommended text is an *explicit keyword list* — every term
+# there must be evidence-backed (present in the score table). Apple's hidden
+# Keyword Field is the only such slot; Play has none (per-store model).
+APPLE_REQUIRE_SCORED_SLOTS = {"keyword_field"}
+PLAY_REQUIRE_SCORED_SLOTS: set = set()
+
+
+def _slot_limits(store: str) -> Dict[str, int]:
+    return PLAY_SLOTS if store == "play" else APPLE_SLOTS
+
+
+def _require_scored_slots(store: str) -> set:
+    return PLAY_REQUIRE_SCORED_SLOTS if store == "play" else APPLE_REQUIRE_SCORED_SLOTS
 
 
 def _score_index(score_table: List[Dict]) -> Dict[str, Dict]:
@@ -87,10 +111,10 @@ def crosscheck_listing(
 ) -> Dict:
     """Apply the contradiction rubric to an S2 listing recommendation.
 
-    ``listing`` is the S2 output schema::
+    ``listing`` is the S2 output schema (Apple or Play)::
 
-        {"store": "apple",
-         "slots": [{"slot": "title"|"subtitle"|"keyword_field",
+        {"store": "apple"|"play",
+         "slots": [{"slot": <name>,
                     "recommended": {"text": "..."},
                     "alternatives": [{"text": "..."}, {"text": "..."}]}]}
 
@@ -102,19 +126,22 @@ def crosscheck_listing(
          "note": str}
 
     ``status`` is ``rejected`` as soon as one high-opportunity/low-competition
-    contradiction (or an unscored term) is found.
+    contradiction (or an unscored term in an explicit keyword-list slot) is
+    found. The set of slots that require evidence-backed terms is per-store
+    (Apple: the hidden Keyword Field; Play: none — all prose).
     """
+    store = listing.get("store", "apple")
+    require_scored = _require_scored_slots(store)
     index = _score_index(score_table)
     findings: List[Dict] = []
 
     for slot in listing.get("slots", []):
         slot_name = slot.get("slot", "?")
-        # The hidden Keyword Field is an explicit keyword list: every term
-        # there must be evidence-backed. Title/Subtitle are prose: an
+        # Only explicit keyword-list slots (Apple's Keyword Field) demand an
+        # evidence-backed term; Title/Subtitle/Short/Long are prose, so an
         # unscored word is branding, not a contradiction. The gate validates
-        # the single *recommended* entry (the decision the user acts on);
-        # the two alternatives are fallbacks, not the recommendation.
-        require_scored = slot_name == "keyword_field"
+        # the single *recommended* entry (the decision the user acts on).
+        require_scored_slot = slot_name in require_scored
         rec = slot.get("recommended") or {}
         text = rec.get("text", "")
         seen: set = set()
@@ -123,7 +150,7 @@ def crosscheck_listing(
                 continue
             seen.add(term)
             if term not in index:
-                if require_scored:
+                if require_scored_slot:
                     findings.append(
                         {
                             "slot": slot_name,
@@ -165,23 +192,26 @@ def crosscheck_listing(
 
 
 def validate_listing(listing: Dict) -> Dict:
-    """Verify each Apple slot's recommended + alternative text fits its limit.
+    """Verify each slot's recommended + alternative text fits its limit.
 
-    Checks the ``char_count`` field equals ``len(text)`` (accurate) and the
-    text length is within the slot's Apple limit (Title 30 / Subtitle 30 /
-    Keyword Field 100). Returns::
+    Routes by ``listing["store"]`` so the per-store char limits apply: Apple
+    (Title 30 / Subtitle 30 / Keyword Field 100) or Play (Title 30 / Short 80
+    / Long 4000). Checks the ``char_count`` field equals ``len(text)``
+    (accurate) and the text length is within the slot's limit. Returns::
 
         {"valid": bool,
-         "store": "apple",
+         "store": "apple"|"play",
          "slots": [{"slot", "limit",
                     "recommended": {"text", "char_count", "fits", "accurate"},
                     "alternatives": [ {same fields} ]}]}
     """
+    store = listing.get("store", "apple")
+    limits = _slot_limits(store)
     slots_out: List[Dict] = []
     valid = True
     for slot in listing.get("slots", []):
         name = slot.get("slot", "")
-        limit = APPLE_SLOTS.get(name, 0)
+        limit = limits.get(name, 0)
         slot_out = {"slot": name, "limit": limit}
         entries = [("recommended", slot.get("recommended", {}))]
         for alt in slot.get("alternatives", []):
@@ -202,4 +232,4 @@ def validate_listing(listing: Dict) -> Dict:
         slot_out["recommended"] = rendered[0]
         slot_out["alternatives"] = rendered[1:]
         slots_out.append(slot_out)
-    return {"valid": valid, "store": listing.get("store", "apple"), "slots": slots_out}
+    return {"valid": valid, "store": store, "slots": slots_out}

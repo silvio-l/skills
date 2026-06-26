@@ -59,21 +59,41 @@ def prepare_h1_input(
     positioning sentence + pick top-5 keywords. The own app (Modus A) is
     flagged ``is_own_app=True`` when its id matches ``own_app_id`` — it is
     just another entry in the same list (no separate path).
+
+    Slice 04: Play competitors carry their text under ``short_description`` /
+    ``full_description`` (no Apple ``subtitle``/``description``). The resolver
+    falls back to those Play slots so H1 sees Play's rich text and can write a
+    meaningful positioning sentence for the Play vertical too — same I/O
+    schema, no LLM-mechanism change.
     """
     own = (own_app_id or "").strip()
     out: List[Dict] = []
     for c in competitors:
         app_id = str(c.get("id") or "")
-        record = {field: c.get(_core_field(field), "") for field in _H1_INPUT_FIELDS}
+        record = {field: _resolve_h1_field(c, field) for field in _H1_INPUT_FIELDS}
         record["app_id"] = app_id
         record["is_own_app"] = bool(own and app_id and app_id == own)
         out.append(record)
     return out
 
 
-def _core_field(field: str) -> str:
-    """Map an H1-input field name onto the competitor Core/Slots key."""
-    return "id" if field == "app_id" else field
+def _resolve_h1_field(competitor: Dict, field: str):
+    """Source an H1 field from the competitor record, with Play fallbacks.
+
+    ``description`` falls back to Play's ``full_description`` and ``subtitle``
+    to Play's ``short_description`` when the Apple-named field is empty, so a
+    unified Apple+Play corpus reads coherently without platform branching.
+    """
+    if field == "app_id":
+        return str(competitor.get("id") or "")
+    value = competitor.get(field, "")
+    if value:
+        return value
+    if field == "description":
+        return competitor.get("full_description") or ""
+    if field == "subtitle":
+        return competitor.get("short_description") or ""
+    return ""
 
 
 def build_llm_input(

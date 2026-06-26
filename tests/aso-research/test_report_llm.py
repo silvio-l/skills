@@ -160,6 +160,56 @@ class ListingRecommendationTests(unittest.TestCase):
             self.assertEqual(len(slot["alternatives"]), 2)
 
 
+class PlayListingReportTests(unittest.TestCase):
+    """Slice 04: the report carries a Play-specific listing (1+2 per Play slot)."""
+
+    def _play_s2(self):
+        title = "Habit Hero Tracker"
+        short = "Build daily habits & routines that stick"
+        long_text = "Habit Hero is the best habit tracker. Build streaks and routines."
+        return {
+            "store": "play",
+            "slots": [
+                {"slot": "title", "recommended": {"text": title, "char_count": len(title)},
+                 "alternatives": [{"text": "Habit Hero", "char_count": 10},
+                                  {"text": "Daily Habit", "char_count": 10}]},
+                {"slot": "short", "recommended": {"text": short, "char_count": len(short)},
+                 "alternatives": [{"text": "Track routines daily", "char_count": 20},
+                                  {"text": "Build streaks now", "char_count": 17}]},
+                {"slot": "long", "recommended": {"text": long_text, "char_count": len(long_text)},
+                 "alternatives": [{"text": "alt long one", "char_count": 11},
+                                  {"text": "alt long two", "char_count": 11}]},
+            ],
+        }
+
+    def _play_competitors(self):
+        return [
+            {"id": "com.a", "platform": "play", "title": "Habit Hero", "developer": "DevA",
+             "category": "health_fitness", "rating_avg": 4.5, "rating_count": 1000,
+             "price_model": "free", "discovery": "chart/search"},
+        ]
+
+    def test_play_listing_section_renders_when_play_present(self):
+        body = report.build_report(
+            _config(), self._play_competitors(), _keywords(), now=NOW,
+            s2_output=_s2(), h2_output=_h2_ok(),
+            s2_play_output=self._play_s2(),
+            h2_play_output=_h2_ok(),
+        )
+        self.assertIn("### Google Play", body)
+        # Play slot names + limits documented in the section
+        self.assertIn("Title 30 / Short 80 / Long 4000", body)
+        # 1 recommended + 2 alts per Play slot rendered with char counts
+        self.assertIn("(recommended)", body)
+        self.assertIn("alt 1", body)
+        self.assertIn("H2 cross-check (Google Play)", body)
+
+    def test_no_play_section_when_play_absent(self):
+        body = report.build_report(_config(), _competitors(), _keywords(), now=NOW)
+        self.assertNotIn("### Google Play", body)
+        self.assertIn("### Apple", body)
+
+
 class ModusTests(unittest.TestCase):
     def test_modus_b_has_no_self_audit_section(self):
         body = report.build_report(_config(), _competitors(), _keywords(), now=NOW)

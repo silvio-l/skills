@@ -74,12 +74,17 @@ def _opportunity_buckets(keywords: List[Dict]) -> Dict[str, List[Dict]]:
     }
 
 
-def _listing_slot_lines(s2_output: Optional[Dict], h2_output: Optional[Dict]) -> List[str]:
-    """Render the S2 listing (1 recommended + 2 alternatives) per Apple slot."""
+def _listing_slot_lines(s2_output: Optional[Dict], h2_output: Optional[Dict], *, store_label: str = "Apple") -> List[str]:
+    """Render the S2 listing (1 recommended + 2 alternatives) per slot.
+
+    Works for either store — the slot names + char limits come from the S2
+    output itself (validated upstream by :mod:`crosscheck`).
+    """
     if not s2_output or not s2_output.get("slots"):
         return [
-            "_Listing recommendation pending — run the S2 Listing Strategist "
-            "(Sonnet) subagent to produce the per-slot 1 + 2 recommendation._"
+            f"_{store_label} listing recommendation pending — run the S2 Listing "
+            f"Strategist (Sonnet) subagent to produce the per-slot 1 + 2 "
+            f"recommendation for the {store_label.lower()} slot model._"
         ]
     lines: List[str] = []
     for slot in s2_output.get("slots", []):
@@ -96,7 +101,7 @@ def _listing_slot_lines(s2_output: Optional[Dict], h2_output: Optional[Dict]) ->
     if h2_output:
         status = h2_output.get("status", "—")
         note = _md_escape(h2_output.get("note", ""))
-        lines.append(f"- **H2 cross-check:** {status} — {note}")
+        lines.append(f"- **H2 cross-check ({store_label}):** {status} — {note}")
     return lines
 
 
@@ -113,9 +118,14 @@ def build_report(
     s1_output: Optional[Dict] = None,
     s2_output: Optional[Dict] = None,
     h2_output: Optional[Dict] = None,
+    # --- slice 04 Play listing (optional; absent -> Apple-only report) ---
+    s2_play_output: Optional[Dict] = None,
+    h2_play_output: Optional[Dict] = None,
 ) -> str:
     """Assemble the 8-section ``report.md`` body as a string."""
     n_comp = len(competitors)
+    apple_comps = [c for c in competitors if c.get("platform", "apple") == "apple"]
+    play_comps = [c for c in competitors if c.get("platform") == "play"]
     niche = [c for c in competitors if c.get("discovery") == "niche_similar"]
     primary = [k for k in keywords if k.get("split") == "primary-candidate"]
     longtail = [k for k in keywords if k.get("split") == "long-tail-candidate"]
@@ -126,6 +136,7 @@ def build_report(
     reddit_threads = reddit_threads or []
     own_app_id = (config.get("own_app_id") or "").strip()
     modus_a = bool(own_app_id)
+    has_play = bool(play_comps) or any(s.startswith("play_") for s in source_status)
 
     lines: List[str] = []
     lines.append(f"# ASO Research — {config['app_name']}")
@@ -136,14 +147,27 @@ def build_report(
     # === 1. Executive Summary ===
     lines.append("## 1. Executive Summary")
     lines.append("")
-    lines.append(
-        f"Discovered **{n_comp}** Apple competitor(s) via the iTunes Search API, "
-        f"enriched with the Apple **subtitle** (Playwright) and a **similar-apps** "
-        f"hop that surfaced **{len(niche)}** niche competitor(s). Keywords were "
-        f"extracted with a YAKE + TF-IDF engine (position-weighted) and scored "
-        f"with the Competition/Relevance proxy — **not** real search volume. The "
-        f"LLM interprets the token-budget-gated, condensed result only."
-    )
+    if has_play:
+        lines.append(
+            f"Discovered **{len(apple_comps)}** Apple and **{len(play_comps)}** Google "
+            f"Play competitor(s). Apple via the iTunes Search API (enriched with the "
+            f"subtitle via Playwright + a similar-apps hop); Play via "
+            f"google-play-scraper (search, charts, similar-apps). The similar-apps "
+            f"hop surfaced **{len(niche)}** niche competitor(s). Keywords were "
+            f"extracted with a YAKE + TF-IDF engine (position-weighted per platform) "
+            f"and scored with the shared Competition/Relevance proxy — **not** real "
+            f"search volume. The LLM interprets the token-budget-gated, condensed "
+            f"result only."
+        )
+    else:
+        lines.append(
+            f"Discovered **{n_comp}** Apple competitor(s) via the iTunes Search API, "
+            f"enriched with the Apple **subtitle** (Playwright) and a **similar-apps** "
+            f"hop that surfaced **{len(niche)}** niche competitor(s). Keywords were "
+            f"extracted with a YAKE + TF-IDF engine (position-weighted) and scored "
+            f"with the Competition/Relevance proxy — **not** real search volume. The "
+            f"LLM interprets the token-budget-gated, condensed result only."
+        )
     lines.append("")
     lines.append(f"- **Category:** {config.get('category', 'other')}")
     lines.append(f"- **Country / language:** {config['country']} / {config['language']}")
@@ -244,9 +268,10 @@ def build_report(
     lines.append("")
     lines.append(
         "Scores are a deterministic **Competition/Relevance signal** — a proxy, "
-        "**never** search volume. Competition = position-weighted title/subtitle/"
-        "description share; Relevance = cosine TF-IDF to the seed concept "
-        "(+15 Apple Search-Suggest boost); Opportunity = Relevance × (100 − "
+        "**never** search volume. Competition = position-weighted slot share "
+        "(Apple: Title ×5 · Subtitle ×3 · Description ×1; Play: Title ×5 · Short "
+        "×4 · Long ×2); Relevance = cosine TF-IDF to the seed concept (+15 "
+        "Apple/Play Search-Suggest boost); Opportunity = Relevance × (100 − "
         "Competition) (+10 niche bonus)."
     )
     lines.append("")
@@ -328,15 +353,29 @@ def build_report(
     lines.append("")
 
     # === 7. Listing Recommendation ===
-    lines.append("## 7. Listing Recommendation (Apple)")
+    lines.append("## 7. Listing Recommendation")
+    lines.append("")
+    lines.append("### Apple")
     lines.append("")
     lines.append(
         "1 recommended + 2 alternatives per Apple slot (Title 30 / Subtitle 30 "
         "/ hidden Keyword Field 100), validated by the H2 cross-check."
     )
     lines.append("")
-    lines.extend(_listing_slot_lines(s2_output, h2_output))
+    lines.extend(_listing_slot_lines(s2_output, h2_output, store_label="Apple"))
     lines.append("")
+
+    if has_play:
+        lines.append("### Google Play")
+        lines.append("")
+        lines.append(
+            "1 recommended + 2 alternatives per Play slot (Title 30 / Short 80 / "
+            "Long 4000), optimised for Play's own ranking model (Short is a strong "
+            "ranking factor; Long is fully indexed), validated by the H2 cross-check."
+        )
+        lines.append("")
+        lines.extend(_listing_slot_lines(s2_play_output, h2_play_output, store_label="Google Play"))
+        lines.append("")
 
     # Modus A self-audit block (no separate code path — present iff own app).
     if modus_a:
@@ -375,13 +414,24 @@ def build_report(
         "+ Apple Search-Suggest enrichment; DE+EN stopwords, generics filtered, "
         "light morphology grouping."
     )
+    if has_play:
+        lines.append("")
+        lines.append(
+            "Google Play **Core + Slots** metadata collected via "
+            "google-play-scraper (search, charts, similar-apps): Title + "
+            "Short Description (80, strong ranking factor) + Long Description "
+            "(4000, fully indexed). Play **tags are not collected** (not reliably "
+            "extractable). Play keywords flow into the SAME shared scoring engine "
+            "with Play's own position weighting (Title ×5 · Short ×4 · Long ×2) "
+            "and Play autocomplete enriches the suggest set alongside Apple's."
+        )
     lines.append("")
     lines.append("**Honesty — what is a proxy vs what is real:**")
     lines.append(
         "- Competition / Relevance / Opportunity are **deterministic proxy "
         "signals**, explicitly **not real search volume or difficulty** — they "
-        "are labelled \"signal\" throughout. The only free *real-search* signal "
-        "is Apple Search-Suggest autocomplete (a +15 Relevance boost)."
+        "are labelled \"signal\" throughout. The only free *real-search* signals "
+        "are Apple + Play Search-Suggest autocomplete (a +15 Relevance boost)."
     )
     lines.append(
         "- Keyword counts come from the collected competitor corpus, not from a "
@@ -415,6 +465,7 @@ def _source_split(source_status: Dict[str, str]):
     order = (
         "apple_subtitle", "apple_similar", "apple_rss_charts",
         "reddit", "apple_search_suggest",
+        "play_search", "play_charts", "play_similar", "play_search_suggest",
     )
     ran, unavailable = [], []
     for src in order:

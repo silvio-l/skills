@@ -37,13 +37,14 @@ tokens), consistent with `ratchet-up` / `ship-to-*`.
 | Apple RSS Marketing-Tools charts collector | [scripts/apple_rss.py](scripts/apple_rss.py) |
 | Reddit `.json` qualitative-signal collector | [scripts/reddit.py](scripts/reddit.py) |
 | Apple Search-Suggest autocomplete collector | [scripts/search_suggest.py](scripts/search_suggest.py) |
+| Google Play collector (google-play-scraper via npx; search/charts/similar/suggest) | [scripts/play.py](scripts/play.py) |
 | Deep Apple collection orchestration (never-blocking, injectable) | [scripts/collect.py](scripts/collect.py) |
 | Unified category taxonomy + raw→Core+Slots schema mapping | [scripts/schema.py](scripts/schema.py) |
 | Keyword extraction (YAKE + TF-IDF position-weighted + suggest) | [scripts/extract.py](scripts/extract.py) |
 | Scoring (Competition/Relevance proxy, opportunity, split, is_gap) | [scripts/score.py](scripts/score.py) |
 | LLM-input prep (H1 raw profiles + token-gated S1 representation, Modus-A flag) | [scripts/condense.py](scripts/condense.py) |
 | Token-Budget Gate (measure + auto-trim under ~70k, chars/4 estimate) | [scripts/llm_gate.py](scripts/llm_gate.py) |
-| H2 contradiction rubric + Apple slot char-count validation | [scripts/crosscheck.py](scripts/crosscheck.py) |
+| H2 contradiction rubric + per-store slot char-count validation (Apple + Play) | [scripts/crosscheck.py](scripts/crosscheck.py) |
 | Stable serialization (byte-identical determinism) | [scripts/serialize.py](scripts/serialize.py) |
 | Report assembly (full 8 sections from artefacts + subagent outputs) | [scripts/report.py](scripts/report.py) |
 
@@ -98,18 +99,33 @@ The exact JSON schemas, the gate limits, the H2 thresholds
 (Opportunity ≥ 20, Competition ≤ 70), and the Modus A/B handling are in
 [pipeline.md](pipeline.md) → "LLM interpretation phase".
 
-## Current scope (slice 03 — LLM phase + full report)
+## Current scope (slice 04 — Google Play vertical)
 
-Slice 03 wires the four LLM subagents behind a hard token-budget gate and
-assembles the **full 8-section report** (Executive Summary · Competitive
-Landscape · Positioning Map · Keyword Report · Opportunities · Risks/
-Threats · Listing Recommendation · Methodology). The gate
-(`scripts/llm_gate.py`) measures the condensed LLM-input representation
-(chars/4 estimate) and auto-trims it under ~70k tokens; the condensed
-input (`scripts/condense.py`) carries no raw descriptions into the later
-LLM stages; the H2 rubric (`scripts/crosscheck.py`) is a real gate — it
-rejects a low-opportunity / high-competition / unscored recommendation.
-Modus A (own app present) self-audits via the same path (the own app is
-just another reference entry); Modus B omits the self-audit. **Apple
-listing only** here (Title 30 / Subtitle 30 / Keyword Field 100); Play
-listing, Microsoft scoring, and resumability/diff are later slices.
+Slice 04 adds **Google Play** as a complete second vertical alongside Apple,
+reusing the shared scoring engine and the LLM listing path:
+
+- **Play discovery + metadata** via `google-play-scraper` (Node, through
+  `npx`): seed-keyword search, category charts, and the similar-apps graph.
+  Play Core + Slots carry `short_description` (80, strong ranking factor) and
+  `full_description` (4000, fully indexed). **`tags` are dropped** (not
+  reliably extractable).
+- **Shared scoring engine.** Play keywords flow into the SAME score table as
+  Apple (`keywords.json` / `competition.json` carry `platform: apple` **and**
+  `platform: play` rows), scored with Play's own position weighting
+  (Title ×5 · Short ×4 · Long ×2 — distinct from Apple's 5/3/1). The engine
+  is generalised over a per-platform slot-weight map; Apple's numeric outputs
+  are unchanged.
+- **Unified Search-Suggest.** Play autocomplete is collected alongside
+  Apple's and merged into one suggest set (the +15 relevance boost applies to
+  either store's terms).
+- **Play listing (S2/H2).** The Listing Strategist emits a Play-specific
+  listing (`llm/s2-listing-play.json`: 1 recommended + 2 alternatives per
+  Play slot, char counts fitting Title 30 / Short 80 / Long 4000),
+  cross-checked by H2 (`llm/h2-crosscheck-play.json`). The report renders
+  both an Apple and a Google Play listing section.
+- **Never-blocking.** A failing Play source is marked `"unavailable"` and the
+  pipeline continues (Apple-only result when Play is down).
+
+The LLM subagent mechanism itself (H1/S1/S2/H2 call flow, pinned models) is
+unchanged from slice 03 — only the listing/crosscheck now also covers the
+Play slot model. Microsoft scoring and resumability/diff remain later slices.

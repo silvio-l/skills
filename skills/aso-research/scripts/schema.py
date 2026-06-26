@@ -29,6 +29,7 @@ import re
 from typing import Dict, List
 
 PLATFORM = "apple"
+PLAY_PLATFORM = "play"
 
 # Discovery slot: populated by the similar-apps collector (slice 02).
 _DEFAULT_CORE: Dict[str, object] = {
@@ -208,6 +209,91 @@ def merge_apple_slots(
         )
     if similar_app_ids is not None:
         # de-duped, order-preserved, str-coerced
+        seen = set()
+        clean = []
+        for sid in similar_app_ids:
+            s = str(sid).strip()
+            if s and s not in seen:
+                seen.add(s)
+                clean.append(s)
+        merged["similar_app_ids"] = clean
+    return merged
+
+
+# ---------------------------------------------------------------------------
+# Google Play Core + Slots mapping (slice 04)
+# ---------------------------------------------------------------------------
+
+def infer_play_price_model(raw: dict) -> str:
+    """Infer ``free`` / ``paid`` from the google-play-scraper price fields.
+
+    The library returns ``free`` (bool) and/or ``price`` (number, 0 for free)
+    and ``priceText``. We prefer the explicit boolean, then the numeric price.
+    """
+    if "free" in raw and raw["free"] is not None:
+        return "free" if bool(raw["free"]) else "paid"
+    price = raw.get("price")
+    if isinstance(price, (int, float)) and price > 0:
+        return "paid"
+    return "free"
+
+
+def map_play_to_core(raw: dict) -> dict:
+    """Map one raw google-play-scraper ``app()`` result onto Core + Play slots.
+
+    Play slots (PRD): ``short_description`` (80 chars, strong ranking factor)
+    and ``full_description`` (4000 chars, fully indexed). The library exposes
+    the short text as ``summary`` and the long text as ``description`` — both
+    are HTML-stripped here for consistency with the Apple path.
+
+    **``tags`` are deliberately NOT collected** (PRD + slice 04 decision): they
+    are not reliably extractable from the public listing, verified in the
+    feasibility probe. The record therefore carries no ``tags`` key at all.
+
+    Missing Core fields degrade to safe defaults rather than raising, so one
+    oddly-shaped result cannot abort a whole Play discovery pass.
+    """
+    app_id = raw.get("appId") or raw.get("id") or ""
+    title = raw.get("title") or ""
+    short = strip_html(raw.get("summary") or raw.get("shortDescription") or "")
+    full = strip_html(raw.get("description") or raw.get("fullDescription") or "")
+    genre = raw.get("genre") or raw.get("primaryGenre") or raw.get("genreId") or ""
+    screenshots = raw.get("screenshots") or []
+    return {
+        # --- Core ---
+        "id": str(app_id) if app_id != "" else "",
+        "platform": PLAY_PLATFORM,
+        "store_url": raw.get("url") or "",
+        "title": title,
+        "developer": raw.get("developer") or "",
+        "category": map_category(genre) if not genre.isdigit() else DEFAULT_CATEGORY,
+        "rating_avg": raw.get("score"),
+        "rating_count": raw.get("ratings") or 0,
+        "last_updated": raw.get("updated") or raw.get("released") or "",
+        "price_model": infer_play_price_model(raw),
+        "screenshot_count": len(screenshots),
+        # --- Play slots (tags dropped by decision) ---
+        "short_description": short,
+        "full_description": full,
+        # --- Discovery slot ---
+        "similar_app_ids": [],
+    }
+
+
+def merge_play_slots(
+    core: dict,
+    *,
+    similar_app_ids: List[str] = None,
+) -> dict:
+    """Fill the Play discovery slot collected from the similar-apps hop.
+
+    Returns a new dict (does not mutate the caller's record). Mirrors
+    :func:`merge_apple_slots` for the platform-agnostic discovery field.
+    Play has no browser-only slot (short/full description come straight from
+    the library), so only ``similar_app_ids`` is filled here.
+    """
+    merged = dict(core)
+    if similar_app_ids is not None:
         seen = set()
         clean = []
         for sid in similar_app_ids:
