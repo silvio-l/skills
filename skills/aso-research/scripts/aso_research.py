@@ -489,6 +489,7 @@ def run(argv=None) -> int:
 
     # --- Stage: llm-inputs (run-config + H1 raw profiles) ---
     def _llm_inputs():
+        os.makedirs(os.path.join(run_dir, "llm-input"), exist_ok=True)
         run_config = {k: config[k] for k in input_config.CANONICAL_KEYS}
         with open(os.path.join(run_dir, "run-config.yaml"), "w", encoding="utf-8") as fh:
             fh.write(serialize.dumps_yaml(run_config))
