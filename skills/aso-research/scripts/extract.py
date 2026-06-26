@@ -85,7 +85,9 @@ _SENT_SPLIT_RE = re.compile(r"[.!?;\n]+")
 # Stopwords + generics
 # ---------------------------------------------------------------------------
 
-STOPWORDS: set = {
+# Inline fallback set — only used when neither stopwordsiso nor spaCy
+# import. Kept as a last-resort fallback per the PRD.
+_FALLBACK_STOPWORDS: set = {
     # EN
     "the", "and", "for", "with", "your", "you", "app", "apps", "all",
     "are", "new", "now", "from", "get", "has", "have", "this", "that",
@@ -105,6 +107,68 @@ STOPWORDS: set = {
     "vom", "beim", "nach", "aus", "durch", "ohne", "statt", "neue",
     "neuen", "ganz", "ganze", "jede", "jeden", "alle", "allen",
 }
+
+# ASO-valuable terms that general NLP stop-word lists wrongly kill.
+# Carved out after the curated union is built (per PRD §P1).
+_ASO_CARVEOUT = {
+    "best", "free", "app", "pro", "kostenlos", "neu", "new",
+    "text", "top", "work", "open",
+}
+
+# German subordinating conjunctions missing even from the stopwordsiso +
+# spaCy union — these leak persistently and must be explicitly added.
+_MANUAL_DE_CONJUNCTIONS = {
+    "sodass", "damit", "obwohl", "während", "weil",
+}
+
+# Domain-noise: app/corpus-specific junk, separate from linguistic
+# stop-words. Callers extend it via the existing ``generics`` argument.
+DOMAIN_NOISE = {
+    "anbieter", "fenster",
+}
+
+# Verb forms that leak through NLP stop-word lists (POS-dependent —
+# ``spacy`` tags them as VERB, not stopword). Deferred to P6 for proper
+# POS lemmatisation; here we keep a small explicit block.
+_VERB_LEAKS = {
+    "verlassen", "läuft",
+}
+
+
+def _build_stopwords() -> set:
+    """Build a curated DE+EN stop-word set from stopwordsiso and spaCy.
+
+    Merges both permissive-licence (MIT) pure-Python sources, adds
+    missing German subordinating conjunctions, and carves out ASO-valuable
+    terms that general NLP lists wrongly kill. Falls back to
+    ``_FALLBACK_STOPWORDS`` if neither package imports.
+    """
+    iso = set()
+    try:
+        import stopwordsiso  # noqa: F811
+        iso = set(stopwordsiso.stopwords("de")) | set(stopwordsiso.stopwords("en"))
+    except Exception:
+        pass
+
+    spacy = set()
+    try:
+        import spacy.lang.de.stop_words  # noqa: F811
+        import spacy.lang.en.stop_words  # noqa: F811
+        spacy = (set(spacy.lang.de.stop_words.STOP_WORDS)
+                 | set(spacy.lang.en.stop_words.STOP_WORDS))
+    except Exception:
+        pass
+
+    union = iso | spacy
+    if not union:
+        union = _FALLBACK_STOPWORDS.copy()
+    union |= _MANUAL_DE_CONJUNCTIONS
+    union |= _VERB_LEAKS
+    union -= _ASO_CARVEOUT
+    return union
+
+
+STOPWORDS: set = _build_stopwords()
 
 # Platform / device generics dropped alongside the caller-supplied
 # category name. "app" / "apps" already live in STOPWORDS; kept here too
@@ -221,23 +285,31 @@ def _sentences(text: str) -> List[str]:
     return [s for s in _SENT_SPLIT_RE.split(text or "") if s.strip()]
 
 
-def _candidate_phrases(field_text: str) -> Dict[tuple, int]:
+def _candidate_phrases(
+    field_text: str, stopwords: set = None,
+) -> Dict[tuple, int]:
     """Yield n-gram candidate phrases (n=2..3) -> occurrence count.
 
-    Phrases are contiguous runs of *filtered* tokens (stopwords removed),
-    so a phrase never spans a stopword. Repeated phrases within the field
-    count once per occurrence (YAKE frequency signal).
+    Phrases are built from *raw* tokens (no pre-stripping of stopwords)
+    so multi-word phrases like ``sprache zu text`` survive. YAKE-style
+    edge filtering drops candidates that start or end with a stopword,
+    but keeps those whose stop-word sits only in the middle. Repeated
+    phrases within the field count once per occurrence.
     """
+    if stopwords is None:
+        stopwords = STOPWORDS
     phrases: Dict[tuple, int] = {}
     if not field_text:
         return phrases
     for sentence in _sentences(field_text):
-        toks = tokenize(sentence)
+        toks = _raw_tokens(sentence)
         if len(toks) < 2:
             continue
         for n in range(2, _MAX_PHRASE_LEN + 1):
             for i in range(len(toks) - n + 1):
                 gram = tuple(toks[i : i + n])
+                if gram[0] in stopwords or gram[-1] in stopwords:
+                    continue
                 phrases[gram] = phrases.get(gram, 0) + 1
     return phrases
 
@@ -360,7 +432,7 @@ def extract_keywords(
     field_names = _field_names(field_defs)
     phrase_field_defs = _phrase_fields(field_defs)
     generic = {g.lower() for g in generics if g} | PLATFORM_GENERICS
-    blocked = STOPWORDS | generic
+    blocked = STOPWORDS | generic | DOMAIN_NOISE
     suggest = {s.lower().strip() for s in suggest_terms if s and s.strip()}
 
     # ---- single-term pass (position-weighted) ----
@@ -392,7 +464,7 @@ def extract_keywords(
         for rank, (fname, _w) in enumerate(phrase_field_defs):
             field_text = doc.get(fname, "") or ""
             sentence_base = float(rank) * 0.5  # 0.0 then 0.5
-            grams = _candidate_phrases(field_text)
+            grams = _candidate_phrases(field_text, stopwords=blocked)
             for gram, freq in grams.items():
                 # drop phrases whose every token is generic/stopword-ish
                 if all(g in blocked for g in gram):

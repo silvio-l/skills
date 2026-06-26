@@ -49,13 +49,13 @@ class TokenizeTests(unittest.TestCase):
         self.assertIn("version", toks)
 
     def test_contractions_split_on_apostrophe(self):
-        toks = extract.tokenize("world's aren't pro's")
-        # apostrophe is a separator -> 'world' / 'pro' kept, trailing 's' dropped
-        self.assertIn("world", toks)
+        toks = extract.tokenize("gamer's aren't pro's")
+        # apostrophe is a separator -> 'gamer' / 'pro' kept, trailing 's' dropped
+        self.assertIn("gamer", toks)
         self.assertIn("pro", toks)
         # never joined back together
-        self.assertNotIn("worlds", toks)
-        self.assertNotIn("world's", toks)
+        self.assertNotIn("gamers", toks)
+        self.assertNotIn("gamer's", toks)
 
     def test_short_tokens_dropped(self):
         toks = extract.tokenize("a an im ux das")

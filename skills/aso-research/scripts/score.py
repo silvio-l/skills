@@ -241,6 +241,18 @@ def score_keywords(
         idf[c["term"]] = math.log((n_docs + 1) / (1 + df)) if n_docs > 0 else 0.0
     seed_profile = _seed_tfidf_profile(seed_description, vocab, idf)
 
+    # Compute all raw cosine similarities first to enable max-normalisation
+    # (per PRD §P1: Relevance = cosine / max_cosine × 100, so the most
+    # relevant term reaches ~100 and fixed thresholds become comparable).
+    raw_cos = {}
+    max_cos = 0.0
+    for c in extracted:
+        term = c["term"]
+        raw = _cosine_relevance(seed_profile, term)
+        raw_cos[term] = raw
+        if raw > max_cos:
+            max_cos = raw
+
     scored: List[Dict] = []
     for c in extracted:
         term = c["term"]
@@ -249,7 +261,11 @@ def score_keywords(
         title_hits = hits.get("title", int(c.get("title_hits", 0)))
 
         competition = competition_score_weighted(hits, weights, n_docs)
-        relevance = int(round(_cosine_relevance(seed_profile, term) * 100.0))
+        raw = raw_cos[term]
+        if max_cos > 0.0:
+            relevance = int(round(raw / max_cos * 100.0))
+        else:
+            relevance = 0
         if term in suggest:
             relevance += SUGGEST_BOOST
         relevance = max(0, min(100, relevance))
