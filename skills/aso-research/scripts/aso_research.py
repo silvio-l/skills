@@ -417,6 +417,7 @@ def run(argv=None) -> int:
         )
         ms = collect.collect_ms(
             config, seed_terms=seed_terms, country=country,
+            language=config.get("language", "de"),
             cache_dir=args.cache_dir, fresh=args.fresh,
         )
         ms_entries = ms["ms_entries"]

@@ -506,6 +506,7 @@ def collect_ms(
     *,
     seed_terms: Optional[List[str]] = None,
     country: str = "de",
+    language: str = "de",
     cache_dir: str = "",
     fresh: bool = False,
     # injectable collectors (tests pass fakes; defaults hit the live modules)
@@ -543,7 +544,8 @@ def collect_ms(
 
     source_status: Dict[str, Dict] = {}
     search_fn = search_fn or ms_collector.search
-    detail_fn = detail_fn or (lambda ids, *a, **k: ms_collector.enrich(ids, *a, **k))
+    detail_fn = detail_fn or (lambda ids, *a, **k: ms_collector.enrich(
+        ids, *a, country=country, language=language, **k))
 
     seed_terms = list(seed_terms or config.get("seed_keywords") or [])
     if config.get("app_name"):
@@ -556,7 +558,7 @@ def collect_ms(
     # --- MS best-effort search (seed keywords + app name) ---
     for term in seed_terms:
         results, err = _ms_safe(
-            search_fn, term, country=country, cache_dir=cache_dir, fresh=fresh
+            search_fn, term, country=country, language=language, cache_dir=cache_dir, fresh=fresh
         )
         if err is not None:
             if ms_err is None:

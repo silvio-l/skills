@@ -33,6 +33,78 @@ import schema  # noqa: E402
 import serialize  # noqa: E402
 
 
+class MSSearchURLBuilderTests(unittest.TestCase):
+    """AC: MS search URL builder with locale parameters (country + language)."""
+
+    def setUp(self):
+        import ms as ms_mod
+        self.url_fn = ms_mod._search_url
+        self.resolve_fn = ms_mod._resolve_hl
+
+    def test_de_locale_params(self):
+        url = self.url_fn("habit tracker", country="de", language="de")
+        self.assertIn("hl=de-DE", url)
+        self.assertIn("gl=DE", url)
+        self.assertIn("query=habit", url)
+
+    def test_en_us_locale_params(self):
+        url = self.url_fn("habit tracker", country="us", language="en")
+        self.assertIn("hl=en-US", url)
+        self.assertIn("gl=US", url)
+        self.assertIn("query=habit", url)
+
+    def test_fr_locale_params(self):
+        url = self.url_fn("habitude", country="fr", language="fr")
+        self.assertIn("hl=fr-FR", url)
+        self.assertIn("gl=FR", url)
+        self.assertIn("query=habitude", url)
+
+    def test_es_locale_params(self):
+        url = self.url_fn("habito", country="es", language="es")
+        self.assertIn("hl=es-ES", url)
+        self.assertIn("gl=ES", url)
+        self.assertIn("query=habito", url)
+
+    def test_it_locale_params(self):
+        url = self.url_fn("abitudine", country="it", language="it")
+        self.assertIn("hl=it-IT", url)
+        self.assertIn("gl=IT", url)
+        self.assertIn("query=abitudine", url)
+
+    def test_unknown_language_falls_back_to_en_us(self):
+        url = self.url_fn("app", country="jp", language="ja")
+        self.assertIn("hl=en-US", url)
+        self.assertIn("gl=JP", url)
+        self.assertIn("query=app", url)
+
+    def test_resolve_hl_de(self):
+        self.assertEqual(self.resolve_fn("de"), "de-DE")
+        self.assertEqual(self.resolve_fn("DE"), "de-DE")
+        self.assertEqual(self.resolve_fn("de-DE"), "de-DE")
+
+    def test_resolve_hl_en(self):
+        self.assertEqual(self.resolve_fn("en"), "en-US")
+        self.assertEqual(self.resolve_fn("en-GB"), "en-US")
+
+    def test_resolve_hl_default(self):
+        self.assertEqual(self.resolve_fn(""), "de-DE")
+        self.assertEqual(self.resolve_fn("ja"), "en-US")
+
+    def test_detail_url_includes_locale(self):
+        import ms as ms_mod
+        url = ms_mod._detail_url("9p7f1j2svk3g", country="de", language="de")
+        self.assertIn("hl=de-DE", url)
+        self.assertIn("gl=DE", url)
+        self.assertIn("/detail/9p7f1j2svk3g", url)
+
+    def test_detail_url_en_us_locale(self):
+        import ms as ms_mod
+        url = ms_mod._detail_url("9p7f1j2svk3g", country="us", language="en")
+        self.assertIn("hl=en-US", url)
+        self.assertIn("gl=US", url)
+
+
+
 # ===========================================================================
 # ID extractor — full product ID, both URL shapes (slice 05 → 04 fix)
 # ===========================================================================

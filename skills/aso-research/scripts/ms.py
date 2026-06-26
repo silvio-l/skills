@@ -75,6 +75,10 @@ _DETAIL_DESC_SELECTORS = (
     "section[aria-label*='Description']",
     "[data-testid='productDescription']",
     "div[class*='description']",
+    "div[class*='product-description']",
+    "div[id='product-description']",
+    "[aria-label*='Übersicht' i]",
+    "[aria-label*='overview' i]",
 )
 _DETAIL_RATING_SELECTORS = (
     "[data-testid='rating']",
@@ -83,6 +87,9 @@ _DETAIL_RATING_SELECTORS = (
     "div[class*='rating'] [class*='number']",
     "[data-testid='ratingValue']",
     ".c-rating",
+    "span[class*='rating-value']",
+    "[data-testid='reviewRating']",
+    "meta[itemprop='ratingValue']",
 )
 _DETAIL_RATING_COUNT_SELECTORS = (
     "[data-testid='ratingCount']",
@@ -90,6 +97,9 @@ _DETAIL_RATING_COUNT_SELECTORS = (
     "[aria-label*='ratings' i]",
     "[data-testid='totalRatings']",
     ".c-rating + span",
+    "[data-testid='reviewCount']",
+    "meta[itemprop='ratingCount']",
+    "meta[itemprop='reviewCount']",
 )
 _DETAIL_REVIEW_SELECTORS = (
     "[data-testid='review']",
@@ -97,13 +107,32 @@ _DETAIL_REVIEW_SELECTORS = (
     ".review-text",
     ".review-content",
     "div[class*='review'] p",
+    "p[class*='review']",
+    "[data-testid='userReview']",
+    "section[aria-label*='review' i] p",
+    "section[aria-label*='Bewertung' i] p",
 )
+
+
+def _resolve_hl(language: str) -> str:
+    lang = (language or "de").lower()
+    if lang.startswith("de"):
+        return "de-DE"
+    if lang.startswith("en"):
+        return "en-US"
+    if lang.startswith("fr"):
+        return "fr-FR"
+    if lang.startswith("es"):
+        return "es-ES"
+    if lang.startswith("it"):
+        return "it-IT"
+    return "en-US"
 
 
 def _search_url(query: str, *, country: str, language: str) -> str:
     q = urllib.parse.quote(query)
-    hl = "de-DE" if (language or "de").lower().startswith("de") else language or "en-US"
-    gl = country or "de"
+    hl = _resolve_hl(language)
+    gl = (country or "de").upper()
     return f"https://apps.microsoft.com/search?query={q}&hl={hl}&gl={gl}"
 
 
@@ -308,7 +337,8 @@ def _scrape_detail(page, app_id: str) -> Dict:
 
     Returns a dict with description, rating_avg, rating_count, and up to 3
     review snippets. Every field degrades safely — a missing selector produces
-    an empty default rather than an error.
+    an empty default rather than an error. Also tries meta tags and full-page
+    text as fallback strategies.
     """
     result: Dict = {
         "id": app_id,
@@ -333,6 +363,24 @@ def _scrape_detail(page, app_id: str) -> Dict:
                     break
             except Exception:
                 continue
+        if not desc_texts:
+            try:
+                meta = page.query_selector("meta[property='og:description']")
+                if meta is not None:
+                    content = meta.get_attribute("content")
+                    if content and content.strip():
+                        desc_texts = [content.strip()]
+            except Exception:
+                pass
+        if not desc_texts:
+            try:
+                meta = page.query_selector("meta[name='description']")
+                if meta is not None:
+                    content = meta.get_attribute("content")
+                    if content and content.strip():
+                        desc_texts = [content.strip()]
+            except Exception:
+                pass
         if desc_texts:
             result["description"] = " ".join(desc_texts)
     except Exception:
@@ -343,14 +391,22 @@ def _scrape_detail(page, app_id: str) -> Dict:
             try:
                 el = page.query_selector(sel)
                 if el is not None:
-                    text = el.evaluate("e => (e.innerText||'').trim()")
+                    text = el.evaluate("e => (e.innerText||'').trim()") or el.get_attribute("content") or ""
                     if text:
                         val = text.replace(",", ".").replace("(", "").replace(")", "").strip()
                         try:
                             result["rating_avg"] = float(val)
                             break
                         except (ValueError, TypeError):
-                            continue
+                            pass
+                if sel.startswith("meta"):
+                    content = el.get_attribute("content") if el else None
+                    if content:
+                        try:
+                            result["rating_avg"] = float(content.strip())
+                            break
+                        except (ValueError, TypeError):
+                            pass
             except Exception:
                 continue
     except Exception:
@@ -396,8 +452,10 @@ def _scrape_detail(page, app_id: str) -> Dict:
     return result
 
 
-def _detail_url(app_id: str) -> str:
-    return f"https://apps.microsoft.com/detail/{app_id}"
+def _detail_url(app_id: str, *, country: str = "de", language: str = "de") -> str:
+    hl = _resolve_hl(language)
+    gl = (country or "de").upper()
+    return f"https://apps.microsoft.com/detail/{app_id}?hl={hl}&gl={gl}"
 
 
 def fetch_ms_detail(
@@ -408,6 +466,8 @@ def fetch_ms_detail(
     now: Optional[float] = None,
     fresh: bool = False,
     cap: int = _DETAIL_CAP,
+    country: str = "de",
+    language: str = "de",
 ) -> Dict[str, Dict]:
     """Scrape MS Store detail pages for a list of app IDs (SPA-aware, cache-backed).
 
@@ -428,7 +488,7 @@ def fetch_ms_detail(
 
     fresh_ids: List[str] = []
     for app_id in capped:
-        url = _detail_url(app_id)
+        url = _detail_url(app_id, country=country, language=language)
         key = CACHE.cache_key("BROWSER", url, {})
         path = CACHE.cache_path(cache_dir, key)
         if not fresh and CACHE.is_fresh(path, ttl, now_ts):
@@ -445,7 +505,7 @@ def fetch_ms_detail(
         return result
 
     for app_id in fresh_ids:
-        url = _detail_url(app_id)
+        url = _detail_url(app_id, country=country, language=language)
         if not POLITE.robots_allows(url):
             continue
 
@@ -470,7 +530,7 @@ def fetch_ms_detail(
             )
             page = context.new_page()
             for app_id in fresh_ids:
-                url = _detail_url(app_id)
+                url = _detail_url(app_id, country=country, language=language)
                 detail: Optional[Dict] = None
                 try:
                     POLITE.RateLimiter().wait(url)
@@ -487,7 +547,7 @@ def fetch_ms_detail(
                             if attempt == POLITE.MAX_RETRIES - 1:
                                 break
                     try:
-                        page.wait_for_load_state("networkidle", timeout=20000)
+                        page.wait_for_load_state("networkidle", timeout=25000)
                     except Exception:
                         pass
                     ready = False
@@ -495,17 +555,32 @@ def fetch_ms_detail(
                         "[data-testid='productDetails']",
                         "[data-testid='ProductDescription']",
                         "h1",
-                        "main",
-                        ".description",
+                        "section[aria-label*='description' i]",
+                        "section[aria-label*='Description' i]",
+                        "main[role='main']",
+                        "div[id='product-description']",
+                        "div[class*='description']",
+                        "div[class*='product-description']",
                         "[data-testid='reviewRating']",
+                        ".c-rating-stars",
+                        ".rating-stars",
+                        "meta[property='og:title']",
                     )
                     for sel in detail_ready_selectors:
                         try:
-                            page.wait_for_selector(sel, timeout=12000)
+                            page.wait_for_selector(sel, timeout=15000)
                             ready = True
                             break
                         except Exception:
                             continue
+                    if not ready:
+                        try:
+                            page.wait_for_timeout(5000)
+                            title = page.title()
+                            if title and title.strip() and "404" not in title.lower():
+                                ready = True
+                        except Exception:
+                            pass
                     if ready:
                         detail = _scrape_detail(page, app_id)
                 except Exception:
@@ -531,6 +606,8 @@ def enrich(
     *,
     cache_dir: str = "",
     fresh: bool = False,
+    country: str = "de",
+    language: str = "de",
     detail_fn: Optional[Callable[..., Dict[str, Dict]]] = None,
 ) -> Dict[str, Dict]:
     """Return enriched data for a list of MS app IDs (SPA-aware, never-blocking).
@@ -540,7 +617,10 @@ def enrich(
     """
     do_fetch = detail_fn or fetch_ms_detail
     try:
-        return do_fetch(app_ids, cache_dir=cache_dir, fresh=fresh)
+        return do_fetch(
+            app_ids, cache_dir=cache_dir, fresh=fresh,
+            country=country, language=language,
+        )
     except Exception:
         return {}
 
