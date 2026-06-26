@@ -375,7 +375,7 @@ class CollectPlayTests(unittest.TestCase):
             self.assertEqual(c["platform"], "play")
             self.assertIn("short_description", c)
             self.assertIn("full_description", c)
-        self.assertEqual(out["source_status"]["play_search"], "ok")
+        self.assertEqual(out["source_status"]["play_search"]["status"], "ok")
 
     def test_failing_play_search_marked_unavailable_never_blocks(self):
         out = collect.collect_play(
@@ -386,8 +386,9 @@ class CollectPlayTests(unittest.TestCase):
             similar_fn=lambda *a, **k: [],
             suggest_fn=lambda *a, **k: [],
         )
-        self.assertEqual(out["source_status"]["play_search"], "unavailable")
-        self.assertEqual(out["competitors"], [])  # no crash, empty result
+        entry = out["source_status"]["play_search"]
+        self.assertEqual(entry["status"], "unavailable")
+        self.assertEqual(len(out["competitors"]), 0)  # no crash, empty result
 
     def test_play_charts_and_suggest_collected(self):
         out = collect.collect_play(
@@ -402,8 +403,8 @@ class CollectPlayTests(unittest.TestCase):
         ids = [c["id"] for c in out["competitors"]]
         self.assertIn("com.chart1", ids)
         self.assertEqual(out["suggest_terms"], ["habit tracker", "routine app"])
-        self.assertEqual(out["source_status"]["play_charts"], "ok")
-        self.assertEqual(out["source_status"]["play_search_suggest"], "ok")
+        self.assertEqual(out["source_status"]["play_charts"]["status"], "ok")
+        self.assertEqual(out["source_status"]["play_search_suggest"]["status"], "ok")
 
     def test_play_similar_hop_adds_niche_deduped(self):
         def search_fn(term, **_k):
@@ -429,7 +430,9 @@ class CollectPlayTests(unittest.TestCase):
         self.assertIn("com.niche1", ids)
         self.assertIn("com.niche2", ids)
         self.assertEqual(ids.count("com.niche1"), 1)  # deduped
-        self.assertEqual(out["source_status"]["play_similar"], "ok")
+        entry = out["source_status"]["play_similar"]
+        self.assertEqual(entry["status"], "ok")
+        self.assertEqual(entry["result_count"], 2)
 
     def test_exception_in_any_play_collector_never_aborts(self):
         out = collect.collect_play(
@@ -441,7 +444,7 @@ class CollectPlayTests(unittest.TestCase):
             suggest_fn=lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")),
         )
         for src in ("play_charts", "play_similar", "play_search_suggest"):
-            self.assertEqual(out["source_status"][src], "unavailable")
+            self.assertEqual(out["source_status"][src]["status"], "unavailable")
         self.assertEqual(out["suggest_terms"], [])
 
     def test_deterministic_output(self):

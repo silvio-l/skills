@@ -46,6 +46,13 @@ def _row(cells: List[str]) -> str:
     return "| " + " | ".join(cells) + " |"
 
 
+def _entry_is_ok(entry):
+    """Test whether a source_status entry is ok (handles both dict and legacy str)."""
+    if isinstance(entry, dict):
+        return entry.get("status") == "ok"
+    return entry == "ok"
+
+
 def _md_escape(text) -> str:
     if text is None:
         return ""
@@ -139,6 +146,7 @@ def build_report(
     own_app_id = (config.get("own_app_id") or "").strip()
     modus_a = bool(own_app_id)
     has_play = bool(play_comps) or any(s.startswith("play_") for s in source_status)
+    en_without_us = config.get("language", "").lower() == "en" and config.get("country", "").lower() != "us"
 
     lines: List[str] = []
     lines.append(f"# ASO Research — {config['app_name']}")
@@ -180,6 +188,12 @@ def build_report(
         )
     else:
         lines.append("- **Mode:** B (pre-launch / idea only)")
+    if en_without_us:
+        lines.append(
+            "- :warning: **Language is EN but country is not US** — EN listing "
+            "recommendations below are derived from a non-US market crawl and should "
+            "NOT be treated as EN-market (US) findings."
+        )
     seeds = config.get("seed_keywords") or []
     if seeds:
         lines.append("- **Seed keywords:** " + ", ".join(seeds))
@@ -266,7 +280,7 @@ def build_report(
     # Microsoft Store qualitative signal (slice 05) — best-effort, qualitative
     # only. Surfaced when the MS source ran and returned entries; S1 reads it
     # as additional context, it is never scored (no MS slot model).
-    if ms_entries and source_status.get("ms") == "ok":
+    if ms_entries and _entry_is_ok(source_status.get("ms")):
         ms_titles = ", ".join(_md_escape(e.get("title", "")) for e in ms_entries[:8])
         lines.append("")
         lines.append(
@@ -371,6 +385,13 @@ def build_report(
     lines.append("")
     lines.append("### Apple")
     lines.append("")
+    if en_without_us:
+        lines.append(
+            ":warning: **Language is EN but country is not US** — the EN listing "
+            "recommendations below are derived from a non-US market crawl and should "
+            "NOT be treated as EN-market (US) findings."
+        )
+        lines.append("")
     lines.append(
         "1 recommended + 2 alternatives per Apple slot (Title 30 / Subtitle 30 "
         "/ hidden Keyword Field 100), validated by the H2 cross-check."
@@ -440,7 +461,7 @@ def build_report(
             "and Play autocomplete enriches the suggest set alongside Apple's."
         )
     # Microsoft Store (slice 05) — best-effort + qualitative-only.
-    if source_status.get("ms") == "ok":
+    if _entry_is_ok(source_status.get("ms")):
         lines.append("")
         lines.append(
             "Microsoft Store metadata collected **best-effort** via Playwright "
@@ -470,6 +491,39 @@ def build_report(
         "proprietary search-volume panel."
     )
     lines.append("")
+    lines.append("### Source Health")
+    lines.append("")
+    lines.append("| Source | Status | Count | Note |")
+    lines.append("| --- | --- | --- | --- |")
+    _order = (
+        ("apple_subtitle", "Apple Subtitle"),
+        ("apple_similar", "Apple Similar"),
+        ("apple_rss_charts", "Apple RSS Charts"),
+        ("reddit", "Reddit"),
+        ("apple_search_suggest", "Apple Search-Suggest"),
+        ("play_search", "Play Search"),
+        ("play_charts", "Play Charts"),
+        ("play_similar", "Play Similar"),
+        ("play_search_suggest", "Play Search-Suggest"),
+        ("ms", "Microsoft Store"),
+    )
+    for key, label in _order:
+        entry = source_status.get(key)
+        if entry is None:
+            continue
+        if isinstance(entry, dict):
+            status = entry.get("status", "?")
+            count = str(entry.get("result_count", "—"))
+            note = ""
+            if status == "ok":
+                status_display = f"ok ({count})" if entry.get("result_count") is not None else "ok"
+            else:
+                status_display = "unavailable"
+                note = _md_escape(entry.get("reason", ""))
+            lines.append(f"| {label} | {status_display} | {count} | {note} |")
+        else:
+            lines.append(f"| {label} | {entry} | — | |")
+    lines.append("")
     lines.append("**Sources that ran:** " + (", ".join(ran) if ran else "iTunes Search API"))
     if unavailable:
         lines.append(
@@ -492,8 +546,12 @@ def build_report(
     return "\n".join(lines)
 
 
-def _source_split(source_status: Dict[str, str]):
-    """Partition source_status into (ran, unavailable) for the methodology note."""
+def _source_split(source_status):
+    """Partition source_status into (ran_display, unavailable_display) for the methodology note.
+
+    Each entry is a structured dict: ``{"status":"ok","result_count":N}`` or
+    ``{"status":"unavailable","reason":"..."}``.
+    """
     order = (
         "apple_subtitle", "apple_similar", "apple_rss_charts",
         "reddit", "apple_search_suggest",
@@ -502,7 +560,18 @@ def _source_split(source_status: Dict[str, str]):
     )
     ran, unavailable = [], []
     for src in order:
-        if src not in source_status:
+        entry = source_status.get(src)
+        if entry is None:
             continue
-        (ran if source_status[src] == "ok" else unavailable).append(src)
+        if isinstance(entry, dict):
+            if entry.get("status") == "ok":
+                count = entry.get("result_count")
+                label = f"{src} ({count})" if count is not None else src
+                ran.append(label)
+            else:
+                reason = entry.get("reason", "unavailable")
+                unavailable.append(f"{src} ({reason})")
+        else:
+            # Legacy string format
+            (ran if entry == "ok" else unavailable).append(src)
     return ran, unavailable

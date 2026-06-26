@@ -253,14 +253,18 @@ class CollectMsTests(unittest.TestCase):
         for e in out["ms_entries"]:
             self.assertEqual(e["platform"], "ms")
             self.assertIn("description", e)
-        self.assertEqual(out["source_status"]["ms"], "ok")
+        entry = out["source_status"]["ms"]
+        self.assertEqual(entry["status"], "ok")
+        self.assertEqual(entry["result_count"], 1)
 
     def test_failing_ms_search_marked_unavailable_never_blocks(self):
         out = collect.collect_ms(
             self.config, seed_terms=["habit"],
             search_fn=lambda *a, **k: (_ for _ in ()).throw(RuntimeError("spa down")),
         )
-        self.assertEqual(out["source_status"]["ms"], "unavailable")
+        entry = out["source_status"]["ms"]
+        self.assertEqual(entry["status"], "unavailable")
+        self.assertIn("spa down", entry["reason"])
         self.assertEqual(out["ms_entries"], [])  # no crash, empty result
 
     def test_ms_entries_deduped(self):
@@ -286,7 +290,9 @@ class CollectMsTests(unittest.TestCase):
             self.config, seed_terms=["habit"],
             search_fn=lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")),
         )
-        self.assertEqual(out["source_status"]["ms"], "unavailable")
+        entry = out["source_status"]["ms"]
+        self.assertEqual(entry["status"], "unavailable")
+        self.assertIn("x", entry["reason"])
         self.assertEqual(out["ms_entries"], [])
 
     def test_deterministic_output(self):

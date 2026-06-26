@@ -350,9 +350,10 @@ def run(argv=None) -> int:
         suggest = deep["suggest_terms"]
         src_status = deep["source_status"]
         reddit_threads = deep["reddit_threads"]
-        for src, status in src_status.items():
-            if status != "ok":
-                print(f"[aso-research] source {src}: {status}", file=sys.stderr)
+        for src, entry in src_status.items():
+            if not collect._status_is_ok(entry):
+                reason = entry.get("reason", "unavailable") if isinstance(entry, dict) else entry
+                print(f"[aso-research] source {src}: unavailable — {reason}", file=sys.stderr)
         print(
             f"[aso-research] deep apple: {len(competitors)} competitors "
             f"({sum(1 for c in competitors if c.get('discovery') == 'niche_similar')} niche), "
@@ -365,10 +366,11 @@ def run(argv=None) -> int:
         )
         play_competitors = play["competitors"]
         play_suggest = play["suggest_terms"]
-        for src, status in play["source_status"].items():
-            src_status[src] = status
-            if status != "ok":
-                print(f"[aso-research] source {src}: {status}", file=sys.stderr)
+        for src, entry in play["source_status"].items():
+            src_status[src] = entry
+            if not collect._status_is_ok(entry):
+                reason = entry.get("reason", "unavailable") if isinstance(entry, dict) else entry
+                print(f"[aso-research] source {src}: unavailable — {reason}", file=sys.stderr)
         competitors = competitors + play_competitors
         suggest = suggest + [s for s in play_suggest if s not in suggest]
         print(
@@ -382,10 +384,11 @@ def run(argv=None) -> int:
             cache_dir=args.cache_dir, fresh=args.fresh,
         )
         ms_entries = ms["ms_entries"]
-        for src, status in ms["source_status"].items():
-            src_status[src] = status
-            if status != "ok":
-                print(f"[aso-research] source {src}: {status}", file=sys.stderr)
+        for src, entry in ms["source_status"].items():
+            src_status[src] = entry
+            if not collect._status_is_ok(entry):
+                reason = entry.get("reason", "unavailable") if isinstance(entry, dict) else entry
+                print(f"[aso-research] source {src}: unavailable — {reason}", file=sys.stderr)
         print(
             f"[aso-research] ms best-effort: {len(ms_entries)} qualitative entr(y/ies) "
             f"(not scored; feeds S1 as qualitative context)",

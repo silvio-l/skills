@@ -16,8 +16,13 @@ merge, niche de-dup, source-status tracking, never-blocking) is fully
 offline-testable with fixtures — the live collectors themselves are not
 unit-tested (they fail loud and their formats rot; see CLAUDE.md).
 
-A failing source is recorded as ``"unavailable"`` in ``source_status``
-and the pipeline continues — it never blocks.
+Source status entries are structured dicts::
+
+    {"status": "ok", "result_count": 42}
+    {"status": "unavailable", "reason": "ModuleNotFoundError: playwright"}
+
+A failing source records its reason and the pipeline continues — it never
+blocks.
 """
 
 from __future__ import annotations
@@ -44,6 +49,33 @@ def _safe(fn, *args, **kwargs):
         return fn(*args, **kwargs), None
     except Exception as exc:  # never-blocking
         return None, exc
+
+
+def _exc_reason(exc):
+    """Build a reason string from an exception: type + first line, truncated."""
+    exc_type = type(exc).__name__
+    msg = str(exc).split("\n")[0].strip()[:120]
+    return f"{exc_type}: {msg}" if msg else exc_type
+
+
+def _ok_status(count=None):
+    """Build a structured ok status entry."""
+    entry = {"status": "ok"}
+    if count is not None:
+        entry["result_count"] = count
+    return entry
+
+
+def _unavailable_status(reason):
+    """Build a structured unavailable status entry with a reason."""
+    return {"status": "unavailable", "reason": reason}
+
+
+def _status_is_ok(entry):
+    """Test whether a source status entry is ok (backward-compat helper)."""
+    if isinstance(entry, dict):
+        return entry.get("status") == "ok"
+    return entry == "ok"
 
 
 def collect_apple(
@@ -73,13 +105,14 @@ def collect_apple(
           "suggest_terms": [...],
           "chart_ids":     [...],
           "reddit_threads":[...],
-          "source_status": {"apple_subtitle": "ok"|"unavailable", ...},
+          "source_status": {"apple_subtitle": {"status":"ok","result_count":2}, ...},
         }
 
     Never-blocking: every collector is wrapped; a failure sets its
-    ``source_status`` to ``"unavailable"`` and the run continues.
+    ``source_status`` to ``{"status":"unavailable","reason":"..."}`` and the
+    run continues.
     """
-    source_status: Dict[str, str] = {}
+    source_status: Dict[str, Dict] = {}
     subtitle_fn = subtitle_fn or apple_browser.collect_subtitle
     similar_fn = similar_fn or apple_browser.collect_similar
     chart_fn = chart_fn or apple_rss.collect
@@ -96,7 +129,8 @@ def collect_apple(
 
     # --- Apple subtitle (Playwright) on the top-N strongest hits ---
     strongest = list(enriched[:subtitle_top_n])
-    subtitle_ok = False
+    subtitle_count = 0
+    subtitle_err = None
     for comp in strongest:
         cid = comp.get("id")
         if not cid:
@@ -106,16 +140,20 @@ def collect_apple(
         )
         if err is None and sub:
             by_id[cid] = merge_apple_slots(comp, subtitle=sub)
-            subtitle_ok = True
-    if not subtitle_ok and strongest:
-        source_status["apple_subtitle"] = "unavailable"
+            subtitle_count += 1
+        elif err is not None and subtitle_err is None:
+            subtitle_err = err
+    if subtitle_count == 0 and strongest:
+        reason = _exc_reason(subtitle_err) if subtitle_err else "empty: no subtitles obtained"
+        source_status["apple_subtitle"] = _unavailable_status(reason)
     else:
-        source_status["apple_subtitle"] = "ok"
+        source_status["apple_subtitle"] = _ok_status(subtitle_count)
     enriched = [by_id[c["id"]] if c.get("id") in by_id else c for c in enriched]
 
     # --- Similar-apps hop (1 hop from the ~5 strongest) -> niche competitors ---
     niche_ids: List[str] = []
-    hop_ok = False
+    similar_id_count = 0
+    hop_err = None
     for comp in enriched[:similar_top_n]:
         cid = comp.get("id")
         if not cid:
@@ -124,11 +162,18 @@ def collect_apple(
             similar_fn, cid, country=country, cache_dir=cache_dir, fresh=fresh
         )
         if err is None:
-            hop_ok = True
+            ids_this = len(sims or [])
+            similar_id_count += ids_this
             for sid in sims or []:
                 if sid not in by_id and sid not in niche_ids:
                     niche_ids.append(sid)
-    source_status["apple_similar"] = "ok" if hop_ok else "unavailable"
+        elif hop_err is None:
+            hop_err = err
+    if similar_id_count > 0:
+        source_status["apple_similar"] = _ok_status(similar_id_count)
+    else:
+        reason = _exc_reason(hop_err) if hop_err else "empty: no similar apps found"
+        source_status["apple_similar"] = _unavailable_status(reason)
 
     for sid in niche_ids:
         raw, err = _safe(lookup_fn, sid, country=country)
@@ -152,7 +197,10 @@ def collect_apple(
         cache_dir=cache_dir,
         fresh=fresh,
     )
-    source_status["apple_rss_charts"] = "unavailable" if cerr else "ok"
+    if cerr:
+        source_status["apple_rss_charts"] = _unavailable_status(_exc_reason(cerr))
+    else:
+        source_status["apple_rss_charts"] = _ok_status(len(chart_ids or []))
     chart_ids = chart_ids or []
 
     # --- Reddit .json (qualitative) ---
@@ -163,8 +211,12 @@ def collect_apple(
         cache_dir=cache_dir,
         fresh=fresh,
     )
-    source_status["reddit"] = "unavailable" if rerr else "ok"
-    threads = threads or []
+    if rerr:
+        source_status["reddit"] = _unavailable_status(_exc_reason(rerr))
+        threads = []
+    else:
+        threads = threads or []
+        source_status["reddit"] = _ok_status(len(threads))
 
     # --- Apple Search-Suggest (autocomplete) ---
     suggest, serr = _safe(
@@ -173,8 +225,12 @@ def collect_apple(
         cache_dir=cache_dir,
         fresh=fresh,
     )
-    source_status["apple_search_suggest"] = "unavailable" if serr else "ok"
-    suggest = suggest or []
+    if serr:
+        source_status["apple_search_suggest"] = _unavailable_status(_exc_reason(serr))
+        suggest = []
+    else:
+        suggest = suggest or []
+        source_status["apple_search_suggest"] = _ok_status(len(suggest))
 
     # deterministic re-sort: (-rating_count, id) keeps niche competitors in place
     enriched.sort(key=lambda c: (-(c.get("rating_count") or 0), str(c.get("id"))))
@@ -323,7 +379,7 @@ def collect_play(
     """
     import play as play_collector  # type: ignore
 
-    source_status: Dict[str, str] = {}
+    source_status: Dict[str, Dict] = {}
     search_fn = search_fn or play_collector.search
     lookup_fn = lookup_fn or play_collector.lookup
     chart_fn = chart_fn or play_collector.charts
@@ -338,34 +394,47 @@ def collect_play(
     enriched: List[Dict] = []
 
     # --- Play search (seed keywords + app name) ---
-    search_ok = False
+    play_search_count = 0
+    play_search_err = None
     for term in seed_terms:
         results, err = _play_safe(search_fn, term, country=country, cache_dir=cache_dir, fresh=fresh)
-        if err is None:
-            search_ok = True
-            for raw in results or []:
-                core = schema.map_play_to_core(raw)
-                if not core.get("id") or core["id"] in by_id:
-                    continue
-                by_id[core["id"]] = core
-                enriched.append(core)
-    source_status["play_search"] = "ok" if (search_ok or not seed_terms) else "unavailable"
+        if err is not None:
+            if play_search_err is None:
+                play_search_err = err
+            continue
+        for raw in results or []:
+            core = schema.map_play_to_core(raw)
+            if not core.get("id") or core["id"] in by_id:
+                continue
+            by_id[core["id"]] = core
+            enriched.append(core)
+            play_search_count += 1
+    if play_search_count > 0 or (not seed_terms):
+        source_status["play_search"] = _ok_status(play_search_count)
+    else:
+        reason = _exc_reason(play_search_err) if play_search_err else "empty: no search results"
+        source_status["play_search"] = _unavailable_status(reason)
 
     # --- Play category charts (deckel-limited) ---
     chart_raw, cerr = _play_safe(
         chart_fn, config.get("category", ""), country=country, cache_dir=cache_dir, fresh=fresh
     )
-    source_status["play_charts"] = "unavailable" if cerr else "ok"
-    for raw in chart_raw or []:
-        core = schema.map_play_to_core(raw)
-        if not core.get("id") or core["id"] in by_id:
-            continue
-        core["discovery"] = "chart"
-        by_id[core["id"]] = core
-        enriched.append(core)
+    if cerr:
+        source_status["play_charts"] = _unavailable_status(_exc_reason(cerr))
+    else:
+        chart_raw = chart_raw or []
+        for raw in chart_raw:
+            core = schema.map_play_to_core(raw)
+            if not core.get("id") or core["id"] in by_id:
+                continue
+            core["discovery"] = "chart"
+            by_id[core["id"]] = core
+            enriched.append(core)
+        source_status["play_charts"] = _ok_status(len(chart_raw))
 
     # --- Play similar-apps hop (1 hop from the strongest) -> niche competitors ---
-    hop_ok = False
+    play_similar_count = 0
+    play_similar_err = None
     niche_ids: List[str] = []
     strongest = sorted(
         enriched, key=lambda c: (-(c.get("rating_count") or 0), str(c.get("id")))
@@ -376,11 +445,18 @@ def collect_play(
             continue
         sims, err = _play_safe(similar_fn, cid, country=country, cache_dir=cache_dir, fresh=fresh)
         if err is None:
-            hop_ok = True
+            ids_this = len(sims or [])
+            play_similar_count += ids_this
             for sid in sims or []:
                 if sid not in by_id and sid not in niche_ids:
                     niche_ids.append(sid)
-    source_status["play_similar"] = "ok" if hop_ok else "unavailable"
+        elif play_similar_err is None:
+            play_similar_err = err
+    if play_similar_count > 0:
+        source_status["play_similar"] = _ok_status(play_similar_count)
+    else:
+        reason = _exc_reason(play_similar_err) if play_similar_err else "empty: no similar apps found"
+        source_status["play_similar"] = _unavailable_status(reason)
 
     for sid in niche_ids:
         raw, err = _play_safe(lookup_fn, sid, country=country)
@@ -398,8 +474,12 @@ def collect_play(
     suggest, serr = _play_safe(
         suggest_fn, seed_terms, country=country, cache_dir=cache_dir, fresh=fresh
     )
-    source_status["play_search_suggest"] = "unavailable" if serr else "ok"
-    suggest = suggest or []
+    if serr:
+        source_status["play_search_suggest"] = _unavailable_status(_exc_reason(serr))
+        suggest = []
+    else:
+        suggest = suggest or []
+        source_status["play_search_suggest"] = _ok_status(len(suggest))
 
     enriched.sort(key=lambda c: (-(c.get("rating_count") or 0), str(c.get("id"))))
     return {
@@ -455,7 +535,7 @@ def collect_ms(
     """
     import ms as ms_collector  # type: ignore
 
-    source_status: Dict[str, str] = {}
+    source_status: Dict[str, Dict] = {}
     search_fn = search_fn or ms_collector.search
 
     seed_terms = list(seed_terms or config.get("seed_keywords") or [])
@@ -464,7 +544,7 @@ def collect_ms(
 
     by_id: Dict[str, Dict] = {}
     ms_entries: List[Dict] = []
-    ms_ok = False
+    ms_err = None
 
     # --- MS best-effort search (seed keywords + app name) ---
     for term in seed_terms:
@@ -472,8 +552,9 @@ def collect_ms(
             search_fn, term, country=country, cache_dir=cache_dir, fresh=fresh
         )
         if err is not None:
+            if ms_err is None:
+                ms_err = err
             continue
-        ms_ok = True
         for raw in results or []:
             core = schema.map_ms_to_core(raw)
             if not core.get("id") or core["id"] in by_id:
@@ -481,8 +562,11 @@ def collect_ms(
             by_id[core["id"]] = core
             ms_entries.append(core)
 
-    # Reachable = at least one search call did not raise (even if 0 results).
-    source_status["ms"] = "ok" if (ms_ok or not seed_terms) else "unavailable"
+    if ms_entries or not seed_terms:
+        source_status["ms"] = _ok_status(len(ms_entries))
+    else:
+        reason = _exc_reason(ms_err) if ms_err else "empty: no MS results"
+        source_status["ms"] = _unavailable_status(reason)
 
     ms_entries.sort(key=lambda c: (-(c.get("rating_count") or 0), str(c.get("id"))))
     return {

@@ -18,6 +18,8 @@ import urllib.parse
 import urllib.request
 from typing import Callable, Dict, List, Optional
 
+_HTML_SNIFF = b"<html"
+
 import cache as CACHE
 import politeness as POLITE
 
@@ -73,7 +75,13 @@ def fetch_suggest(
     if payload is None:
         return []
     CACHE.write_cache(path, payload, now=now_ts)
-    return _parse(json.loads(payload.decode("utf-8")))
+    try:
+        parsed = json.loads(payload.decode("utf-8"))
+    except json.JSONDecodeError:
+        if payload.lower().startswith(_HTML_SNIFF):
+            raise ValueError("non-JSON response: HTML interstitial from Apple Search-Suggest")
+        raise
+    return _parse(parsed)
 
 
 def _parse(raw) -> List[str]:
@@ -113,6 +121,8 @@ def collect(
     for term in seed_terms:
         try:
             suggestions = do_fetch(term, cache_dir=cache_dir, fresh=fresh)
+        except ValueError:
+            raise
         except Exception:
             continue
         for s in suggestions:

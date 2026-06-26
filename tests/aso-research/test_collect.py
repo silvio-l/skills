@@ -69,7 +69,9 @@ class CollectAppleTests(unittest.TestCase):
         )
         by_id = {c["id"]: c for c in out["competitors"]}
         self.assertEqual(by_id["1"]["subtitle"], "Subtitle for 1")
-        self.assertEqual(out["source_status"]["apple_subtitle"], "ok")
+        entry = out["source_status"]["apple_subtitle"]
+        self.assertEqual(entry["status"], "ok")
+        self.assertEqual(entry["result_count"], 2)
 
     def test_failing_subtitle_marked_unavailable_and_never_blocks(self):
         def boom(cid, **_k):
@@ -84,7 +86,9 @@ class CollectAppleTests(unittest.TestCase):
             suggest_fn=lambda *a, **k: [],
             lookup_fn=lambda *a, **k: {},
         )
-        self.assertEqual(out["source_status"]["apple_subtitle"], "unavailable")
+        entry = out["source_status"]["apple_subtitle"]
+        self.assertEqual(entry["status"], "unavailable")
+        self.assertIn("browser down", entry["reason"])
         # pipeline still produced competitors
         self.assertTrue(out["competitors"])
 
@@ -120,7 +124,9 @@ class CollectAppleTests(unittest.TestCase):
         self.assertIn("92", ids)
         # deduped: 91 appears once even though two sources listed it
         self.assertEqual(ids.count("91"), 1)
-        self.assertEqual(out["source_status"]["apple_similar"], "ok")
+        entry = out["source_status"]["apple_similar"]
+        self.assertEqual(entry["status"], "ok")
+        self.assertEqual(entry["result_count"], 3)
 
     def test_suggest_and_chart_and_reddit_collected(self):
         out = collect.collect_apple(
@@ -136,7 +142,7 @@ class CollectAppleTests(unittest.TestCase):
         self.assertEqual(out["suggest_terms"], ["habit tracker", "routine"])
         self.assertEqual(out["reddit_threads"], [{"title": "t", "subreddit": "r"}])
         for src in ("apple_rss_charts", "reddit", "apple_search_suggest"):
-            self.assertEqual(out["source_status"][src], "ok")
+            self.assertEqual(out["source_status"][src]["status"], "ok")
 
     def test_exception_in_any_collector_never_aborts(self):
         out = collect.collect_apple(
@@ -148,9 +154,9 @@ class CollectAppleTests(unittest.TestCase):
             suggest_fn=lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")),
             lookup_fn=lambda *a, **k: {},
         )
-        self.assertEqual(out["source_status"]["apple_rss_charts"], "unavailable")
-        self.assertEqual(out["source_status"]["reddit"], "unavailable")
-        self.assertEqual(out["source_status"]["apple_search_suggest"], "unavailable")
+        self.assertEqual(out["source_status"]["apple_rss_charts"]["status"], "unavailable")
+        self.assertEqual(out["source_status"]["reddit"]["status"], "unavailable")
+        self.assertEqual(out["source_status"]["apple_search_suggest"]["status"], "unavailable")
         self.assertEqual(out["chart_ids"], [])
         self.assertEqual(out["suggest_terms"], [])
 
