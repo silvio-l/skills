@@ -248,11 +248,24 @@ def _assemble(run_dir: str) -> int:
         fh.write(report_md)
     print(f"[aso-research] assembled report.md in {run_dir}", file=sys.stderr)
     print(os.path.abspath(os.path.join(run_dir, "report.md")))
+
+    report_html = report.build_report_html(
+        config, competitors, keywords,
+        now=now, source_status=source_status, reddit_threads=reddit_threads,
+        condensed_profiles=condensed_profiles,
+        s1_output=s1_output, s2_output=s2_output, h2_output=h2_output,
+        s2_play_output=s2_play_output, h2_play_output=h2_play_output,
+        ms_entries=ms_entries,
+        brand_conflicts=brand_conflicts,
+    )
+    with open(os.path.join(run_dir, "report.html"), "w", encoding="utf-8") as fh:
+        fh.write(report_html)
+    print(f"[aso-research] assembled report.html in {run_dir}", file=sys.stderr)
     return 0
 
 
 def _write_report(run_dir, config, competitors, keywords, source_status, reddit_threads, now, ms_entries=None, brand_conflicts=None):
-    """Write report.md from whatever subagent outputs already exist (if any)."""
+    """Write report.md + report.html from whatever subagent outputs already exist (if any)."""
     condensed_profiles = _load_json(os.path.join(run_dir, _H1_CONDENSED)) or []
     s1_output = _load_json(os.path.join(run_dir, _S1_ANALYSIS))
     s2_output = _load_json(os.path.join(run_dir, _S2_LISTING))
@@ -270,6 +283,17 @@ def _write_report(run_dir, config, competitors, keywords, source_status, reddit_
     )
     with open(os.path.join(run_dir, "report.md"), "w", encoding="utf-8") as fh:
         fh.write(report_md)
+    report_html = report.build_report_html(
+        config, competitors, keywords,
+        now=now, source_status=source_status, reddit_threads=reddit_threads,
+        condensed_profiles=condensed_profiles,
+        s1_output=s1_output, s2_output=s2_output, h2_output=h2_output,
+        s2_play_output=s2_play_output, h2_play_output=h2_play_output,
+        ms_entries=ms_entries or [],
+        brand_conflicts=brand_conflicts or [],
+    )
+    with open(os.path.join(run_dir, "report.html"), "w", encoding="utf-8") as fh:
+        fh.write(report_html)
 
 
 # Channels the pipeline exercised (kept stable for run-summary consumers:

@@ -1,0 +1,500 @@
+#!/usr/bin/env python3
+"""Tests for the HTML report builder (slice 06) — report.build_report_html().
+
+Run from the repo root:
+    python3 -m unittest discover -s tests/aso-research -q
+
+Covers AC1-6: self-contained single <html> with inline <style> and no
+external assets; equal data to Markdown twin; brand conflicts visually
+prominent; source-health distinguishes ok/unavailable/ok-empty with
+result counts; full landscape renders.
+"""
+
+import datetime
+import pathlib
+import re
+import sys
+import unittest
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
+SCRIPTS_DIR = REPO_ROOT / "skills" / "aso-research" / "scripts"
+sys.path.insert(0, str(SCRIPTS_DIR))
+sys.dont_write_bytecode = True
+
+import report  # noqa: E402
+
+NOW = datetime.datetime(2026, 6, 26, 12, 0, 0)
+
+
+def _config(*, own_app_id=None, country="de", language="de"):
+    return {
+        "app_name": "Habit Hero",
+        "description": "A gamified habit tracker app",
+        "category": "health_fitness",
+        "country": country,
+        "language": language,
+        "own_app_id": own_app_id,
+        "seed_keywords": ["habit", "tracker"],
+    }
+
+
+def _competitors():
+    return [
+        {"id": "1", "title": "Habit Tracker", "developer": "DevA",
+         "category": "health_fitness", "rating_avg": 4.5, "rating_count": 1000,
+         "price_model": "free", "subtitle": "Daily Routine",
+         "discovery": "chart/search", "platform": "apple"},
+        {"id": "2", "title": "Streak Buddy", "developer": "DevB",
+         "category": "health_fitness", "rating_avg": 4.7, "rating_count": 500,
+         "price_model": "paid", "subtitle": "",
+         "discovery": "niche_similar", "platform": "apple"},
+    ]
+
+
+def _keywords():
+    return [
+        {"term": "habit", "competition": 20, "relevance": 80, "opportunity": 64,
+         "split": "primary-candidate", "is_gap": False, "suggest": True},
+        {"term": "tracker", "competition": 40, "relevance": 70, "opportunity": 42,
+         "split": "primary-candidate", "is_gap": False, "suggest": False},
+        {"term": "routine", "competition": 10, "relevance": 60, "opportunity": 54,
+         "split": "primary-candidate", "is_gap": True, "suggest": False},
+        {"term": "daily streak", "competition": 60, "relevance": 50, "opportunity": 20,
+         "split": "long-tail-candidate", "is_gap": False, "suggest": False},
+        {"term": "gamified", "competition": 5, "relevance": 55, "opportunity": 52,
+         "split": "long-tail-candidate", "is_gap": False, "suggest": True},
+    ]
+
+
+def _s1():
+    return {
+        "niches": ["gamified habits", "streak motivation"],
+        "dominant_themes": ["routine building", "daily reminders"],
+        "leader_positioning": ["Spotify-style gamification"],
+        "audiences": ["students", "professionals"],
+        "missing_themes": ["accountability partners"],
+        "threats": ["Apple native Reminders integration"],
+    }
+
+
+def _s2():
+    title = "Habit Hero Tracker"
+    subtitle = "Build Daily Routines"
+    kw = "habit,tracker,routine,streak"
+    return {
+        "store": "apple",
+        "slots": [
+            {"slot": "title", "recommended": {"text": title, "char_count": len(title)},
+             "alternatives": [{"text": "Habit Hero", "char_count": 10},
+                              {"text": "Daily Habit", "char_count": 10}]},
+            {"slot": "subtitle", "recommended": {"text": subtitle, "char_count": len(subtitle)},
+             "alternatives": [{"text": "Routine Builder", "char_count": 14},
+                              {"text": "Streak & Habit", "char_count": 14}]},
+            {"slot": "keyword_field", "recommended": {"text": kw, "char_count": len(kw)},
+             "alternatives": [{"text": "habit,routine,daily", "char_count": 19},
+                              {"text": "tracker,streak", "char_count": 14}]},
+        ],
+    }
+
+
+def _play_s2():
+    title = "Habit Hero Tracker"
+    short = "Build daily habits & routines that stick"
+    long_text = "Habit Hero is the best habit tracker."
+    return {
+        "store": "play",
+        "slots": [
+            {"slot": "title", "recommended": {"text": title, "char_count": len(title)},
+             "alternatives": [{"text": "Habit Hero", "char_count": 10},
+                              {"text": "Daily Habit", "char_count": 10}]},
+            {"slot": "short", "recommended": {"text": short, "char_count": len(short)},
+             "alternatives": [{"text": "Track routines daily", "char_count": 20},
+                              {"text": "Build streaks now", "char_count": 17}]},
+            {"slot": "long", "recommended": {"text": long_text, "char_count": len(long_text)},
+             "alternatives": [{"text": "alt long one", "char_count": 11},
+                              {"text": "alt long two", "char_count": 11}]},
+        ],
+    }
+
+
+def _play_competitors():
+    return [
+        {"id": "com.a", "platform": "play", "title": "Habit Hero", "developer": "DevA",
+         "category": "health_fitness", "rating_avg": 4.5, "rating_count": 1000,
+         "price_model": "free", "discovery": "chart/search"},
+    ]
+
+
+def _h2_ok():
+    return {"status": "ok", "findings": [], "note": "every keyword evidence-conform."}
+
+
+def _brand_conflicts():
+    return [
+        {
+            "term": "diktieren zu text",
+            "forbidden_match": "diktieren",
+            "replacement": "Spracheingabe",
+            "opportunity": 80,
+            "relevance": 70,
+            "platform": "apple",
+            "strategies": ["keyword-field-only", "alternative phrasing",
+                           "non-brand landingpage", "accept deliberately"],
+        },
+        {
+            "term": "dictate app",
+            "forbidden_match": "dictate",
+            "replacement": "speak",
+            "opportunity": 60,
+            "relevance": 55,
+            "platform": "apple",
+            "strategies": ["keyword-field-only", "alternative phrasing",
+                           "non-brand landingpage", "accept deliberately"],
+        },
+    ]
+
+
+class SelfContainedHTMLTests(unittest.TestCase):
+    """AC1: build_report_html returns self-contained HTML string."""
+
+    def test_returns_string(self):
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW)
+        self.assertIsInstance(html, str)
+        self.assertGreater(len(html), 500)
+
+    def test_single_html_document(self):
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW)
+        # Exactly one opening <html> tag
+        self.assertEqual(html.lower().count("<html"), 1, "Must contain exactly one <html> tag")
+        # Contains closing </html>
+        self.assertIn("</html>", html)
+
+    def test_has_doctype(self):
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW)
+        self.assertTrue(html.strip().lower().startswith("<!doctype html"))
+
+    def test_has_inline_style_block(self):
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW)
+        self.assertIn("<style>", html)
+        self.assertIn("</style>", html)
+
+    def test_no_external_assets(self):
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW)
+        # No external src= or href= referencing network assets
+        self.assertNotIn('src="http', html)
+        self.assertNotIn("src='http", html)
+        self.assertNotIn('href="http', html)
+        self.assertNotIn("href='http", html)
+        # No link rel=stylesheet to external files
+        self.assertNotIn('rel="stylesheet"', html.lower())
+
+    def test_no_external_fonts(self):
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW)
+        self.assertNotIn("@import url(", html)
+        self.assertNotIn("fonts.googleapis.com", html)
+        self.assertNotIn("fonts.gstatic.com", html)
+
+    def test_no_script_tags(self):
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW)
+        self.assertNotIn("<script", html.lower())
+
+
+class FullLandscapeTests(unittest.TestCase):
+    """AC6: Renders full landscape — all sections present."""
+
+    def test_all_sections_present(self):
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW,
+            s1_output=_s1(), s2_output=_s2(), h2_output=_h2_ok(),
+        )
+        sections = [
+            "Executive Summary",
+            "Competitive Landscape",
+            "Positioning Map",
+            "Keyword Report",
+            "Opportunities",
+            "Risks / Threats",
+            "Listing Recommendation",
+            "Methodology",
+        ]
+        for name in sections:
+            with self.subTest(section=name):
+                self.assertIn(name, html, f"missing section: {name}")
+
+    def test_run_meta_present(self):
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW)
+        self.assertIn("Habit Hero", html)
+        self.assertIn("2026-06-26", html)
+
+
+class DataParityTests(unittest.TestCase):
+    """AC3: HTML contains same data as the Markdown twin."""
+
+    def test_keyword_table_contains_terms(self):
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW)
+        for term in ["habit", "tracker", "routine"]:
+            with self.subTest(term=term):
+                self.assertIn(term, html)
+
+    def test_keyword_scores_in_html(self):
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW)
+        self.assertIn("64", html)   # habit opportunity
+        self.assertIn("42", html)   # tracker opportunity
+
+    def test_competitor_data_in_html(self):
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW)
+        self.assertIn("Habit Tracker", html)
+        self.assertIn("Streak Buddy", html)
+        self.assertIn("DevA", html)
+        self.assertIn("DevB", html)
+
+    def test_opportunity_buckets_in_html(self):
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW)
+        self.assertIn("Quick win", html)
+        self.assertIn("Niche lever", html)
+        self.assertIn("Coverage gap", html)
+
+    def test_listing_slots_in_html(self):
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW,
+            s2_output=_s2(), h2_output=_h2_ok(),
+        )
+        self.assertIn("Habit Hero Tracker", html)   # recommended title
+        self.assertIn("Build Daily Routines", html)  # recommended subtitle
+        self.assertIn("char", html)                  # char counts shown
+
+    def test_play_listing_when_play_present(self):
+        html = report.build_report_html(
+            _config(), _play_competitors(), _keywords(), now=NOW,
+            s2_output=_s2(), h2_output=_h2_ok(),
+            s2_play_output=_play_s2(), h2_play_output=_h2_ok(),
+        )
+        self.assertIn("Google Play", html)
+        self.assertIn("Title 30", html)
+        self.assertIn("Short 80", html)
+        self.assertIn("Long 4000", html)
+
+    def test_modus_a_renders_self_audit(self):
+        s1 = _s1()
+        s1["own_app_audit"] = ["own subtitle is generic"]
+        html = report.build_report_html(
+            _config(own_app_id="1"), _competitors(), _keywords(), now=NOW,
+            s1_output=s1, s2_output=_s2(), h2_output=_h2_ok(),
+        )
+        self.assertIn("Self-audit", html)
+        self.assertIn("own subtitle is generic", html)
+
+
+class BrandConflictVisibilityTests(unittest.TestCase):
+    """AC4: Brand conflicts are visually prominent (badge/highlight)."""
+
+    def test_brand_conflicts_section_present_when_conflicts_exist(self):
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW,
+            brand_conflicts=_brand_conflicts(),
+        )
+        self.assertIn("Brand Conflict", html)
+
+    def test_conflict_terms_visible(self):
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW,
+            brand_conflicts=_brand_conflicts(),
+        )
+        self.assertIn("diktieren", html)
+        self.assertIn("dictate", html)
+
+    def test_conflict_replacements_visible(self):
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW,
+            brand_conflicts=_brand_conflicts(),
+        )
+        self.assertIn("Spracheingabe", html)
+        self.assertIn("speak", html)
+
+    def test_strategies_visible(self):
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW,
+            brand_conflicts=_brand_conflicts(),
+        )
+        self.assertIn("keyword-field-only", html)
+        self.assertIn("alternative phrasing", html)
+
+    def test_brand_conflict_uses_badge_or_warning_class(self):
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW,
+            brand_conflicts=_brand_conflicts(),
+        )
+        # Must have a visual indicator — badge, conflict class, or warning styling
+        has_visual = (
+            'class="badge' in html
+            or 'class="conflict' in html
+            or 'class="brand' in html
+            or "class='brand" in html
+            or 'brand-conflict' in html.lower()
+        )
+        self.assertTrue(has_visual, "brand conflicts must have visual prominence markers")
+
+
+class SourceHealthBoardTests(unittest.TestCase):
+    """AC5: Source-health board distinguishes ok / unavailable-with-reason / ok-empty."""
+
+    def test_source_health_board_present_in_methodology(self):
+        status = {
+            "apple_subtitle": {"status": "ok", "result_count": 3},
+            "apple_similar": {"status": "unavailable",
+                              "reason": "RuntimeError: browser timeout"},
+        }
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW,
+            source_status=status,
+        )
+        self.assertIn("Source Health", html)
+        self.assertIn("Apple Subtitle", html)
+        self.assertIn("Apple Similar", html)
+
+    def test_ok_source_shows_count(self):
+        status = {
+            "apple_subtitle": {"status": "ok", "result_count": 3},
+        }
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW,
+            source_status=status,
+        )
+        self.assertIn("3", html)
+        self.assertIn("ok", html.lower())
+
+    def test_unavailable_source_shows_reason(self):
+        status = {
+            "apple_similar": {"status": "unavailable",
+                              "reason": "RuntimeError: browser timeout"},
+        }
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW,
+            source_status=status,
+        )
+        self.assertIn("unavailable", html.lower())
+        self.assertIn("browser timeout", html)
+
+    def test_ok_empty_source_shows_zero_result(self):
+        status = {
+            "apple_search_suggest": {"status": "ok", "result_count": 0},
+        }
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW,
+            source_status=status,
+        )
+        self.assertIn("0", html)
+
+    def test_source_health_uses_distinct_status_classes(self):
+        status = {
+            "apple_subtitle": {"status": "ok", "result_count": 3},
+            "apple_similar": {"status": "unavailable",
+                              "reason": "RuntimeError: browser timeout"},
+            "apple_rss_charts": {"status": "ok", "result_count": 0},
+        }
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW,
+            source_status=status,
+        )
+        # Check that different status types have distinct visual markers
+        has_ok_class = ('class="ok' in html.lower()
+                        or "class='ok" in html.lower()
+                        or 'status-ok' in html
+                        or 'ok"' in html.lower())
+        has_unavailable_class = ('class="unavailable' in html.lower()
+                                 or "class='unavailable" in html.lower()
+                                 or 'status-unavailable' in html
+                                 or 'unavailable"' in html.lower())
+        self.assertTrue(has_ok_class, "must have ok status styling")
+        self.assertTrue(has_unavailable_class, "must have unavailable status styling")
+
+
+class MethodologyHonestyTests(unittest.TestCase):
+    """Methodology/honesty section renders correctly in HTML."""
+
+    def test_proxy_explanation_in_html(self):
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW)
+        self.assertIn("proxy", html.lower())
+        self.assertIn("not real search volume", html.lower())
+
+    def test_en_without_en_market_caveat(self):
+        html = report.build_report_html(
+            _config(country="de", language="en"),
+            _competitors(), _keywords(), now=NOW)
+        self.assertIn("EN", html)
+        self.assertIn("not US", html)
+
+    def test_no_caveat_when_us_en(self):
+        html = report.build_report_html(
+            _config(country="us", language="en"),
+            _competitors(), _keywords(), now=NOW)
+        self.assertNotIn("not US", html)
+
+
+class DeterminismTests(unittest.TestCase):
+    """HTML output is deterministic for identical input."""
+
+    def test_identical_input_produces_identical_html(self):
+        a = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW,
+            s1_output=_s1(), s2_output=_s2(), h2_output=_h2_ok(),
+            brand_conflicts=_brand_conflicts(),
+            source_status={"apple_subtitle": {"status": "ok", "result_count": 3}},
+        )
+        b = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW,
+            s1_output=_s1(), s2_output=_s2(), h2_output=_h2_ok(),
+            brand_conflicts=_brand_conflicts(),
+            source_status={"apple_subtitle": {"status": "ok", "result_count": 3}},
+        )
+        self.assertEqual(a, b)
+
+    def test_no_subagent_output_still_produces_valid_html(self):
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW)
+        self.assertIn("<html", html.lower())
+        self.assertIn("Executive Summary", html)
+
+
+class MSQualitativeTests(unittest.TestCase):
+    """MS Store qualitative data renders in HTML."""
+
+    def test_ms_entries_rendered_when_present_and_ok(self):
+        ms_entries = [
+            {"title": "Habit Tracker Pro", "platform": "ms",
+             "developer": "MsDev", "category": "health_fitness",
+             "rating_avg": 4.2, "rating_count": 200, "price_model": "free"},
+        ]
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW,
+            ms_entries=ms_entries,
+            source_status={"ms": {"status": "ok", "result_count": 1}},
+        )
+        self.assertIn("Microsoft Store", html)
+        self.assertIn("Habit Tracker Pro", html)
+
+    def test_ms_not_rendered_when_unavailable(self):
+        html = report.build_report_html(
+            _config(), _competitors(), _keywords(), now=NOW,
+            source_status={"ms": {"status": "unavailable",
+                                  "reason": "SPA not reachable"}},
+        )
+        self.assertIn("Microsoft Store", html)  # still mentioned in source health
+        self.assertIn("unavailable", html.lower())
+
+
+if __name__ == "__main__":
+    unittest.main()
