@@ -278,7 +278,7 @@ class MSIsolationTests(unittest.TestCase):
         profiles = [{"app_id": "1", "title": "Habit Tracker",
                      "positioning": "p", "top_keywords": ["habit"], "tag": "t"}]
         rep = condense.build_llm_input(
-            profiles, out["keywords"], [], config=self._config(),
+            profiles, out["keywords"], config=self._config(),
             ms_entries=[_ms_entry()],
         )
         # qualitative_ms carries the MS entry...
@@ -302,7 +302,7 @@ class MSQualitativeWiringTests(unittest.TestCase):
 
     def test_ms_appears_as_qualitative_context(self):
         rep = condense.build_llm_input(
-            [], [], [], config=self._config(), ms_entries=[_ms_entry()],
+            [], [], config=self._config(), ms_entries=[_ms_entry()],
         )
         self.assertTrue(rep["qualitative_ms"])
         ms = rep["qualitative_ms"][0]
@@ -316,7 +316,7 @@ class MSQualitativeWiringTests(unittest.TestCase):
               "top_keywords": [], "tag": "t"}],
             [{"term": "habit", "competition": 20, "relevance": 80,
               "opportunity": 64, "split": "primary-candidate", "is_gap": False}],
-            [], config=self._config(), ms_entries=[_ms_entry()],
+            config=self._config(), ms_entries=[_ms_entry()],
         )
         self.assertEqual(len(rep["condensed_profiles"]), 1)  # only the Apple/Play one
         for prof in rep["condensed_profiles"]:
@@ -328,13 +328,13 @@ class MSQualitativeWiringTests(unittest.TestCase):
                                    "description": "d", "ratingCount": i, "free": True})
             for i in range(30)
         ]
-        a = condense.build_llm_input([], [], [], config=self._config(), ms_entries=many)
-        b = condense.build_llm_input([], [], [], config=self._config(), ms_entries=many)
+        a = condense.build_llm_input([], [], config=self._config(), ms_entries=many)
+        b = condense.build_llm_input([], [], config=self._config(), ms_entries=many)
         self.assertLessEqual(len(a["qualitative_ms"]), condense._MS_CAP)
         self.assertEqual(a, b)
 
     def test_no_ms_entries_yields_empty_qualitative(self):
-        rep = condense.build_llm_input([], [], [], config=self._config())
+        rep = condense.build_llm_input([], [], config=self._config())
         self.assertEqual(rep["qualitative_ms"], [])
 
 

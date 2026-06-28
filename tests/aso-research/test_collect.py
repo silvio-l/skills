@@ -63,7 +63,6 @@ class CollectAppleTests(unittest.TestCase):
             subtitle_fn=sub_fn,
             similar_fn=lambda *a, **k: [],
             chart_fn=lambda *a, **k: [],
-            reddit_fn=lambda *a, **k: [],
             suggest_fn=lambda *a, **k: [],
             lookup_fn=lambda *a, **k: {},
         )
@@ -82,7 +81,6 @@ class CollectAppleTests(unittest.TestCase):
             subtitle_fn=boom,
             similar_fn=lambda *a, **k: [],
             chart_fn=lambda *a, **k: [],
-            reddit_fn=lambda *a, **k: [],
             suggest_fn=lambda *a, **k: [],
             lookup_fn=lambda *a, **k: {},
         )
@@ -115,7 +113,6 @@ class CollectAppleTests(unittest.TestCase):
             subtitle_fn=lambda *a, **k: "",
             similar_fn=sim_fn,
             chart_fn=lambda *a, **k: [],
-            reddit_fn=lambda *a, **k: [],
             suggest_fn=lambda *a, **k: [],
             lookup_fn=lookup_fn,
         )
@@ -128,20 +125,18 @@ class CollectAppleTests(unittest.TestCase):
         self.assertEqual(entry["status"], "ok")
         self.assertEqual(entry["result_count"], 3)
 
-    def test_suggest_and_chart_and_reddit_collected(self):
+    def test_suggest_and_chart_collected(self):
         out = collect.collect_apple(
             self.config, self.competitors,
             subtitle_fn=lambda *a, **k: "",
             similar_fn=lambda *a, **k: [],
             chart_fn=lambda *a, **k: ["100", "101"],
-            reddit_fn=lambda *a, **k: [{"title": "t", "subreddit": "r"}],
             suggest_fn=lambda *a, **k: ["habit tracker", "routine"],
             lookup_fn=lambda *a, **k: {},
         )
         self.assertEqual(out["chart_ids"], ["100", "101"])
         self.assertEqual(out["suggest_terms"], ["habit tracker", "routine"])
-        self.assertEqual(out["reddit_threads"], [{"title": "t", "subreddit": "r"}])
-        for src in ("apple_rss_charts", "reddit", "apple_search_suggest"):
+        for src in ("apple_rss_charts", "apple_search_suggest"):
             self.assertEqual(out["source_status"][src]["status"], "ok")
 
     def test_exception_in_any_collector_never_aborts(self):
@@ -150,12 +145,10 @@ class CollectAppleTests(unittest.TestCase):
             subtitle_fn=lambda *a, **k: "",
             similar_fn=lambda *a, **k: [],
             chart_fn=lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")),
-            reddit_fn=lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")),
             suggest_fn=lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")),
             lookup_fn=lambda *a, **k: {},
         )
         self.assertEqual(out["source_status"]["apple_rss_charts"]["status"], "unavailable")
-        self.assertEqual(out["source_status"]["reddit"]["status"], "unavailable")
         self.assertEqual(out["source_status"]["apple_search_suggest"]["status"], "unavailable")
         self.assertEqual(out["chart_ids"], [])
         self.assertEqual(out["suggest_terms"], [])
@@ -165,7 +158,6 @@ class CollectAppleTests(unittest.TestCase):
             subtitle_fn=lambda cid, **k: f"S{cid}",
             similar_fn=lambda *a, **k: [],
             chart_fn=lambda *a, **k: ["1"],
-            reddit_fn=lambda *a, **k: [],
             suggest_fn=lambda *a, **k: ["x"],
             lookup_fn=lambda *a, **k: {},
         )

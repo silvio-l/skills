@@ -11,7 +11,7 @@ Split of responsibility (documented under the slice-03 LLM mechanism):
   write the positioning sentence).
 * Python prepares the **S1 representation** that the later LLM stages
   read, via :func:`build_llm_input`. It is built from the H1 *outputs*
-  (condensed profiles) + the score table + Reddit summaries — and contains
+  (condensed profiles) + the score table — and contains
   **no raw description** (AC1). That representation is what the token gate
   measures.
 
@@ -30,7 +30,6 @@ The S1 representation schema (what the gate measures + S1/S2 read)::
       "meta": {"app_name", "category", "seed_keywords"},
       "condensed_profiles": [ <condensed profile>, ... ],  # strength-ordered
       "score_table": [ <scored keyword>, ... ],            # capped top-N
-      "reddit_summaries": [ {subreddit, title, score}, ... ],
       "qualitative_ms": [ {title, developer, category, ...}, ... ],  # slice 05
     }
 
@@ -45,7 +44,6 @@ from typing import Dict, List, Optional
 
 # Caps that bound the representation before the gate even measures it.
 _SCORE_TABLE_CAP = 50  # top-50 keywords by opportunity (PRD: top 50-80 in report)
-_REDDIT_CAP = 10       # top-10 Reddit summaries feed S1's qualitative read
 _MS_CAP = 10           # top-10 MS entries feed S1 as qualitative context (slice 05)
 
 # Fields H1 is allowed to see (the raw metadata it condenses).
@@ -105,7 +103,6 @@ def _resolve_h1_field(competitor: Dict, field: str):
 def build_llm_input(
     condensed_profiles: List[Dict],
     keywords: List[Dict],
-    reddit_threads: List[Dict],
     *,
     config: Dict,
     ms_entries: Optional[List[Dict]] = None,
@@ -114,11 +111,11 @@ def build_llm_input(
     """Assemble the token-gated S1 representation from H1 outputs + artefacts.
 
     No raw ``description`` is carried — only condensed profiles (positioning
-    + top_keywords + tag) + the score table + Reddit summaries. The own app
-    is flagged ``is_own_app`` on its condensed profile (Modus A). Score
-    table + Reddit are pre-capped so the representation is bounded before
-    the gate measures it; the caller is expected to pass
-    ``condensed_profiles`` in strength order (the gate trims the tail).
+    + top_keywords + tag) + the score table. The own app is flagged
+    ``is_own_app`` on its condensed profile (Modus A). The score table is
+    pre-capped so the representation is bounded before the gate measures it;
+    the caller is expected to pass ``condensed_profiles`` in strength order
+    (the gate trims the tail).
 
     **MS qualitative context (slice 05):** ``ms_entries`` are carried under
     ``qualitative_ms`` as *additional context* for S1 (Niche & Positioning
@@ -151,15 +148,6 @@ def build_llm_input(
         for k in (keywords or [])[:_SCORE_TABLE_CAP]
     ]
 
-    reddit_summaries = [
-        {
-            "subreddit": t.get("subreddit") or "",
-            "title": t.get("title") or "",
-            "score": t.get("score") or 0,
-        }
-        for t in (reddit_threads or [])[:_REDDIT_CAP]
-    ]
-
     # MS qualitative context: strength-ordered, capped, description snipped so
     # raw MS prose stays bounded. Carried as context ONLY — never scored.
     qualitative_ms: List[Dict] = []
@@ -186,7 +174,6 @@ def build_llm_input(
         },
         "condensed_profiles": flagged_profiles,
         "score_table": score_table,
-        "reddit_summaries": reddit_summaries,
         "qualitative_ms": qualitative_ms,
         "brand_conflicts": brand_conflicts or [],
     }

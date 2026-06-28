@@ -9,7 +9,7 @@ Single entry point that turns a structured app-idea input into a written
 report end to end:
 
     parse input → iTunes discovery → deep Apple channels
-      (subtitle via Playwright, similar-apps hop, RSS charts, Reddit,
+      (subtitle via Playwright, similar-apps hop, RSS charts,
        Search-Suggest) → extract (YAKE + TF-IDF) → score
       (Competition/Relevance proxy) → serialize keywords.json /
       competition.json / run-config.yaml → prepare the LLM-input
@@ -21,7 +21,7 @@ The **LLM subagent steps (H1/S1/S2/H2) are performed by the running agent**
 constrains, measures, and assembles. Two extra stages wire the hybrid:
 
 * ``--gate <run_dir>``    — deterministic: build the token-gated S1
-  representation from the agent's H1 output + the score table + Reddit,
+  representation from the agent's H1 output + the score table,
   measure/trim it, write ``llm/s1-input.json`` + ``llm/gate-report.json``.
 * ``--assemble <run_dir>`` — deterministic: stitch the full 8-section
   ``report.md`` from the artefacts + the agent's ``llm/*.json`` subagent
@@ -128,19 +128,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--preflight", action="store_true",
         help="check + prepare every source dependency (chromium, google-play-"
-             "scraper, Reddit creds) and exit",
+             "scraper) and exit",
     )
-    p.add_argument(
-        "--open", action="store_true",
-        help="with --preflight: open the Reddit app-registration page if creds are missing",
-    )
-    p.add_argument(
-        "--setup-reddit", action="store_true",
-        help="write Reddit OAuth creds to ~/.config/reddit/api.env and exit "
-             "(use with --reddit-client-id / --reddit-client-secret)",
-    )
-    p.add_argument("--reddit-client-id", default=None)
-    p.add_argument("--reddit-client-secret", default=None)
     # --- slice 03 LLM-phase stages ---
     p.add_argument(
         "--gate", metavar="RUN_DIR",
@@ -200,8 +189,8 @@ def _run_gate(run_dir: str) -> int:
     """Stage 50: build the token-gated S1 representation deterministically.
 
     Reads the agent's H1 output (``llm/h1-condensed.json``) + the scored
-    keywords + Reddit summaries + the resolved config, assembles the
-    representation, measures/trims it under the token limit, and writes
+    keywords + the resolved config, assembles the representation,
+    measures/trims it under the token limit, and writes
     ``llm/s1-input.json`` + ``llm/gate-report.json``.
     """
     condensed_profiles = _load_json(os.path.join(run_dir, _H1_CONDENSED))
@@ -213,13 +202,12 @@ def _run_gate(run_dir: str) -> int:
         )
         return 2
     keywords = _load_json(os.path.join(run_dir, "keywords.json")) or []
-    reddit_threads = _load_json(os.path.join(run_dir, "reddit-threads.json")) or []
     ms_entries = _load_json(os.path.join(run_dir, "ms-entries.json")) or []
     brand_conflicts = _load_json(os.path.join(run_dir, "brand-conflicts.json")) or []
     config = _load_json(os.path.join(run_dir, "run-config.json")) or {}
 
     rep = condense.build_llm_input(
-        condensed_profiles, keywords, reddit_threads, config=config, ms_entries=ms_entries,
+        condensed_profiles, keywords, config=config, ms_entries=ms_entries,
         brand_conflicts=brand_conflicts,
     )
     trimmed, gate_report = llm_gate.apply_token_gate(rep, _gate_token_limit(config))
@@ -245,7 +233,6 @@ def _assemble(run_dir: str) -> int:
     competitors = _load_json(os.path.join(run_dir, "competition.json")) or []
     config = _load_json(os.path.join(run_dir, "run-config.json")) or {}
     summary = _load_json(os.path.join(run_dir, "run-summary.json")) or {}
-    reddit_threads = _load_json(os.path.join(run_dir, "reddit-threads.json")) or []
     ms_entries = _load_json(os.path.join(run_dir, "ms-entries.json")) or []
     source_status = summary.get("source_status") or {}
     brand_conflicts = _load_json(os.path.join(run_dir, "brand-conflicts.json")) or []
@@ -266,7 +253,7 @@ def _assemble(run_dir: str) -> int:
     now = datetime.datetime.now()
     report_md = report.build_report(
         config, competitors, keywords,
-        now=now, source_status=source_status, reddit_threads=reddit_threads,
+        now=now, source_status=source_status,
         condensed_profiles=condensed_profiles,
         s1_output=s1_output, s2_output=s2_output, h2_output=h2_output,
         s2_play_output=s2_play_output, h2_play_output=h2_play_output,
@@ -280,7 +267,7 @@ def _assemble(run_dir: str) -> int:
 
     report_html = report.build_report_html(
         config, competitors, keywords,
-        now=now, source_status=source_status, reddit_threads=reddit_threads,
+        now=now, source_status=source_status,
         condensed_profiles=condensed_profiles,
         s1_output=s1_output, s2_output=s2_output, h2_output=h2_output,
         s2_play_output=s2_play_output, h2_play_output=h2_play_output,
@@ -293,7 +280,7 @@ def _assemble(run_dir: str) -> int:
     return 0
 
 
-def _write_report(run_dir, config, competitors, keywords, source_status, reddit_threads, now, ms_entries=None, brand_conflicts=None):
+def _write_report(run_dir, config, competitors, keywords, source_status, now, ms_entries=None, brand_conflicts=None):
     """Write report.md + report.html from whatever subagent outputs already exist (if any)."""
     condensed_profiles = _load_json(os.path.join(run_dir, _H1_CONDENSED)) or []
     s1_output = _load_json(os.path.join(run_dir, _S1_ANALYSIS))
@@ -303,7 +290,7 @@ def _write_report(run_dir, config, competitors, keywords, source_status, reddit_
     h2_play_output = _load_json(os.path.join(run_dir, _H2_CROSSCHECK_PLAY))
     report_md = report.build_report(
         config, competitors, keywords,
-        now=now, source_status=source_status, reddit_threads=reddit_threads,
+        now=now, source_status=source_status,
         condensed_profiles=condensed_profiles,
         s1_output=s1_output, s2_output=s2_output, h2_output=h2_output,
         s2_play_output=s2_play_output, h2_play_output=h2_play_output,
@@ -314,7 +301,7 @@ def _write_report(run_dir, config, competitors, keywords, source_status, reddit_
         fh.write(report_md)
     report_html = report.build_report_html(
         config, competitors, keywords,
-        now=now, source_status=source_status, reddit_threads=reddit_threads,
+        now=now, source_status=source_status,
         condensed_profiles=condensed_profiles,
         s1_output=s1_output, s2_output=s2_output, h2_output=h2_output,
         s2_play_output=s2_play_output, h2_play_output=h2_play_output,
@@ -332,7 +319,6 @@ _RUN_CHANNELS = [
     "apple_subtitle",
     "apple_similar",
     "apple_rss_charts",
-    "reddit",
     "apple_search_suggest",
     "play_search",
     "play_charts",
@@ -362,17 +348,14 @@ def _build_run_summary(
     }
 
 
-def _preflight(open_browser: bool = False, ensure: bool = True) -> dict:
+def _preflight(ensure: bool = True) -> dict:
     """Check (and, where scriptable, prepare) every source dependency.
 
     Run at the start of every pipeline (and via ``--preflight``): ensures the
-    Chromium browser and the google-play-scraper package are installed, and
-    reports whether Reddit credentials exist. The only step that needs the user
-    is the Reddit app registration — ``open_browser`` opens that page for them.
+    Chromium browser and the google-play-scraper package are installed.
     Returns a status dict ``{dep: {"ok": bool, "detail": str, ...}}``.
     """
     import shutil
-    import subprocess
 
     status: dict = {}
     status["node"] = {
@@ -392,15 +375,6 @@ def _preflight(open_browser: bool = False, ensure: bool = True) -> dict:
             status["google_play"] = {"ok": gp, "detail": "ready" if gp else "npm install failed"}
         except Exception as exc:
             status["google_play"] = {"ok": False, "detail": f"{type(exc).__name__}: {exc}"}
-    import reddit
-    rc = reddit.credentials_status()
-    status["reddit"] = rc
-    if not rc.get("ok") and open_browser:
-        try:
-            subprocess.run(["open", rc["register_url"]], check=False, timeout=10)
-            status["reddit"]["opened_browser"] = True
-        except Exception:
-            pass
     return status
 
 
@@ -409,17 +383,6 @@ def _print_preflight(status: dict) -> None:
     for dep, st in status.items():
         mark = "✓" if st.get("ok") else "✗"
         print(f"[preflight] {mark} {dep}: {st.get('detail', st.get('reason', ''))}", file=sys.stderr)
-    rd = status.get("reddit", {})
-    if not rd.get("ok"):
-        print(
-            "[preflight] → Reddit is OPTIONAL and currently gated: since the Nov-2025 "
-            "Responsible Builder Policy, Reddit requires approved API access before a "
-            "'script' app can be created, so self-serve creds are no longer instant. "
-            "The other four stores (iOS, Mac, Play, Microsoft) fully cover the research. "
-            "If you already hold approved creds, run: aso_research.py --setup-reddit "
-            "--reddit-client-id <ID> --reddit-client-secret <SECRET>",
-            file=sys.stderr,
-        )
 
 
 def _latest_fresh_run_dir(output_root: str, app_slug: str, now_ts: float):
@@ -449,21 +412,11 @@ def run(argv=None) -> int:
     args = _build_arg_parser().parse_args(argv)
 
     # --- preflight / source setup (no collection) ---
-    if args.setup_reddit:
-        import reddit
-        try:
-            path = reddit.save_credentials(args.reddit_client_id, args.reddit_client_secret)
-        except ValueError as exc:
-            print(f"error: {exc}", file=sys.stderr)
-            return 2
-        print(f"[aso-research] wrote Reddit credentials to {path}", file=sys.stderr)
-        print(path)
-        return 0
     if args.preflight:
-        status = _preflight(open_browser=args.open)
+        status = _preflight()
         _print_preflight(status)
         print(json.dumps(status, ensure_ascii=False))
-        return 0  # preflight is informational; missing Reddit creds is not a failure
+        return 0
 
     # --- slice 03 LLM-phase stages (no collection) ---
     if args.gate:
@@ -506,9 +459,9 @@ def run(argv=None) -> int:
         print("[aso-research] --fresh: bypassing cache + stage checkpoints", file=sys.stderr)
 
     # Preflight: ensure scriptable deps (chromium, google-play-scraper) up front
-    # so failures surface here, not mid-crawl; report Reddit-creds status with an
-    # actionable hint. Never blocks — collectors still degrade per-source.
-    _print_preflight(_preflight(open_browser=False))
+    # so failures surface here, not mid-crawl. Never blocks — collectors still
+    # degrade per-source.
+    _print_preflight(_preflight())
 
     # Stages are idempotent (slice 06): each skips if its checkpoint is fresh,
     # so a crash at stage N resumes at N (US9). --fresh bypasses every check.
@@ -534,7 +487,6 @@ def run(argv=None) -> int:
         competitors = deep["competitors"]
         suggest = deep["suggest_terms"]
         src_status = deep["source_status"]
-        reddit_threads = deep["reddit_threads"]
         for src, entry in src_status.items():
             if not collect._status_is_ok(entry):
                 reason = entry.get("reason", "unavailable") if isinstance(entry, dict) else entry
@@ -618,12 +570,10 @@ def run(argv=None) -> int:
         # Human-facing artefacts: written when the stage runs and left
         # untouched on a skip (so a warm re-run keeps them byte-identical).
         serialize.dump_json(competitors, os.path.join(run_dir, "competition.json"))
-        serialize.dump_json(reddit_threads, os.path.join(run_dir, "reddit-threads.json"))
         serialize.dump_json(ms_entries, os.path.join(run_dir, "ms-entries.json"))
         return {
             "competitors": competitors,
             "suggest_terms": suggest,
-            "reddit_threads": reddit_threads,
             "ms_entries": ms_entries,
             "source_status": src_status,
             "has_play": bool(play_competitors),
@@ -634,7 +584,6 @@ def run(argv=None) -> int:
     )
     competitors = collect_out["competitors"]
     suggest_terms = collect_out["suggest_terms"]
-    reddit_threads = collect_out["reddit_threads"]
     ms_entries = collect_out["ms_entries"]
     source_status = collect_out["source_status"]
     has_play = collect_out["has_play"]
@@ -642,12 +591,7 @@ def run(argv=None) -> int:
 
     # --- Stage: score (deterministic extract -> score over the corpus) ---
     def _score():
-        # Reddit threads are real user language → fold their distinctive terms
-        # into the Search-Suggest boost set (same "real demand" signal as store
-        # autocomplete). No-op when Reddit is unavailable (no creds → no threads).
-        import reddit as _reddit
-        user_terms = list(suggest_terms) + _reddit.user_language_terms(reddit_threads)
-        scored = collect.extract_and_score(competitors, config, suggest_terms=user_terms)
+        scored = collect.extract_and_score(competitors, config, suggest_terms=suggest_terms)
         serialize.dump_json(scored["keywords"], os.path.join(run_dir, "keywords.json"))
         return {"keywords": scored["keywords"]}
 
@@ -694,7 +638,7 @@ def run(argv=None) -> int:
     def _report():
         _write_report(
             run_dir, config, competitors, keywords, source_status,
-            reddit_threads, now, ms_entries=ms_entries,
+            now, ms_entries=ms_entries,
             brand_conflicts=brand_conflicts,
         )
         return {}

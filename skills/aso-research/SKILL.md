@@ -35,7 +35,6 @@ tokens), consistent with `ratchet-up` / `ship-to-*`.
 | iTunes Search + Lookup collector (Apple Core metadata) | [scripts/itunes.py](scripts/itunes.py) |
 | Apple subtitle + similar-apps collector (Playwright, 12h cache) | [scripts/apple_browser.py](scripts/apple_browser.py) |
 | Apple RSS Marketing-Tools charts collector | [scripts/apple_rss.py](scripts/apple_rss.py) |
-| Reddit `.json` qualitative-signal collector | [scripts/reddit.py](scripts/reddit.py) |
 | Apple Search-Suggest autocomplete collector | [scripts/search_suggest.py](scripts/search_suggest.py) |
 | Google Play collector (google-play-scraper via npx; search/charts/similar/suggest) | [scripts/play.py](scripts/play.py) |
 | Microsoft Store best-effort collector (Playwright, SPA-aware; qualitative-only) | [scripts/ms.py](scripts/ms.py) |
@@ -95,39 +94,18 @@ canonical design source is the PRD at `.scratch/aso-research/PRD.md`.
 ## Preflight & source setup (automated — do this first, every time)
 
 **Run preflight at the start of every `/aso-research` invocation** and prepare
-everything scriptable yourself; only ask the user for the one thing that needs
-a human (Reddit credentials). `--input` runs preflight automatically too, but
-running it first lets you drive the Reddit setup before the crawl.
+everything scriptable yourself. `--input` runs preflight automatically too, but
+running it first lets you verify dependencies before the crawl.
 
 ```bash
 S=~/.claude/skills/aso-research/scripts/aso_research.py
-uv run "$S" --preflight          # add --open to open the Reddit page if needed
+uv run "$S" --preflight
 ```
 
 Preflight ensures + reports each dependency:
 - **Chromium** (Playwright) — auto-installed if missing.
 - **google-play-scraper** — auto-vendored into `~/.cache/aso-research/node`
   (`npm install`, needs Node).
-- **Reddit credentials — OPTIONAL and now gated.** Reddit blocks anonymous
-  `.json` (HTTP 403), and since the **Nov-2025 Responsible Builder Policy**
-  Reddit also **gates API-app creation behind approval** — the old self-serve
-  "create a script app at prefs/apps" no longer issues instant credentials
-  (the button just links to the policy). So **do not send the user on a
-  30-second setup chase.** Reddit is a *supplementary* user-language signal; the
-  four stores cover the research without it.
-
-  When preflight reports `✗ reddit`, **say it plainly**: Reddit is optional and
-  currently requires Reddit's own API approval; the report will list it
-  "unavailable" and everything else runs normally. Only if the user *already
-  holds approved credentials* (e.g. an app created before the policy, or an
-  approved request) write them for the user — never make them edit a file:
-  ```bash
-  uv run "$S" --setup-reddit --reddit-client-id <ID> --reddit-client-secret <SECRET>
-  ```
-  (writes `~/.config/reddit/api.env`, mode 0600; re-run `--preflight` to confirm
-  `✓ reddit`). With valid creds, Reddit thread titles + selftext become a
-  **user-language keyword signal** folded into the Search-Suggest relevance
-  boost (real demand, like store autocomplete).
 
 ## The LLM phase (agent-performed, Claude-native)
 

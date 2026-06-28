@@ -19,7 +19,7 @@ Input (structured YAML/JSON)
   │                          MS Core + description (slice 05): SPA-aware
   │                          Playwright (networkidle + wait_for_selector),
   │                          qualitative-only — NOT in the scoring corpus
-  ├ 2x  Deep channels      ── Apple RSS charts, Reddit .json,
+  ├ 2x  Deep channels      ── Apple RSS charts,
   │                          Apple + Play Search-Suggest (slice 02/04) — never-blocking
   ├─ 30  Keyword Extract   ── YAKE phrases + TF-IDF position-weighted + suggest
   │                          (per-platform field tuples: Apple 5/3/1, Play 5/4/2)
@@ -156,8 +156,7 @@ thresholds are unit-tested directly. The report labels these
 
 ## Bot-detection & rate-limit policy (politeness rule-set)
 
-- Official APIs (iTunes Search/Lookup ~20/min, Apple RSS, Reddit `.json`
-  ~60/min) are the default.
+- Official APIs (iTunes Search/Lookup ~20/min, Apple RSS) are the default.
 - Playwright-scraped parts (Apple subtitle/similar) run under
   `scripts/politeness.py`: realistic UA + locale `de-DE`; **≤1 req/s/
   domain + 0.5–2s jitter**; HTTP cache 24h / browser cache 12h;
@@ -181,9 +180,8 @@ consumes. Python only prepares, constrains, measures, and assembles.
 
 1. **Collect** — `uv run scripts/aso_research.py --input seed.yaml`. Writes
    the deterministic spine + `llm-input/h1-input.json` (raw per-app
-   metadata) + `reddit-threads.json` + `run-config.json` + a first
-   `report.md` (data sections + deterministic fallbacks for the LLM
-   sections).
+   metadata) + `run-config.json` + a first `report.md` (data sections +
+   deterministic fallbacks for the LLM sections).
 2. **H1** (agent) — condense `llm-input/h1-input.json` → `llm/h1-condensed.json`.
 3. **Gate** — `python3 scripts/aso_research.py --gate <run-dir>`. Builds the
    token-gated S1 representation → `llm/s1-input.json` + `llm/gate-report.json`.
@@ -198,19 +196,19 @@ consumes. Python only prepares, constrains, measures, and assembles.
 | # | Subagent | **Pinned model** | Reads | Emits |
 |---|---|---|---|---|
 | H1 | Metadata-Condenser | **Haiku** | `llm-input/h1-input.json` (raw per-app metadata) | `llm/h1-condensed.json` — one condensed profile per app |
-| S1 | Niche & Positioning Analyst | **Sonnet** | `llm/s1-input.json` (condensed profiles + score table + Reddit) | `llm/s1-analysis.json` |
+| S1 | Niche & Positioning Analyst | **Sonnet** | `llm/s1-input.json` (condensed profiles + score table) | `llm/s1-analysis.json` |
 | S2 | Listing Strategist | **Sonnet** | S1 analysis + score table (Apple slot model) | `llm/s2-listing.json` |
 | H2 | Cross-Checker (quality gate) | **Haiku** | S2 listing vs the score table | `llm/h2-crosscheck.json` |
 
 ### Token-Budget Gate (stage 50, deterministic)
 
 `scripts/llm_gate.py`. The LLM-input representation (condensed profiles +
-score table + Reddit summaries) is measured with a dependency-free
-**chars/4** token estimate and auto-trimmed under the configured limit
-(default **~70k**; honour the input's `gate-token-limit`). Trim order:
-condensed-profiles tail (least-relevant) → score-table tail → Reddit tail;
-the score table is kept whole unless profiles are exhausted. The gate is
-the hard control on context quality (US13), not wall-clock time.
+score table) is measured with a dependency-free **chars/4** token estimate
+and auto-trimmed under the configured limit (default **~70k**; honour the
+input's `gate-token-limit`). Trim order: condensed-profiles tail
+(least-relevant) → score-table tail; the score table is kept whole unless
+profiles are exhausted. The gate is the hard control on context quality
+(US13), not wall-clock time.
 
 ### Schemas (deterministic JSON in, defined JSON out)
 
@@ -235,7 +233,7 @@ gate measures `s1-input.json`, which carries only condensed fields).
 ```
 
 S1 must flag **missing themes** and **threats to monitor**, grounded in
-the Reddit qualitative summaries (US14).
+the condensed competitor profiles and score table (US14).
 
 **S2 listing** (`llm/s2-listing.json`) — Apple slots. Exactly **1 recommended
 + 2 alternatives** per slot, each with an accurate `char_count` fitting
@@ -321,7 +319,7 @@ absent. The flag is deterministic (`condense.own_app_is_referenced`).
   self-contained, browser-openable visual twin — Astro-inspired light UI with
   traffic-light keyword signal meters, the canonical deliverable to read),
   `keywords.json`,
-  `competition.json`, `reddit-threads.json`, `run-config.yaml`
+  `competition.json`, `run-config.yaml`
   (human echo) + `run-config.json` (machine round-trip),
   `run-summary.json` (includes `source_status` + `stage_timing`),
   `llm-input/h1-input.json` (raw profiles for H1), the agent-written
@@ -360,7 +358,7 @@ re-crawl, no re-score. The stages:
 
 | stage | checkpoint | TTL | also writes |
 |---|---|---|---|
-| `collect` | `stages/collect.json` | browser 12h (crawl, most fragile) | `competition.json`, `reddit-threads.json`, `ms-entries.json` |
+| `collect` | `stages/collect.json` | browser 12h (crawl, most fragile) | `competition.json`, `ms-entries.json` |
 | `score` | `stages/score.json` | HTTP 24h | `keywords.json` |
 | `llm-inputs` | `stages/llm-inputs.json` | HTTP 24h | `run-config.{yaml,json}`, `llm-input/h1-input.json` |
 | `report` | — (terminal, always runs) | — | `report.md` |

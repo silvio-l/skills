@@ -76,7 +76,6 @@ class ReasonBearingStatusTests(unittest.TestCase):
             subtitle_fn=boom_subtitle,
             similar_fn=lambda *a, **k: [],
             chart_fn=lambda *a, **k: [],
-            reddit_fn=lambda *a, **k: [],
             suggest_fn=lambda *a, **k: [],
             lookup_fn=lambda *a, **k: {},
         )
@@ -94,7 +93,6 @@ class ReasonBearingStatusTests(unittest.TestCase):
             subtitle_fn=lambda *a, **k: "",
             similar_fn=lambda *a, **k: [],
             chart_fn=boom_charts,
-            reddit_fn=lambda *a, **k: [],
             suggest_fn=lambda *a, **k: [],
             lookup_fn=lambda *a, **k: {},
         )
@@ -111,12 +109,11 @@ class ReasonBearingStatusTests(unittest.TestCase):
             self.config, self.competitors,
             subtitle_fn=lambda *a, **k: "",
             similar_fn=lambda *a, **k: [],
-            chart_fn=lambda *a, **k: [],
-            reddit_fn=boom,
+            chart_fn=boom,
             suggest_fn=lambda *a, **k: [],
             lookup_fn=lambda *a, **k: {},
         )
-        entry = out["source_status"]["reddit"]
+        entry = out["source_status"]["apple_rss_charts"]
         reason = entry.get("reason", "")
         self.assertNotIn("\n", reason)
         self.assertIn("line one", reason)
@@ -144,7 +141,6 @@ class EmptyResultSignalTests(unittest.TestCase):
             subtitle_fn=sub_fn,
             similar_fn=lambda *a, **k: [],
             chart_fn=lambda *a, **k: ["100", "101"],
-            reddit_fn=lambda *a, **k: [],
             suggest_fn=lambda *a, **k: [],
             lookup_fn=lambda *a, **k: {},
         )
@@ -158,7 +154,6 @@ class EmptyResultSignalTests(unittest.TestCase):
             subtitle_fn=lambda *a, **k: "",
             similar_fn=lambda *a, **k: [],
             chart_fn=lambda *a, **k: ["100", "101", "102"],
-            reddit_fn=lambda *a, **k: [],
             suggest_fn=lambda *a, **k: [],
             lookup_fn=lambda *a, **k: {},
         )
@@ -172,7 +167,6 @@ class EmptyResultSignalTests(unittest.TestCase):
             subtitle_fn=lambda *a, **k: "",
             similar_fn=lambda *a, **k: [],
             chart_fn=lambda *a, **k: [],
-            reddit_fn=lambda *a, **k: [],
             suggest_fn=lambda *a, **k: [],  # returns empty
             lookup_fn=lambda *a, **k: {},
         )
@@ -186,7 +180,6 @@ class EmptyResultSignalTests(unittest.TestCase):
             subtitle_fn=lambda *a, **k: "",
             similar_fn=lambda *a, **k: [],
             chart_fn=lambda *a, **k: [],
-            reddit_fn=lambda *a, **k: [],
             suggest_fn=lambda *a, **k: ["a", "b", "c", "d", "e"],
             lookup_fn=lambda *a, **k: {},
         )
@@ -217,7 +210,6 @@ class AppleSimilarHonestyTests(unittest.TestCase):
             subtitle_fn=lambda *a, **k: "",
             similar_fn=sim_fn,
             chart_fn=lambda *a, **k: [],
-            reddit_fn=lambda *a, **k: [],
             suggest_fn=lambda *a, **k: [],
             lookup_fn=lambda *a, **k: {},
         )
@@ -234,7 +226,6 @@ class AppleSimilarHonestyTests(unittest.TestCase):
             subtitle_fn=lambda *a, **k: "",
             similar_fn=boom_sim,
             chart_fn=lambda *a, **k: [],
-            reddit_fn=lambda *a, **k: [],
             suggest_fn=lambda *a, **k: [],
             lookup_fn=lambda *a, **k: {},
         )
@@ -264,7 +255,6 @@ class AppleSimilarHonestyTests(unittest.TestCase):
             subtitle_fn=lambda *a, **k: "",
             similar_fn=sim_fn,
             chart_fn=lambda *a, **k: [],
-            reddit_fn=lambda *a, **k: [],
             suggest_fn=lambda *a, **k: [],
             lookup_fn=lookup_fn,
         )
@@ -306,7 +296,6 @@ class NonJSONDriftTests(unittest.TestCase):
             subtitle_fn=lambda *a, **k: "",
             similar_fn=lambda *a, **k: [],
             chart_fn=lambda *a, **k: [],
-            reddit_fn=lambda *a, **k: [],
             suggest_fn=suggest_raises,
             lookup_fn=lambda *a, **k: {},
         )
@@ -334,14 +323,12 @@ class NeverBlockingPreservedTests(unittest.TestCase):
             subtitle_fn=lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")),
             similar_fn=lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")),
             chart_fn=lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")),
-            reddit_fn=lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")),
             suggest_fn=lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")),
             lookup_fn=lambda *a, **k: {},
         )
         self.assertIn("apple_subtitle", out["source_status"])
         self.assertIn("apple_similar", out["source_status"])
         self.assertIn("apple_rss_charts", out["source_status"])
-        self.assertIn("reddit", out["source_status"])
         self.assertIn("apple_search_suggest", out["source_status"])
         self.assertTrue(out["competitors"])  # base competitors survive
 
@@ -371,14 +358,11 @@ class SourceSplitReportTests(unittest.TestCase):
             "apple_subtitle": {"status": "ok", "result_count": 2},
             "apple_similar": {"status": "unavailable", "reason": "RuntimeError: browser timeout"},
             "apple_rss_charts": {"status": "ok", "result_count": 5},
-            "reddit": {"status": "unavailable", "reason": "ModuleNotFoundError: praw"},
         }
         ran, unavailable = report._source_split(status)
         self.assertTrue(any("apple_subtitle" in s for s in ran), f"apple_subtitle not found in {ran}")
         self.assertTrue(any("apple_rss_charts" in s for s in ran))
         self.assertTrue(any("apple_similar" in s for s in unavailable))
-        self.assertTrue(any("reddit" in s for s in unavailable))
-        self.assertFalse(any("reddit" in s for s in ran))
 
     def test_source_split_shows_counts_for_ok(self):
         status = {
@@ -392,11 +376,11 @@ class SourceSplitReportTests(unittest.TestCase):
 
     def test_source_split_shows_reasons_for_unavailable(self):
         status = {
-            "reddit": {"status": "unavailable", "reason": "ModuleNotFoundError: praw"},
+            "apple_similar": {"status": "unavailable", "reason": "RuntimeError: browser timeout"},
         }
         ran, unavailable = report._source_split(status)
         self.assertEqual(len(ran), 0)
-        self.assertIn("ModuleNotFoundError: praw", unavailable[0])
+        self.assertIn("RuntimeError: browser timeout", unavailable[0])
 
 
 class ENWithoutENMarketTests(unittest.TestCase):
@@ -530,7 +514,6 @@ class DeterminismAfterStatusChangeTests(unittest.TestCase):
             subtitle_fn=lambda cid, **k: f"S{cid}",
             similar_fn=lambda *a, **k: [],
             chart_fn=lambda *a, **k: ["1"],
-            reddit_fn=lambda *a, **k: [],
             suggest_fn=lambda *a, **k: ["x"],
             lookup_fn=lambda *a, **k: {},
         )

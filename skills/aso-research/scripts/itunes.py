@@ -2,7 +2,7 @@
 """Apple Store Discovery via the iTunes Search API (slice 01's only channel).
 
 Honours the documented ~20/min politeness limit (3 s between live
-calls). No Playwright, no charts, no Reddit — those are later slices.
+calls). No Playwright, no charts — those are later slices.
 
 Split for testability:
 

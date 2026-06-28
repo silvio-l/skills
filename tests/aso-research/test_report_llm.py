@@ -131,13 +131,13 @@ class MethodologyTests(unittest.TestCase):
     def test_lists_sources_ran_and_unavailable(self):
         status = {
             "apple_subtitle": "ok", "apple_similar": "ok", "apple_rss_charts": "ok",
-            "reddit": "unavailable", "apple_search_suggest": "ok",
+            "apple_search_suggest": "ok", "ms": "unavailable",
         }
         body = report.build_report(_config(), _competitors(), _keywords(), now=NOW,
                                    source_status=status)
         self.assertIn("**Sources that ran:**", body)
         self.assertIn("apple_subtitle", body)
-        self.assertIn("reddit", body)
+        self.assertIn("ms", body)
         self.assertIn("unavailable", body.lower())
 
 
@@ -235,16 +235,13 @@ class ModusTests(unittest.TestCase):
 
 
 class LlmDrivenSectionTests(unittest.TestCase):
-    def test_positioning_map_renders_s1_themes_and_reddit_grounding(self):
-        reddit = [{"subreddit": "getdisciplined", "title": "best habit app?", "score": 5}]
+    def test_positioning_map_renders_s1_themes(self):
         body = report.build_report(
             _config(), _competitors(), _keywords(), now=NOW,
-            reddit_threads=reddit, s1_output=_s1(),
+            s1_output=_s1(),
         )
         self.assertIn("Dominant themes", body)
         self.assertIn("routine building", body)
-        self.assertIn("Qualitative grounding (Reddit)", body)
-        self.assertIn("best habit app?", body)
 
     def test_opportunities_renders_buckets_and_missing_themes(self):
         body = report.build_report(_config(), _competitors(), _keywords(), now=NOW, s1_output=_s1())

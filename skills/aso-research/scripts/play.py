@@ -11,7 +11,7 @@ global install is needed) for the four Play channels the pipeline needs:
 * **suggest**       — Play autocomplete (the only free real-search signal,
                       channel 6, Play side).
 
-Like the iTunes/Reddit collectors this is an **external library collector** —
+Like the iTunes collector this is an **external library collector** —
 it is **NOT unit-tested** (repo convention: external collectors fail loud and
 their output formats would rot tests). It is verified by the dispatcher's
 manual live-smoke run. The pure transforms (raw JSON -> Core + Slots) live in

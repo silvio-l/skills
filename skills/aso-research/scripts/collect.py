@@ -7,7 +7,6 @@ Wires the deterministic spine end-to-end on top of the collectors:
       -> enrich top-N with Apple subtitle (Playwright)
       -> similar-apps hop (1 hop from the ~5 strongest) -> niche competitors
       -> Apple RSS charts (deckel-limited)
-      -> Reddit .json (qualitative signals + competitor names)
       -> Apple Search-Suggest autocomplete (enrich + relevance boost)
       -> extract -> score
 
@@ -33,7 +32,6 @@ import apple_browser
 import apple_rss
 import extract
 import itunes
-import reddit
 import score
 import schema
 import search_suggest
@@ -93,7 +91,6 @@ def collect_apple(
     subtitle_fn: Optional[Callable] = None,
     similar_fn: Optional[Callable] = None,
     chart_fn: Optional[Callable] = None,
-    reddit_fn: Optional[Callable] = None,
     suggest_fn: Optional[Callable] = None,
     lookup_fn: Optional[Callable] = None,
     subtitle_top_n: int = SUBTITLE_TOP_N,
@@ -107,7 +104,6 @@ def collect_apple(
           "competitors":   [...enriched + niche Core records, deduped, sorted],
           "suggest_terms": [...],
           "chart_ids":     [...],
-          "reddit_threads":[...],
           "source_status": {"apple_subtitle": {"status":"ok","result_count":2}, ...},
         }
 
@@ -119,7 +115,6 @@ def collect_apple(
     subtitle_fn = subtitle_fn or apple_browser.collect_subtitle
     similar_fn = similar_fn or apple_browser.collect_similar
     chart_fn = chart_fn or apple_rss.collect
-    reddit_fn = reddit_fn or reddit.collect
     suggest_fn = suggest_fn or search_suggest.collect
     # The similar-apps + RSS-chart hops resolve ids → Core via the live iTunes
     # Lookup API. A no-op default silently discarded every niche competitor.
@@ -231,21 +226,6 @@ def collect_apple(
         enriched.append(core)
         chart_added += 1
 
-    # --- Reddit .json (qualitative) ---
-    reddit_queries = [f"{q} app" for q in seed_terms][:5] or [config.get("app_name", "")]
-    threads, rerr = _safe(
-        reddit_fn,
-        reddit_queries,
-        cache_dir=cache_dir,
-        fresh=fresh,
-    )
-    if rerr:
-        source_status["reddit"] = _unavailable_status(_exc_reason(rerr))
-        threads = []
-    else:
-        threads = threads or []
-        source_status["reddit"] = _ok_status(len(threads))
-
     # --- Apple Search-Suggest (autocomplete) ---
     suggest, serr = _safe(
         suggest_fn,
@@ -268,7 +248,6 @@ def collect_apple(
         "competitors": enriched,
         "suggest_terms": suggest,
         "chart_ids": chart_ids,
-        "reddit_threads": threads,
         "source_status": source_status,
     }
 

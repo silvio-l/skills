@@ -11,7 +11,7 @@ fall back to a deterministic, clearly-labelled read otherwise — so a
 report is always valid and the LLM *enriches* rather than gates it.
 
 Determinism: the body is stable for a given
-(config, competitors, keywords, source_status, reddit_threads, subagent
+(config, competitors, keywords, source_status, subagent
 outputs); only the injected timestamp differs between runs (expected).
 
 Score labels read **"Competition/Relevance signal"** — never search
@@ -119,7 +119,6 @@ def build_report(
     *,
     now: datetime.datetime,
     source_status: Optional[Dict[str, str]] = None,
-    reddit_threads: Optional[List[Dict]] = None,
     # --- slice 03 LLM phase (all optional; absent -> deterministic fallback) ---
     condensed_profiles: Optional[List[Dict]] = None,
     s1_output: Optional[Dict] = None,
@@ -144,7 +143,6 @@ def build_report(
     top_kw = ", ".join(k["term"] for k in keywords[:8]) or "—"
     generated = now.strftime("%Y-%m-%d %H:%M:%S")
     source_status = source_status or {}
-    reddit_threads = reddit_threads or []
     own_app_id = (config.get("own_app_id") or "").strip()
     modus_a = bool(own_app_id)
     has_play = bool(play_comps) or any(s.startswith("play_") for s in source_status)
@@ -258,12 +256,6 @@ def build_report(
             if values:
                 joined = "; ".join(_md_escape(v) for v in values[:8])
                 lines.append(f"- **{label}:** {joined}")
-        if reddit_threads:
-            lines.append("")
-            lines.append("**Qualitative grounding (Reddit):**")
-            for t in reddit_threads[:6]:
-                sub = t.get("subreddit") or "—"
-                lines.append(f"  - r/{_md_escape(sub)} — {_md_escape(t.get('title', ''))}")
     else:
         # Deterministic fallback: position competitors by category cluster.
         lines.append(
@@ -538,7 +530,6 @@ def build_report(
         ("apple_similar", "Apple Similar"),
         ("apple_mac", "Mac App Store"),
         ("apple_rss_charts", "Apple RSS Charts"),
-        ("reddit", "Reddit"),
         ("apple_search_suggest", "Apple Search-Suggest"),
         ("play_search", "Play Search"),
         ("play_charts", "Play Charts"),
@@ -593,7 +584,7 @@ def _source_split(source_status):
     """
     order = (
         "apple_subtitle", "apple_similar", "apple_mac", "apple_rss_charts",
-        "reddit", "apple_search_suggest",
+        "apple_search_suggest",
         "play_search", "play_charts", "play_similar", "play_search_suggest",
         "ms",
     )
@@ -625,7 +616,6 @@ _HTML_SOURCE_ORDER = (
     ("apple_similar", "Apple Similar"),
     ("apple_mac", "Mac App Store"),
     ("apple_rss_charts", "Apple RSS Charts"),
-    ("reddit", "Reddit"),
     ("apple_search_suggest", "Apple Search-Suggest"),
     ("play_search", "Play Search"),
     ("play_charts", "Play Charts"),
@@ -980,7 +970,6 @@ def build_report_html(
     *,
     now: datetime.datetime,
     source_status: Optional[Dict[str, str]] = None,
-    reddit_threads: Optional[List[Dict]] = None,
     condensed_profiles: Optional[List[Dict]] = None,
     s1_output: Optional[Dict] = None,
     s2_output: Optional[Dict] = None,
@@ -992,7 +981,6 @@ def build_report_html(
 ) -> str:
     """Assemble a self-contained, browser-openable HTML twin of ``report.md``."""
     source_status = source_status or {}
-    reddit_threads = reddit_threads or []
     ms_entries = ms_entries or []
     brand_conflicts = brand_conflicts or []
 
@@ -1179,13 +1167,6 @@ def build_report_html(
                 items.append(f"<li><b>{_html_esc(label)}:</b> {joined}</li>")
         if items:
             parts.append('<ul class="facts">' + "".join(items) + "</ul>")
-        if reddit_threads:
-            parts.append("<h3>Qualitative Untermauerung · Reddit</h3>")
-            quotes = "".join(
-                f'<li>r/{_html_esc(t.get("subreddit") or "—")} — {_html_esc(t.get("title", ""))}</li>'
-                for t in reddit_threads[:6]
-            )
-            parts.append(f'<ul class="quotes">{quotes}</ul>')
     else:
         parts.append(
             '<p class="section__intro">Vollständige LLM-Positionierungsanalyse ausstehend '
@@ -1405,7 +1386,7 @@ def build_report_html(
         '<li>Wettbewerb / Relevanz / Chance sind <strong>deterministische Proxy-Signale</strong>, '
         'ausdrücklich <strong>kein echtes Suchvolumen und keine echte Difficulty</strong> — '
         'durchgängig als „Signal" bezeichnet. Die kostenlosen <em>Echtbedarf</em>-Signale '
-        'sind Apple- &amp; Play-Search-Suggest sowie (mit Creds) Reddit-Nutzersprache '
+        'sind Apple- &amp; Play-Search-Suggest-Autocomplete '
         '(ein +15-Relevanz-Bonus).</li>'
         '<li>Keyword-Zahlen stammen aus dem gesammelten Wettbewerber-Korpus, nicht aus einem '
         'proprietären Suchvolumen-Panel.</li>'
@@ -1445,8 +1426,8 @@ def build_report_html(
          "Beschreibungstexte und das Keyword-Feld."),
         ("Qualitativer Kanal",
          "Eine Datenquelle, die bewusst NICHT in das Scoring einfließt, sondern "
-         "als Kontext für die LLM-Analyse dient (z. B. Microsoft Store, "
-         "Reddit-Threads). Liefert Tiefe, aber keine Zahlen."),
+         "als Kontext für die LLM-Analyse dient (z. B. Microsoft Store). "
+         "Liefert Tiefe, aber keine Zahlen."),
         ("Markenkonflikt (Brand Conflict)",
          "Ein Keyword, das Begriffe aus dem Anti-Vokabular des Projekts enthält — "
          "z. B. Konkurrenzmarken oder unerwünschte Assoziationen. Wird im Report "

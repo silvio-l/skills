@@ -46,9 +46,6 @@ def _representation(n_profiles: int) -> dict:
             {"term": "habit", "competition": 30, "relevance": 80, "opportunity": 56, "split": "primary-candidate", "is_gap": False, "suggest": True},
             {"term": "tracker", "competition": 40, "relevance": 70, "opportunity": 42, "split": "primary-candidate", "is_gap": False, "suggest": False},
         ],
-        "reddit_summaries": [
-            {"subreddit": "getdisciplined", "title": "best habit tracker app?", "score": 42},
-        ],
     }
 
 
@@ -112,9 +109,8 @@ class ApplyTokenGateTests(unittest.TestCase):
         trimmed, gate_report = llm_gate.apply_token_gate(rep, limit)
         self.assertTrue(gate_report["trimmed"])
         self.assertLessEqual(gate_report["measured_after"], limit)
-        # score table + reddit kept whole (profiles are the primary lever)
+        # score table kept whole (profiles are the primary lever)
         self.assertEqual(len(trimmed["score_table"]), len(rep["score_table"]))
-        self.assertEqual(len(trimmed["reddit_summaries"]), len(rep["reddit_summaries"]))
 
     def test_score_table_trimmed_only_when_profiles_exhausted(self):
         # One profile + a large score table, tiny limit: profiles can't trim

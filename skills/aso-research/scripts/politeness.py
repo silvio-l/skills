@@ -24,7 +24,7 @@ import urllib.request
 from typing import Callable, Dict, Optional
 
 # Realistic desktop Chromium UA (de-DE). Not spoofed — a normal browser
-# string so Apple/Reddit serve the de-DE listing we research.
+# string so Apple serves the de-DE listing we research.
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "

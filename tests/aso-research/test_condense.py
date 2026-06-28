@@ -6,8 +6,8 @@ Run from the repo root:
 
 Covers: H1 raw-profile preparation (clean per-app metadata), the S1
 representation carrying NO raw descriptions (AC1), the Modus-A flagging
-(own app is just another reference entry — AC7), and the score-table /
-Reddit caps that bound the representation.
+(own app is just another reference entry — AC7), and the score-table cap
+that bounds the representation.
 """
 
 import json
@@ -86,9 +86,8 @@ class BuildLlmInputTests(unittest.TestCase):
              "positioning": "A gamified habit tracker.", "top_keywords": ["habit"], "tag": "habit"}
         ]
         keywords = [{"term": "habit", "competition": 20, "relevance": 80, "opportunity": 64, "split": "primary-candidate", "is_gap": False}]
-        reddit = [{"subreddit": "x", "title": "t", "score": 1}]
         config = {"app_name": "H", "category": "other", "seed_keywords": ["habit"], "own_app_id": None}
-        rep = condense.build_llm_input(profiles, keywords, reddit, config=config)
+        rep = condense.build_llm_input(profiles, keywords, config=config)
         blob = json.dumps(rep)
         self.assertNotIn("raw desc", blob)
         self.assertNotIn("description", blob)  # no description key at all
@@ -102,26 +101,24 @@ class BuildLlmInputTests(unittest.TestCase):
             {"app_id": "9", "title": "Own", "positioning": "p", "top_keywords": [], "tag": "t"},
         ]
         config = {"app_name": "H", "category": "other", "seed_keywords": [], "own_app_id": "9"}
-        rep = condense.build_llm_input(profiles, [], [], config=config)
+        rep = condense.build_llm_input(profiles, [], config=config)
         own = [p for p in rep["condensed_profiles"] if p["is_own_app"]]
         self.assertEqual(len(own), 1)
         self.assertEqual(own[0]["app_id"], "9")
         self.assertEqual(rep["own_app_id"], "9")
 
-    def test_score_table_and_reddit_capped(self):
+    def test_score_table_capped(self):
         profiles = [{"app_id": "1", "title": "A", "positioning": "p", "top_keywords": [], "tag": "t"}]
         keywords = [{"term": f"k{i}", "competition": 1, "relevance": 1, "opportunity": 1, "split": "long-tail-candidate", "is_gap": False} for i in range(200)]
-        reddit = [{"subreddit": "s", "title": str(i), "score": i} for i in range(50)]
         config = {"app_name": "H", "category": "other", "seed_keywords": [], "own_app_id": None}
-        rep = condense.build_llm_input(profiles, keywords, reddit, config=config)
+        rep = condense.build_llm_input(profiles, keywords, config=config)
         self.assertEqual(len(rep["score_table"]), condense._SCORE_TABLE_CAP)
-        self.assertEqual(len(rep["reddit_summaries"]), condense._REDDIT_CAP)
 
     def test_score_table_carries_proxy_fields_only(self):
         profiles = [{"app_id": "1", "title": "A", "positioning": "p", "top_keywords": [], "tag": "t"}]
         keywords = [{"term": "habit", "competition": 20, "relevance": 80, "opportunity": 64, "split": "primary-candidate", "is_gap": True, "suggest": True, "title_hits": 5, "subtitle_hits": 2}]
         config = {"app_name": "H", "category": "other", "seed_keywords": [], "own_app_id": None}
-        rep = condense.build_llm_input(profiles, keywords, [], config=config)
+        rep = condense.build_llm_input(profiles, keywords, config=config)
         row = rep["score_table"][0]
         self.assertEqual(set(row.keys()), {"term", "competition", "relevance", "opportunity", "split", "is_gap", "suggest"})
         self.assertNotIn("title_hits", row)
@@ -131,13 +128,13 @@ class OwnAppReferencedTests(unittest.TestCase):
     def test_modus_a_when_own_app_in_profiles(self):
         profiles = [{"app_id": "1", "title": "A", "positioning": "p", "top_keywords": [], "tag": "t"}]
         config = {"app_name": "H", "category": "other", "seed_keywords": [], "own_app_id": "1"}
-        rep = condense.build_llm_input(profiles, [], [], config=config)
+        rep = condense.build_llm_input(profiles, [], config=config)
         self.assertTrue(condense.own_app_is_referenced(rep))
 
     def test_modus_b_when_no_own_app(self):
         profiles = [{"app_id": "1", "title": "A", "positioning": "p", "top_keywords": [], "tag": "t"}]
         config = {"app_name": "H", "category": "other", "seed_keywords": [], "own_app_id": None}
-        rep = condense.build_llm_input(profiles, [], [], config=config)
+        rep = condense.build_llm_input(profiles, [], config=config)
         self.assertFalse(condense.own_app_is_referenced(rep))
 
 
