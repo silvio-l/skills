@@ -42,7 +42,55 @@ CANONICAL_KEYS = (
     "seed_keywords",
     "gate_token_limit",
     "output_dir",
+    "app_type",
+    "app_type_source",
 )
+
+# --- App-type detection (desktop vs mobile) --------------------------------
+# All four stores are always collected; app_type only drives which platforms'
+# keywords + ratings are weighted up (Mac App Store + Microsoft Store for a
+# desktop app, iOS + Play for a mobile app). The decision is recorded so the
+# report can show it transparently.
+APP_TYPES = ("mobile", "desktop", "both")
+
+_DESKTOP_SIGNALS = (
+    "desktop", "windows", "macos", "mac os", "mac-app", "pc", "laptop",
+    "computer", "rechner", "tastenkürzel", "tastenkombination", "hotkey",
+    "shortcut", "menüleiste", "menu bar", "menubar", "menu-bar", "tray",
+    "systray", "taskbar", "taskleiste", "statusleiste", "win32", "electron",
+    ".exe", "kommandozeile", "terminal", " cli ", "arbeitsplatz", "am pc",
+    "am rechner", "am computer", "windows-app", "desktop-app", "win ",
+)
+_MOBILE_SIGNALS = (
+    "iphone", "ipad", "android", " ios", "mobil", "mobile", "unterwegs",
+    "smartphone", "tablet", "handy", "on the go", "on-the-go", "widget",
+    "sperrbildschirm", "lockscreen", "homescreen", "wearable",
+    "apple watch", "wear os", "watchos",
+)
+
+
+def detect_app_type(app_name: str, description: str, seed_keywords) -> dict:
+    """Heuristically classify an app as desktop / mobile / both from its text.
+
+    Counts desktop vs mobile signal phrases in the name + description + seeds.
+    Returns ``{"app_type": <one of APP_TYPES>, "desktop_hits": [...],
+    "mobile_hits": [...]}``. Ties or no signal → ``"both"`` (no store is
+    de-prioritised when the type is genuinely unclear).
+    """
+    blob = " " + " ".join([
+        str(app_name or ""), str(description or ""),
+        " ".join(seed_keywords or []),
+    ]).lower() + " "
+    desktop_hits = sorted({s.strip() for s in _DESKTOP_SIGNALS if s in blob})
+    mobile_hits = sorted({s.strip() for s in _MOBILE_SIGNALS if s in blob})
+    d, m = len(desktop_hits), len(mobile_hits)
+    if d > m:
+        app_type = "desktop"
+    elif m > d:
+        app_type = "mobile"
+    else:
+        app_type = "both"
+    return {"app_type": app_type, "desktop_hits": desktop_hits, "mobile_hits": mobile_hits}
 
 
 def validate(raw: dict) -> List[str]:
@@ -86,6 +134,10 @@ def validate(raw: dict) -> List[str]:
     if out is not None and not (isinstance(out, str) and out.strip()):
         errors.append("output_dir must be a non-empty string when present")
 
+    at = raw.get("app_type")
+    if at is not None and (not isinstance(at, str) or at.strip().lower() not in APP_TYPES):
+        errors.append("app_type must be one of: " + ", ".join(APP_TYPES))
+
     return errors
 
 
@@ -103,6 +155,21 @@ def parse_input(raw: dict) -> dict:
     if len(seeds) > MAX_SEED_KEYWORDS:
         seeds = seeds[:MAX_SEED_KEYWORDS]
 
+    # App type: explicit wins; otherwise auto-detect from the text signals.
+    explicit_at = raw.get("app_type")
+    if isinstance(explicit_at, str) and explicit_at.strip().lower() in APP_TYPES:
+        app_type = explicit_at.strip().lower()
+        app_type_source = "explicit"
+    else:
+        det = detect_app_type(raw["app_name"], raw["description"], seeds)
+        app_type = det["app_type"]
+        hits = []
+        if det["desktop_hits"]:
+            hits.append("desktop:" + "/".join(det["desktop_hits"][:5]))
+        if det["mobile_hits"]:
+            hits.append("mobile:" + "/".join(det["mobile_hits"][:5]))
+        app_type_source = "auto (" + ("; ".join(hits) if hits else "no signal → both") + ")"
+
     config = {
         "app_name": raw["app_name"].strip(),
         "description": raw["description"].strip(),
@@ -113,6 +180,8 @@ def parse_input(raw: dict) -> dict:
         "seed_keywords": seeds,
         "gate_token_limit": raw.get("gate_token_limit"),
         "output_dir": (raw["output_dir"].strip() if raw.get("output_dir") else None),
+        "app_type": app_type,
+        "app_type_source": app_type_source,
     }
     return config
 

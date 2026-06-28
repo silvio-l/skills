@@ -273,6 +273,23 @@ def collect_apple(
     }
 
 
+# Per-platform document builder: maps a Core record → the slot fields its
+# extraction model reads. iOS + Mac share the Title/Subtitle/Description model.
+def _docs_for(platform: str, comps: List[Dict]) -> List[Dict]:
+    if platform == "play":
+        return [{"title": c.get("title", ""), "short": c.get("short_description", ""),
+                 "long": c.get("full_description", "")} for c in comps]
+    if platform == "ms":
+        return [{"title": c.get("title", ""), "description": c.get("description", "")} for c in comps]
+    # apple (iOS) + mac
+    return [{"title": c.get("title", ""), "subtitle": c.get("subtitle", ""),
+             "description": c.get("description", "")} for c in comps]
+
+
+# Stable platform order for grouping/merge determinism.
+_SCORE_PLATFORMS = ("apple", "mac", "play", "ms")
+
+
 def extract_and_score(
     competitors: List[Dict],
     config: Dict,
@@ -280,82 +297,55 @@ def extract_and_score(
 ) -> Dict:
     """Run the real extract -> score engine over the deep competitor corpus.
 
-    Slice 04: the corpus is partitioned by platform so each vertical flows
-    through the shared engine with its **own** slot model. Apple competitors
-    (Title/Subtitle/Description, weights 5/3/1) and Play competitors
-    (Title/Short/Long, weights 5/4/2) are extracted + scored separately, then
-    merged into one unified score table. Every row is tagged ``platform`` and
-    the table is sorted by ``(-opportunity, -relevance, term, platform)`` so
-    identical input is byte-identical (determinism AC). Apple-only corpora
-    behave exactly as in slice 02 (same fields, same weights, same order).
+    The corpus is partitioned by ``platform`` — **iOS App Store** (apple),
+    **Mac App Store** (mac), **Google Play** (play) and **Microsoft Store**
+    (ms) — and each vertical flows through the shared engine with its own slot
+    model. Rows are tagged ``platform`` and carry a ``platform_weight`` /
+    ``rank_score`` from the detected ``app_type`` (desktop boosts mac+ms, mobile
+    boosts apple+play). The unified table is sorted by ``(-rank_score,
+    -opportunity, -relevance, term, platform)`` — a total deterministic order.
+    Apple-only corpora keep slice-02 numeric outputs (the weight is 1.0 for
+    app_type ``both``).
     """
     generics = [
         config.get("category", ""),
-        "apple", "ios", "iphone", "ipad",
-        "android", "google", "play",
+        "apple", "ios", "iphone", "ipad", "mac", "macos",
+        "android", "google", "play", "windows", "microsoft",
         config.get("app_name", ""),
     ]
     suggest = list(suggest_terms or [])
     seed_description = config.get("description") or ""
-    seed_keywords = list(config.get("seed_keywords") or [])
-
-    apple_comps = [c for c in competitors if c.get("platform", "apple") == "apple"]
-    play_comps = [c for c in competitors if c.get("platform") == "play"]
+    app_type = config.get("app_type", "both")
 
     merged: List[Dict] = []
-
-    if apple_comps:
-        apple_docs = [
-            {
-                "title": c.get("title", ""),
-                "subtitle": c.get("subtitle", ""),
-                "description": c.get("description", ""),
-            }
-            for c in apple_comps
-        ]
+    for platform in _SCORE_PLATFORMS:
+        # apple is the default tag for legacy records with no platform key.
+        comps = [c for c in competitors
+                 if c.get("platform", "apple") == platform]
+        if not comps:
+            continue
         extracted = extract.extract_keywords(
-            apple_docs,
+            _docs_for(platform, comps),
             generics=generics,
             seed_description=seed_description,
             suggest_terms=suggest,
+            fields=extract.fields_for(platform),
         )
         merged.extend(
             score.score_keywords(
                 extracted,
                 seed_description=seed_description,
                 suggest_terms=suggest,
-                n_docs=len(apple_comps),
-                platform="apple",
+                n_docs=len(comps),
+                platform=platform,
+                app_type=app_type,
             )
         )
 
-    if play_comps:
-        play_docs = [
-            {
-                "title": c.get("title", ""),
-                "short": c.get("short_description", ""),
-                "long": c.get("full_description", ""),
-            }
-            for c in play_comps
-        ]
-        extracted = extract.extract_keywords(
-            play_docs,
-            generics=generics,
-            seed_description=seed_description,
-            suggest_terms=suggest,
-            fields=extract.PLAY_FIELDS,
-        )
-        merged.extend(
-            score.score_keywords(
-                extracted,
-                seed_description=seed_description,
-                suggest_terms=suggest,
-                n_docs=len(play_comps),
-                platform="play",
-            )
-        )
-
-    merged.sort(key=lambda e: (-e["opportunity"], -e["relevance"], e["term"], e["platform"]))
+    merged.sort(key=lambda e: (
+        -e.get("rank_score", e["opportunity"]), -e["opportunity"],
+        -e["relevance"], e["term"], e["platform"],
+    ))
     return {"keywords": merged}
 
 

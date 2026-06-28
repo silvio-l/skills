@@ -536,6 +536,7 @@ def build_report(
     _order = (
         ("apple_subtitle", "Apple Subtitle"),
         ("apple_similar", "Apple Similar"),
+        ("apple_mac", "Mac App Store"),
         ("apple_rss_charts", "Apple RSS Charts"),
         ("reddit", "Reddit"),
         ("apple_search_suggest", "Apple Search-Suggest"),
@@ -591,7 +592,7 @@ def _source_split(source_status):
     ``{"status":"unavailable","reason":"..."}``.
     """
     order = (
-        "apple_subtitle", "apple_similar", "apple_rss_charts",
+        "apple_subtitle", "apple_similar", "apple_mac", "apple_rss_charts",
         "reddit", "apple_search_suggest",
         "play_search", "play_charts", "play_similar", "play_search_suggest",
         "ms",
@@ -622,6 +623,7 @@ def _source_split(source_status):
 _HTML_SOURCE_ORDER = (
     ("apple_subtitle", "Apple Subtitle"),
     ("apple_similar", "Apple Similar"),
+    ("apple_mac", "Mac App Store"),
     ("apple_rss_charts", "Apple RSS Charts"),
     ("reddit", "Reddit"),
     ("apple_search_suggest", "Apple Search-Suggest"),
@@ -701,6 +703,13 @@ _SPLIT_LABELS_DE = {
     "long-tail-candidate": "Long-Tail",
 }
 
+_PLATFORM_LABELS_DE = {
+    "apple": "iOS",
+    "mac": "Mac",
+    "play": "Play",
+    "ms": "Microsoft",
+}
+
 
 def _html_tag(on, label):
     cls = "tag tag--on" if on else "tag"
@@ -723,7 +732,8 @@ def _html_keyword_table(keywords, *, include_platform=False):
             f'<td>{_html_tag(k.get("suggest"), "Suggest")}</td>',
         ]
         if include_platform:
-            cells.insert(1, f'<td><span class="split">{_html_esc(k.get("platform", "apple"))}</span></td>')
+            plat = _PLATFORM_LABELS_DE.get(k.get("platform", "apple"), k.get("platform", "apple"))
+            cells.insert(1, f'<td><span class="split">{_html_esc(plat)}</span></td>')
         rows.append(f"<tr>{''.join(cells)}</tr>")
 
     header_cells = [
@@ -1000,9 +1010,23 @@ def build_report_html(
     has_play = bool(play_comps) or any(s.startswith("play_") for s in source_status)
     en_without_us = config.get("language", "").lower() == "en" and config.get("country", "").lower() != "us"
 
-    # Partition keywords by platform for grouped tables
-    apple_kws = [k for k in keywords if k.get("platform", "apple") == "apple"]
-    play_kws = [k for k in keywords if k.get("platform") == "play"]
+    # App-type weighting (transparency): which stores were boosted, and why.
+    app_type = config.get("app_type", "both")
+    app_type_source = config.get("app_type_source", "")
+    _APP_TYPE_DE = {"desktop": "Desktop", "mobile": "Mobil", "both": "Desktop & Mobil"}
+    boosted_stores = {
+        "desktop": "Mac App Store + Microsoft Store",
+        "mobile": "iOS App Store + Google Play",
+        "both": "—",
+    }.get(app_type, "—")
+
+    # Keyword platforms actually present in the scored table.
+    platforms_present = []
+    for p in ("apple", "mac", "play", "ms"):
+        if any(k.get("platform", "apple") == p for k in keywords):
+            platforms_present.append(p)
+    mac_comps = [c for c in competitors if c.get("platform") == "mac"]
+    ms_scored = [k for k in keywords if k.get("platform") == "ms"]
 
     parts: List[str] = []
     parts.append("<!DOCTYPE html>")
@@ -1030,6 +1054,7 @@ def build_report_html(
         '<div class="masthead__eyebrow">'
         '<span class="eyebrow">ASO-Recherche</span>'
         f'<span class="badge">{mode_badge}</span>'
+        f'<span class="chip">{_APP_TYPE_DE.get(app_type, app_type)}-App</span>'
         f'<span class="pill-stat">💡 <b>{len(keywords)}</b> Keywords bewertet</span>'
         '</div>'
     )
@@ -1089,6 +1114,19 @@ def build_report_html(
     if s1_output and s1_output.get("dominant_themes"):
         themes = ", ".join(_html_esc(t) for t in s1_output["dominant_themes"][:5])
         parts.append(f'<p class="lead"><strong>Dominante Themen (S1):</strong> {themes}</p>')
+    # App-type weighting transparency
+    if app_type in ("desktop", "mobile"):
+        parts.append(
+            f'<p class="lead"><strong>App-Typ:</strong> {_APP_TYPE_DE.get(app_type, app_type)} '
+            f'<span class="sub">({_html_esc(app_type_source)})</span> → <strong>{boosted_stores}</strong> '
+            f'im Ranking ×1,3 höher gewichtet (Bewertungen &amp; Keywords). '
+            f'Die angezeigten 0–100-Signale bleiben roh; nur die Sortierung ist gewichtet.</p>'
+        )
+    else:
+        parts.append(
+            f'<p class="lead"><strong>App-Typ:</strong> Desktop &amp; Mobil '
+            f'<span class="sub">({_html_esc(app_type_source)})</span> — alle Stores gleich gewichtet.</p>'
+        )
     parts.append("</section>")
 
     # --- Wettbewerbslandschaft ---
@@ -1164,11 +1202,15 @@ def build_report_html(
         )
         parts.append(f'<ul class="facts">{items}</ul>')
     if ms_entries and _entry_is_ok(source_status.get("ms")):
-        parts.append("<h3>Microsoft Store · Windows-Desktop (qualitativ)</h3>")
+        parts.append("<h3>Microsoft Store · Windows-Desktop</h3>")
+        scored_note = (
+            f' {len(ms_scored)} mit Text fließen ins Keyword-Scoring ein (Slot-Modell '
+            f'Titel&times;5 · Beschreibung&times;2, Plattform „Microsoft").'
+            if ms_scored else ""
+        )
         parts.append(
             f'<p class="section__intro">{len(ms_entries)} App(s) auf apps.microsoft.com '
-            f'(StoreEdge-API: Bewertungen, Beschreibung, Kategorie). Kontext für die '
-            f'Positionierung — fließt NICHT ins Keyword-Scoring ein (kein MS-Slot-Modell).</p>'
+            f'(StoreEdge-API: Bewertungen, Beschreibung, Kategorie).{scored_note}</p>'
         )
         ms_sorted = sorted(ms_entries, key=lambda e: -(e.get("rating_count") or 0))
         ms_rows = []
@@ -1195,21 +1237,22 @@ def build_report_html(
     parts.append(
         '<p class="section__intro">Die Werte sind ein deterministisches '
         '<strong>Wettbewerbs-/Relevanz-Signal</strong> — ein Proxy, '
-        '<strong>kein</strong> echtes Suchvolumen. Wettbewerb = positionsgewichteter '
-        'Slot-Anteil (Apple Titel&times;5 · Untertitel&times;3 · Beschreibung&times;1; '
-        'Play Titel&times;5 · Kurz&times;4 · Lang&times;2); Relevanz = Blend aus '
-        'Seed-Nähe (40&nbsp;%) und Wettbewerber-Korpus-Zentralität (60&nbsp;%) (+15 Search-Suggest-Bonus); '
+        '<strong>kein</strong> echtes Suchvolumen. Vier Stores, je eigenes '
+        'Slot-Modell (iOS/Mac Titel&times;5 · Untertitel&times;3 · Beschreibung&times;1; '
+        'Play Titel&times;5 · Kurz&times;4 · Lang&times;2; Microsoft Titel&times;5 · '
+        'Beschreibung&times;2); Relevanz = Blend aus Seed-Nähe (40&nbsp;%) und '
+        'Wettbewerber-Korpus-Zentralität (60&nbsp;%) (+15 Search-Suggest-Bonus); '
         'Chance = Relevanz &times; (100 − Wettbewerb) (+10 Nischen-Bonus). '
+        'Sortiert nach app-typ-gewichteter Rangzahl (siehe Zusammenfassung). '
         'Balken-Farbe: grün = günstig, rot = ungünstig (Wettbewerb invers).</p>'
     )
     if not keywords:
         parts.append('<p class="empty">Keine Keywords bewertet (leerer Wettbewerber-Korpus).</p>')
     else:
-        if has_play and play_kws:
-            parts.append("<h3>Apple</h3>")
-            parts.append(_html_keyword_table(apple_kws))
-            parts.append("<h3>Google Play</h3>")
-            parts.append(_html_keyword_table(play_kws))
+        if len(platforms_present) > 1:
+            # One unified table across all stores, sorted by the app-type-weighted
+            # ranking (the Plattform column shows which store each term comes from).
+            parts.append(_html_keyword_table(keywords, include_platform=True))
         else:
             parts.append(_html_keyword_table(keywords))
         if gaps:
@@ -1334,13 +1377,20 @@ def build_report_html(
             'fließen in DIESELBE Engine mit Play-Gewichtung (Titel&times;5 · Kurz&times;4 · '
             'Lang&times;2); Play-Autocomplete ergänzt das Suggest-Set.</p>'
         )
+    if mac_comps:
+        parts.append(
+            f'<p class="meth-note">Mac App Store (Desktop) via die iTunes <code>macSoftware</code>-'
+            f'Entity: {len(mac_comps)} Desktop-Wettbewerber mit Core + Bewertungen, gescort mit '
+            f'dem iOS-Slot-Modell (Titel&times;5 · Untertitel&times;3 · Beschreibung&times;1), '
+            f'Plattform „Mac".</p>'
+        )
     if _entry_is_ok(source_status.get("ms")):
         parts.append(
-            '<p class="meth-note">Microsoft Store <strong>per Best-Effort</strong> via Playwright '
-            '(<code>apps.microsoft.com</code> ist eine SPA → <code>networkidle</code> + '
-            '<code>wait_for_selector</code>). Nur der <code>description</code>-Slot — '
-            '<strong>kein MS-ASO-Slot-Modell; MS-Daten fließen nie in Extraktion oder Scoring</strong>, '
-            'nur als qualitativer Kontext an S1.</p>'
+            '<p class="meth-note">Microsoft Store (Windows-Desktop) via die <strong>StoreEdge-'
+            'Produkt-API</strong> (sauberes JSON: Bewertung, Bewertungsanzahl, Beschreibung, '
+            'Kategorie). MS-Einträge mit Beschreibungstext fließen mit eigenem Slot-Modell '
+            '(Titel&times;5 · Beschreibung&times;2, Plattform „Microsoft") ins Keyword-Scoring; '
+            'alle MS-Apps speisen zusätzlich die qualitative Positionierungs-Tabelle und S1.</p>'
         )
     elif "ms" in source_status:
         parts.append(

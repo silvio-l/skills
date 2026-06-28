@@ -125,9 +125,27 @@ Play's TF-IDF position weighting follows Play's model, not Apple's.
 - **`is_gap`:** competitors own the term in their Title but the seed
   concept lacks it.
 
-Every scored row is tagged ``platform`` (``"apple"`` / ``"play"``) so the
-**unified** ``keywords.json`` carries both verticals in one table. The table
-is sorted by ``(-opportunity, -relevance, term, platform)`` — a total
+Every scored row is tagged ``platform`` and the **unified** ``keywords.json``
+carries **all four stores** in one table:
+
+- ``apple`` — iOS App Store (Title ×5 · Subtitle ×3 · Description ×1).
+- ``mac`` — **Mac App Store** (desktop), discovered via the iTunes
+  ``macSoftware`` entity; same slot model as iOS.
+- ``play`` — Google Play (Title ×5 · Short ×4 · Long ×2).
+- ``ms`` — **Microsoft Store** (Windows desktop): MS entries with description
+  text are scored with a Title ×5 · Description ×2 slot model (via
+  ``score.MS_SLOT_WEIGHTS``); all MS apps also feed the qualitative ratings
+  table + S1.
+
+**App-type weighting (desktop vs mobile).** ``input_config.detect_app_type``
+classifies the app from its description/name/seeds (explicit ``app_type`` in the
+input overrides; values ``mobile`` / ``desktop`` / ``both``). Every row carries a
+``platform_weight`` and ``rank_score = opportunity × platform_weight``: a
+**desktop** app boosts ``mac`` + ``ms`` by ``score.PLATFORM_PRIORITY_BOOST``
+(1.3), a **mobile** app boosts ``apple`` + ``play``, ``both`` is neutral. The
+boost is applied to the **ranking only** — the displayed 0–100 signals stay raw
+— and the report states the decision + its source transparently. The table is
+sorted by ``(-rank_score, -opportunity, -relevance, term, platform)`` — a total
 deterministic order (a term may appear once per platform).
 
 The exact boundary decisions live in named pure functions

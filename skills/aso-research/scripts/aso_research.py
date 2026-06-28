@@ -91,6 +91,11 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--language", default=None, help="listing language (default: de)")
     p.add_argument("--own-app-id", default=None, help="Modus A: your own app store id")
     p.add_argument(
+        "--app-type", default=None, choices=("mobile", "desktop", "both"),
+        help="app type for store weighting (default: auto-detected from the "
+             "description; desktop boosts Mac App Store + Microsoft Store)",
+    )
+    p.add_argument(
         "--seed-keyword",
         action="append",
         dest="seed_keywords",
@@ -148,6 +153,8 @@ def _merge_file_and_flags(args: argparse.Namespace) -> dict:
         raw["language"] = args.language
     if args.own_app_id is not None:
         raw["own_app_id"] = args.own_app_id
+    if args.app_type is not None:
+        raw["app_type"] = args.app_type
     if args.seed_keywords:
         raw["seed_keywords"] = args.seed_keywords
     if args.gate_token_limit is not None:
@@ -439,6 +446,29 @@ def run(argv=None) -> int:
             f"{len(suggest)} suggest terms",
             file=sys.stderr,
         )
+        # --- Mac App Store (desktop vertical) via the iTunes macSoftware entity ---
+        mac_competitors: list = []
+        try:
+            mac_data = itunes.discover(
+                config, cache_dir=args.cache_dir, fresh=args.fresh,
+                max_queries=args.max_queries, entity="macSoftware",
+            )
+            seen_apple = {c.get("id") for c in competitors}
+            for c in mac_data.get("competitors", []):
+                c["platform"] = "mac"  # re-tag (map_itunes_to_core defaults to apple)
+                if c.get("id") and c["id"] not in seen_apple:
+                    mac_competitors.append(c)
+            src_status["apple_mac"] = (
+                collect._ok_status(len(mac_competitors)) if mac_competitors
+                else collect._unavailable_status("empty: no Mac App Store results")
+            )
+        except Exception as exc:  # never-blocking
+            src_status["apple_mac"] = collect._unavailable_status(collect._exc_reason(exc))
+        competitors = competitors + mac_competitors
+        print(
+            f"[aso-research] mac app store: {len(mac_competitors)} desktop competitor(s)",
+            file=sys.stderr,
+        )
         play = collect.collect_play(
             config, seed_terms=seed_terms, country=country,
             cache_dir=args.cache_dir, fresh=args.fresh,
@@ -469,9 +499,21 @@ def run(argv=None) -> int:
             if not collect._status_is_ok(entry):
                 reason = entry.get("reason", "unavailable") if isinstance(entry, dict) else entry
                 print(f"[aso-research] source {src}: unavailable — {reason}", file=sys.stderr)
+        # MS now feeds the scored corpus too (Title + Description slot model,
+        # platform="ms"): every MS entry that carries description text is added
+        # as a scored competitor while ms_entries stays for the qualitative
+        # ratings table. For a desktop app these keywords are weighted up.
+        ms_scored = []
+        seen_all = {c.get("id") for c in competitors}
+        for e in ms_entries:
+            if e.get("description") and e.get("id") and e["id"] not in seen_all:
+                rec = dict(e)
+                rec["platform"] = "ms"
+                ms_scored.append(rec)
+        competitors = competitors + ms_scored
         print(
-            f"[aso-research] ms best-effort: {len(ms_entries)} qualitative entr(y/ies) "
-            f"(not scored; feeds S1 as qualitative context)",
+            f"[aso-research] ms store: {len(ms_entries)} entr(y/ies) "
+            f"({len(ms_scored)} with text → scored as platform=ms; all feed S1 context)",
             file=sys.stderr,
         )
         # Human-facing artefacts: written when the stage runs and left

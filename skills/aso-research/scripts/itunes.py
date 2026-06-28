@@ -218,16 +218,18 @@ def discover(
     fresh: bool = False,
     max_queries: int = 3,
     limit: int = DEFAULT_LIMIT,
+    entity: str = "software",
     search_fn=None,
     suggest_terms: Optional[List[str]] = None,
 ) -> Dict:
     """Run discovery for the resolved config and return process_results output.
 
     Query terms: seed keywords (capped at ``max_queries``), else the app
-    name. ``search_fn`` is injectable so a caller can substitute a
-    recorded fetch (tests); it defaults to the live :func:`search`.
-    ``suggest_terms`` (Apple Search-Suggest autocomplete) enrich the
-    extraction and boost relevance; collected by the dispatcher.
+    name. ``entity`` selects the App Store catalogue — ``"software"`` (iOS,
+    default) or ``"macSoftware"`` (Mac App Store, the desktop vertical).
+    ``search_fn`` is injectable so a caller can substitute a recorded fetch
+    (tests); it defaults to the live :func:`search`. ``suggest_terms`` (Apple
+    Search-Suggest autocomplete) enrich the extraction and boost relevance.
     """
     do_search = search_fn or search
     seeds = [s for s in (config.get("seed_keywords") or []) if s]
@@ -238,6 +240,7 @@ def discover(
         payload = do_search(
             term,
             country=config.get("country", "de"),
+            entity=entity,
             limit=limit,
             cache_dir=cache_dir,
             ttl=ttl,

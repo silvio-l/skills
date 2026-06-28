@@ -50,11 +50,18 @@ APPLE_FIELDS: tuple = (("title", 5), ("subtitle", 3), ("description", 1))
 # indexed). Mirrors score.PLAY_SLOT_WEIGHTS; kept here so extraction applies
 # Play's TF-IDF position weighting, not Apple's.
 PLAY_FIELDS: tuple = (("title", 5), ("short", 4), ("long", 2))
+# Mac App Store (desktop): same shape as iOS. Microsoft Store: Title + Desc only.
+MAC_FIELDS: tuple = APPLE_FIELDS
+MS_FIELDS: tuple = (("title", 5), ("description", 2))
 
 
 def fields_for(platform: str) -> tuple:
     """Resolve the per-platform ``(field, weight)`` tuple (Apple default)."""
-    return PLAY_FIELDS if platform == "play" else APPLE_FIELDS
+    if platform == "play":
+        return PLAY_FIELDS
+    if platform == "ms":
+        return MS_FIELDS
+    return APPLE_FIELDS  # apple (iOS) + mac share the iOS field model
 
 
 def _field_names(fields: Sequence) -> List[str]:

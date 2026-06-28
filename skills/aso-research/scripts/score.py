@@ -98,6 +98,36 @@ PLAY_SLOT_WEIGHTS: Dict[str, int] = {
     "long": 2,
 }
 
+# Mac App Store (desktop) — same listing shape as iOS (Title/Subtitle/Desc),
+# collected via the iTunes ``macSoftware`` entity, so it reuses Apple's weights.
+MAC_SLOT_WEIGHTS: Dict[str, int] = dict(APPLE_SLOT_WEIGHTS)
+
+# Microsoft Store (Windows desktop) — Title + Description only (no subtitle/
+# short slot). The store description is the main indexed text → weight 2.
+MS_SLOT_WEIGHTS: Dict[str, int] = {
+    "title": 5,
+    "description": 2,
+}
+
+# --- App-type → per-platform ranking weight --------------------------------
+# All four stores are always scored; the app type only *re-weights* the unified
+# ranking so the relevant market floats to the top. A desktop app boosts the
+# Mac App Store + Microsoft Store; a mobile app boosts iOS + Play. The boost is
+# applied to the ranking key (``opportunity × platform_weight``) only — the
+# displayed 0–100 signals stay the raw, honest values. Transparent in the report.
+PLATFORM_PRIORITY_BOOST = 1.3
+_DESKTOP_PLATFORMS = {"mac", "ms"}
+_MOBILE_PLATFORMS = {"apple", "play"}
+
+
+def platform_boost(app_type: str, platform: str) -> float:
+    """Ranking multiplier for ``platform`` given the detected ``app_type``."""
+    if app_type == "desktop" and platform in _DESKTOP_PLATFORMS:
+        return PLATFORM_PRIORITY_BOOST
+    if app_type == "mobile" and platform in _MOBILE_PLATFORMS:
+        return PLATFORM_PRIORITY_BOOST
+    return 1.0
+
 # Backwards-compat module-level aliases for the Apple weights (PRD formula).
 WEIGHT_TITLE = APPLE_SLOT_WEIGHTS["title"]
 WEIGHT_SUBTITLE = APPLE_SLOT_WEIGHTS["subtitle"]
@@ -109,6 +139,10 @@ def slot_weights_for(platform: str) -> Dict[str, int]:
     """Resolve the per-platform slot->weight map (Apple default)."""
     if platform == "play":
         return dict(PLAY_SLOT_WEIGHTS)
+    if platform == "mac":
+        return dict(MAC_SLOT_WEIGHTS)
+    if platform == "ms":
+        return dict(MS_SLOT_WEIGHTS)
     return dict(APPLE_SLOT_WEIGHTS)
 
 
@@ -245,6 +279,7 @@ def score_keywords(
     n_docs: int,
     platform: str = "apple",
     slot_weights: Mapping[str, int] = None,
+    app_type: str = "both",
 ) -> List[Dict]:
     """Attach Competition/Relevance/Opportunity/split/is_gap to candidates.
 
@@ -309,6 +344,7 @@ def score_keywords(
 
         opportunity = opportunity_score(competition, relevance)
         is_gap = title_hits > 0 and not _term_in_seed(term, seed_tokens)
+        pweight = platform_boost(app_type, platform)
 
         row: Dict = {
             "term": term,
@@ -317,6 +353,10 @@ def score_keywords(
             "competition": competition,
             "relevance": relevance,
             "opportunity": opportunity,
+            # ranking weight from the desktop/mobile app-type priority (1.0 =
+            # neutral). Applied to the sort key only; the 0–100 signals stay raw.
+            "platform_weight": round(pweight, 2),
+            "rank_score": round(opportunity * pweight, 2),
             "niche_bonus": NICHE_BONUS if niche_bonus_applies(competition, relevance) else 0,
             "split": split_label(relevance),
             "is_gap": is_gap,
