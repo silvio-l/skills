@@ -823,35 +823,51 @@ _HTML_CSS = r"""
   --good:#1FA971;--good-tint:#E4F5EC;
   --mid:#E0922F;--mid-tint:#FBEFDE;
   --bad:#E0544C;--bad-tint:#FBE7E5;
-  --shadow:0 1px 2px rgba(20,20,30,.04),0 4px 16px rgba(20,20,40,.05);
+  --shadow:0 1px 1px rgba(17,17,26,.035),0 4px 10px rgba(17,17,26,.04),0 12px 28px rgba(17,17,26,.05);
+  --shadow-sm:0 1px 2px rgba(17,17,26,.05),0 1px 1px rgba(17,17,26,.04);
+  --indigo-deep:#3B3BB0;
   --mono:"SF Mono","JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;
   --sans:-apple-system,BlinkMacSystemFont,system-ui,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
 }
 *{box-sizing:border-box}
-body{margin:0;font-family:var(--sans);color:var(--ink);background:var(--bg);line-height:1.55;-webkit-font-smoothing:antialiased}
-.sheet{max-width:1080px;margin:0 auto;padding:32px 22px 72px}
+body{margin:0;font-family:var(--sans);color:var(--ink);background:
+  radial-gradient(1200px 600px at 50% -200px,#EAEAF4 0%,var(--bg) 60%) no-repeat,var(--bg);
+  background-attachment:fixed;line-height:1.55;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+.sheet{max-width:1080px;margin:0 auto;padding:36px 22px 80px}
 a{color:var(--indigo)}
-.num,.kpi__value,.bar__num,.count{font-variant-numeric:tabular-nums}
-.eyebrow{font-size:.7rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--indigo)}
+.num,.kpi__value,.bar__num,.count,.herostat__num{font-variant-numeric:tabular-nums}
+.eyebrow{font-size:.7rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--indigo)}
 
-/* --- masthead: the app's toolbar identity --- */
-.masthead{background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);padding:26px 28px;display:flex;flex-direction:column;gap:8px}
-.masthead__eyebrow{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-.masthead__title{font-size:2rem;font-weight:700;letter-spacing:-.03em;line-height:1.1;margin:2px 0 0}
-.masthead__meta{font-size:.8rem;color:var(--mute);display:flex;flex-wrap:wrap;gap:5px 16px;margin-top:6px}
+/* --- masthead: a confident report header with a hero readout --- */
+.masthead{position:relative;overflow:hidden;background:
+  linear-gradient(180deg,#FBFBFE 0%,var(--card) 100%);border:1px solid var(--line);
+  border-radius:20px;box-shadow:var(--shadow);padding:30px 32px;display:flex;
+  flex-wrap:wrap;gap:22px 28px;align-items:center;justify-content:space-between}
+.masthead::before{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;
+  background:linear-gradient(180deg,var(--indigo) 0%,var(--indigo-deep) 100%)}
+.masthead__main{min-width:0;flex:1 1 360px}
+.masthead__eyebrow{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+.masthead__title{font-size:2.35rem;font-weight:760;letter-spacing:-.035em;line-height:1.05;margin:10px 0 0}
+.masthead__meta{font-size:.8rem;color:var(--mute);display:flex;flex-wrap:wrap;gap:5px 16px;margin-top:11px}
 .masthead__meta span::before{content:"";display:inline-block;width:4px;height:4px;border-radius:50%;background:var(--line-2);margin-right:8px;vertical-align:middle}
-.pill-stat{display:inline-flex;align-items:center;gap:6px;background:var(--orange-tint);color:var(--orange-ink);font-size:.78rem;font-weight:600;padding:5px 12px;border-radius:999px}
+.masthead__hero{display:flex;gap:10px}
+.herostat{background:var(--field);border:1px solid var(--line);border-radius:14px;padding:12px 18px;min-width:92px;text-align:center}
+.herostat--accent{background:linear-gradient(180deg,#6E6EE0,var(--indigo-deep));border-color:transparent;color:#fff;box-shadow:0 6px 16px rgba(70,70,192,.28)}
+.herostat__num{display:block;font-size:1.85rem;font-weight:780;letter-spacing:-.03em;line-height:1}
+.herostat__lbl{display:block;font-size:.64rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--mute);margin-top:5px}
+.herostat--accent .herostat__lbl{color:rgba(255,255,255,.82)}
+.pill-stat{display:inline-flex;align-items:center;gap:6px;background:var(--orange-tint);color:var(--orange-ink);font-size:.76rem;font-weight:650;padding:5px 12px;border-radius:999px}
 .pill-stat b{font-variant-numeric:tabular-nums}
 .badge{display:inline-block;font-size:.7rem;font-weight:600;padding:4px 11px;border-radius:999px;background:var(--indigo-tint);color:var(--indigo-ink)}
 .chip{display:inline-block;font-size:.72rem;font-weight:500;padding:4px 10px;border-radius:999px;background:var(--field);color:var(--ink-soft);border:1px solid var(--line)}
-.caveat{margin-top:12px;padding:10px 14px;background:var(--mid-tint);border:1px solid #EBC892;border-radius:10px;color:#7A4E12;font-size:.82rem}
+.caveat{flex-basis:100%;margin-top:4px;padding:10px 14px;background:var(--mid-tint);border:1px solid #EBC892;border-radius:10px;color:#7A4E12;font-size:.82rem}
 
 /* --- sections: clean white panels --- */
-.section{background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);padding:24px 26px;margin-top:18px}
-.section__head{display:flex;align-items:center;gap:12px;margin-bottom:18px}
-.section__title{font-size:1.2rem;font-weight:650;letter-spacing:-.015em;margin:0}
-.section h3{font-size:.95rem;font-weight:650;margin:22px 0 10px;color:var(--ink)}
-.section__intro{font-size:.85rem;color:var(--mute);max-width:78ch;margin:0 0 16px}
+.section{background:var(--card);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow);padding:26px 28px;margin-top:20px}
+.section__head{display:flex;align-items:center;gap:12px;margin-bottom:18px;padding-bottom:14px;border-bottom:1px solid var(--line)}
+.section__title{font-size:1.28rem;font-weight:680;letter-spacing:-.02em;margin:0}
+.section h3{font-size:.95rem;font-weight:680;margin:24px 0 10px;color:var(--ink);letter-spacing:-.01em}
+.section__intro{font-size:.85rem;color:var(--mute);max-width:80ch;margin:0 0 16px;line-height:1.65}
 
 /* --- signal channels (source health) --- */
 .channels{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:10px}
@@ -870,10 +886,12 @@ a{color:var(--indigo)}
 /* --- KPI readout --- */
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(98px,1fr));gap:10px}
 .kpi{background:var(--field);border:1px solid var(--line);border-radius:12px;padding:13px 15px}
-.kpi__label{display:block;font-size:.68rem;font-weight:600;letter-spacing:.02em;text-transform:uppercase;color:var(--mute);margin-bottom:3px}
-.kpi__value{font-size:1.55rem;font-weight:700;letter-spacing:-.02em}
+.kpi{box-shadow:var(--shadow-sm);transition:transform .15s ease}
+.kpi:hover{transform:translateY(-1px)}
+.kpi__label{display:block;font-size:.66rem;font-weight:650;letter-spacing:.05em;text-transform:uppercase;color:var(--mute);margin-bottom:4px}
+.kpi__value{font-size:1.7rem;font-weight:740;letter-spacing:-.025em}
 .lead{font-size:.88rem;margin:16px 0 0}
-.lead strong{font-weight:650}
+.lead strong{font-weight:680}
 
 /* --- data tables --- */
 .table{width:100%;border-collapse:collapse;font-size:.85rem}
@@ -885,14 +903,15 @@ a{color:var(--indigo)}
 .table__name{font-weight:600}
 .sub{color:var(--mute);font-weight:400}
 
-/* --- traffic-light bar meters (the Astro signature) --- */
-.meter{display:flex;align-items:center;gap:9px;min-width:124px}
-.bar{position:relative;flex:1;height:7px;background:var(--line);border-radius:99px;overflow:hidden}
-.bar__fill{position:absolute;inset:0 auto 0 0;height:100%;border-radius:99px}
-.bar--good .bar__fill{background:var(--good)}
-.bar--mid .bar__fill{background:var(--mid)}
-.bar--bad .bar__fill{background:var(--bad)}
-.bar__num{font-size:.8rem;font-weight:600;width:2.2ch;text-align:right;color:var(--ink-soft)}
+/* --- traffic-light bar meters (the signature element) --- */
+.meter{display:flex;align-items:center;gap:10px;min-width:128px}
+.bar{position:relative;flex:1;height:8px;background:#EAEAEE;border-radius:99px;
+  box-shadow:inset 0 1px 1.5px rgba(17,17,26,.08);overflow:hidden}
+.bar__fill{position:absolute;inset:0 auto 0 0;height:100%;border-radius:99px;box-shadow:inset 0 1px 0 rgba(255,255,255,.3)}
+.bar--good .bar__fill{background:linear-gradient(180deg,#27B97C,var(--good))}
+.bar--mid .bar__fill{background:linear-gradient(180deg,#EDA044,var(--mid))}
+.bar--bad .bar__fill{background:linear-gradient(180deg,#EA6259,var(--bad))}
+.bar__num{font-size:.82rem;font-weight:680;width:2.4ch;text-align:right;color:var(--ink)}
 .tag{display:inline-block;font-size:.68rem;font-weight:600;padding:2px 8px;border-radius:999px;background:var(--field);color:var(--mute);border:1px solid var(--line)}
 .tag--on{border-color:transparent;color:var(--indigo-ink);background:var(--indigo-tint)}
 .split{font-size:.78rem;color:var(--ink-soft)}
@@ -1040,12 +1059,13 @@ def build_report_html(
     mode_badge = (
         f'Modus A · nach Launch · {_html_esc(own_app_id)}' if modus_a else "Modus B · Pre-Launch"
     )
+    top_opp = max((int(k.get("opportunity", 0)) for k in keywords), default=0)
+    parts.append('<div class="masthead__main">')
     parts.append(
         '<div class="masthead__eyebrow">'
         '<span class="eyebrow">ASO-Recherche</span>'
         f'<span class="badge">{mode_badge}</span>'
         f'<span class="chip">{_APP_TYPE_DE.get(app_type, app_type)}-App</span>'
-        f'<span class="pill-stat">💡 <b>{len(keywords)}</b> Keywords bewertet</span>'
         '</div>'
     )
     parts.append(f'<h1 class="masthead__title">{_html_esc(config["app_name"])}</h1>')
@@ -1057,6 +1077,17 @@ def build_report_html(
     if seeds:
         meta_bits.append(f"<span>Seeds: {_html_esc(', '.join(seeds))}</span>")
     parts.append('<div class="masthead__meta">' + "".join(meta_bits) + "</div>")
+    parts.append("</div>")  # .masthead__main
+    parts.append(
+        '<div class="masthead__hero">'
+        f'<div class="herostat herostat--accent"><span class="herostat__num">{top_opp}</span>'
+        '<span class="herostat__lbl">Top-Chance</span></div>'
+        f'<div class="herostat"><span class="herostat__num">{len(keywords)}</span>'
+        '<span class="herostat__lbl">Keywords</span></div>'
+        f'<div class="herostat"><span class="herostat__num">{n_comp}</span>'
+        '<span class="herostat__lbl">Wettbewerber</span></div>'
+        '</div>'
+    )
     if en_without_us:
         parts.append(
             '<div class="caveat">Sprache ist EN, Land aber nicht US — die EN-Listing-'
@@ -1105,17 +1136,18 @@ def build_report_html(
         themes = ", ".join(_html_esc(t) for t in s1_output["dominant_themes"][:5])
         parts.append(f'<p class="lead"><strong>Dominante Themen (S1):</strong> {themes}</p>')
     # App-type weighting transparency
+    src_suffix = f' <span class="sub">({_html_esc(app_type_source)})</span>' if app_type_source else ""
     if app_type in ("desktop", "mobile"):
         parts.append(
-            f'<p class="lead"><strong>App-Typ:</strong> {_APP_TYPE_DE.get(app_type, app_type)} '
-            f'<span class="sub">({_html_esc(app_type_source)})</span> → <strong>{boosted_stores}</strong> '
+            f'<p class="lead"><strong>App-Typ:</strong> {_APP_TYPE_DE.get(app_type, app_type)}'
+            f'{src_suffix} → <strong>{boosted_stores}</strong> '
             f'im Ranking ×1,3 höher gewichtet (Bewertungen &amp; Keywords). '
             f'Die angezeigten 0–100-Signale bleiben roh; nur die Sortierung ist gewichtet.</p>'
         )
     else:
         parts.append(
-            f'<p class="lead"><strong>App-Typ:</strong> Desktop &amp; Mobil '
-            f'<span class="sub">({_html_esc(app_type_source)})</span> — alle Stores gleich gewichtet.</p>'
+            f'<p class="lead"><strong>App-Typ:</strong> Desktop &amp; Mobil'
+            f'{src_suffix} — alle Stores gleich gewichtet.</p>'
         )
     parts.append("</section>")
 
@@ -1223,8 +1255,8 @@ def build_report_html(
         '<strong>kein</strong> echtes Suchvolumen. Vier Stores, je eigenes '
         'Slot-Modell (iOS/Mac Titel&times;5 · Untertitel&times;3 · Beschreibung&times;1; '
         'Play Titel&times;5 · Kurz&times;4 · Lang&times;2; Microsoft Titel&times;5 · '
-        'Beschreibung&times;2); Relevanz = Blend aus Seed-Nähe (40&nbsp;%) und '
-        'Wettbewerber-Korpus-Zentralität (60&nbsp;%) (+15 Search-Suggest-Bonus); '
+        'Beschreibung&times;2); Relevanz = Blend aus Seed-Nähe (30&nbsp;%) und '
+        'Titel-/Hochsignal-Präsenz im Wettbewerber-Korpus (70&nbsp;%) (+15 Search-Suggest-Bonus); '
         'Chance = Relevanz &times; (100 − Wettbewerb) (+10 Nischen-Bonus). '
         'Sortiert nach app-typ-gewichteter Rangzahl (siehe Zusammenfassung). '
         'Balken-Farbe: grün = günstig, rot = ungünstig (Wettbewerb invers).</p>'
@@ -1442,10 +1474,11 @@ def build_report_html(
     _section("Begriffe", "Glossar")
     glossary_terms = [
         ("Relevanz",
-         "Wie sehr ein Keyword zur Nische gehört. Blend aus (40 %) Nähe zum "
-         "Seed-Konzept und (60 %) Zentralität im Wettbewerber-Korpus — also wie "
-         "stark die echten Markt-Apps den Begriff nutzen. So stehen oben die "
-         "Markt-Keywords, nicht die eigenen Beschreibungs-Füllwörter."),
+         "Wie sehr ein Keyword zur Nische gehört. Blend aus (30 %) Nähe zum "
+         "Seed-Konzept und (70 %) Präsenz in den Hochsignal-Feldern (Titel/"
+         "Untertitel) der Wettbewerber — also Begriffe, die die Markt-Apps "
+         "tatsächlich in ihre Titel schreiben. So stehen oben echte Such-Keywords, "
+         "nicht seltene Beschreibungs-Füllwörter."),
         ("Chance (Opportunity)",
          "Kombinierter Kennwert aus Relevanz und Wettbewerb. Je relevanter ein "
          "Keyword und je weniger umkämpft, desto höher die Chance. Der wichtigste "

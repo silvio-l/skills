@@ -14,16 +14,18 @@ Formulas (all shares are 0..1, scores rounded to int 0..100):
     Relevance (0..100)
         = a blend of two max-normalised signals (each / its run-max so the
           top term reaches ~1.0 and the fixed thresholds stay comparable):
-            * **seed cosine** (weight ``SEED_RELEVANCE_WEIGHT`` = 0.4) — TF-IDF
+            * **seed cosine** (weight ``SEED_RELEVANCE_WEIGHT`` = 0.3) — TF-IDF
               closeness to the seed concept; a phrase scores from the mean of
               its component tokens' seed weights (the verbatim phrase never
               occurs in the tokenised seed, so a naive lookup scored every
               phrase 0 — the bug that aggregation fixes);
-            * **corpus centrality** (weight 0.6) — the term's position-weighted
-              TF-IDF mass in the *competitor corpus* (``tf_weighted × idf``):
-              high for vocabulary the niche's apps actually use, low for the
-              seed description's own filler. This anchors the table in the real
-              market, not the seed's prose.
+            * **high-signal corpus presence** (weight 0.7) — the term's
+              position-weighted hits in the competitors' **high-signal slots**
+              (Title, Subtitle/Short; slot weight >= 3), **no IDF and excluding
+              the weakly-indexed description/long body**. ASO value tracks *title
+              presence*, not rarity: keywords competitors put in their titles
+              outrank rare description-only words (IDF used to invert this and
+              float a feature the app does not even have to the top).
           ``+15`` if the term appears in Apple/Play Search-Suggest autocomplete;
           clamped to [0, 100].
 
@@ -62,7 +64,7 @@ NICHE_BONUS = 10
 # top of the table is the niche's real keywords — not the seed description's own
 # filler words ("eingefügt", "werkzeug"), which the seed-only cosine over-rewards.
 # Weight leans toward the corpus: a keyword the market uses is the better ASO bet.
-SEED_RELEVANCE_WEIGHT = 0.4   # → 0.6 corpus-centrality weight
+SEED_RELEVANCE_WEIGHT = 0.3   # → 0.7 corpus (high-signal-field) weight
 NICHE_COMPETITION_MAX = 20  # strict: Competition < 20
 NICHE_RELEVANCE_MIN = 50   # strict: Relevance > 50
 PRIMARY_RELEVANCE_MIN = 50  # split threshold: Relevance >= 50
@@ -308,9 +310,15 @@ def score_keywords(
     # relevant term in each reaches ~1.0 and the fixed thresholds stay
     # comparable:
     #   * seed cosine     — closeness to the seed concept;
-    #   * corpus centrality — the term's position-weighted TF-IDF mass in the
-    #     competitor corpus (``tf_weighted × idf``): high for words the niche's
-    #     apps actually use, low for the seed description's own filler.
+    #   * corpus centrality — how much the niche's apps put the term in their
+    #     **high-signal fields** (Title, Subtitle/Short — slot weight >= 3),
+    #     position-weighted. This is the right ASO signal: value tracks title
+    #     presence, NOT rarity (no IDF — IDF inflated rare description-only words
+    #     like a feature the app does not even have) and NOT the weakly-indexed
+    #     description/long body (excluded — that is where prose filler lives).
+    #     So ``budget``/``finanzplaner`` (in many titles) outrank ``bankanbindung``
+    #     (description-only, zero title presence → corpus 0).
+    high_slots = [s for s, w in weights.items() if w >= 3]
     raw_cos: Dict[str, float] = {}
     corpus_raw: Dict[str, float] = {}
     max_cos = 0.0
@@ -321,7 +329,7 @@ def score_keywords(
         raw_cos[term] = raw
         if raw > max_cos:
             max_cos = raw
-        cr = float(c.get("tf_weighted", 0)) * idf.get(term, 0.0)
+        cr = float(sum(int(c.get(s + "_hits", 0)) * weights[s] for s in high_slots))
         corpus_raw[term] = cr
         if cr > max_corpus:
             max_corpus = cr
