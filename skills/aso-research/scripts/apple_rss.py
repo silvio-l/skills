@@ -23,8 +23,8 @@ source "unavailable".
 from __future__ import annotations
 
 import json
+import re
 import time
-import urllib.parse
 import urllib.request
 from typing import Callable, Dict, List, Optional
 
@@ -32,22 +32,26 @@ import cache as CACHE
 import politeness as POLITE
 from schema import PLATFORM
 
-# Apple Marketing Tools RSS (the feed 301-redirects here from the legacy
-# iTunes RSS host). Category + limit + size are query params.
-CHART_URL = "https://rss.applemarketingtools.com/api/v2/de/apps/top-free/"
-DEFAULT_LIMIT = 20  # deckel: keep charts bounded
+# Apple Marketing Tools RSS. The feed is **path-style**: the limit is a path
+# segment and the resource is ``apps.json`` — the legacy ``?limit=&category=``
+# query form 404s. This endpoint serves the *overall* top-free chart (no genre
+# scoping at this v2 path; the genre-scoped legacy ``/rss/`` feed is robots-
+# disallowed), so the caller post-filters chart apps to the seed category to
+# keep the keyword corpus on-topic.
+DEFAULT_LIMIT = 25  # deckel: keep charts bounded
 
 _RATE = POLITE.RateLimiter(seed=42)
 
+_DIGITS_RE = re.compile(r"\d+")
+
 
 def _chart_url(category: str, limit: int, country: str) -> str:
-    # The Marketing Tools endpoint uses path segments for the feed type;
-    # category/limit are query params. Keep it generic + best-effort.
-    base = f"https://rss.applemarketingtools.com/api/v2/{country}/apps/top-free/"
-    params = {"limit": str(limit)}
-    if category:
-        params["category"] = category
-    return base + "?" + urllib.parse.urlencode(params)
+    # category is intentionally unused: the v2 marketing-tools feed has no
+    # genre path; charts are overall top-free and category-filtered downstream.
+    return (
+        f"https://rss.marketingtools.apple.com/api/v2/{country}"
+        f"/apps/top-free/{int(limit)}/apps.json"
+    )
 
 
 def fetch_chart(
@@ -111,12 +115,15 @@ def parse_chart(raw: Dict) -> List[str]:
     results = (raw.get("feed") or {}).get("results") or []
     ids = []
     for entry in results:
-        # entry id is a URL like .../app/id324684580 -> keep the numeric id
+        # entry id may be a bare numeric string or a URL like
+        # .../app/id324684580?mt=8 — extract the leading digit run either way
+        # (a trailing query string must not leak into the id).
         eid = str(entry.get("id") or "")
         if "/id" in eid:
             eid = eid.rsplit("/id", 1)[-1]
-        if eid:
-            ids.append(eid)
+        m = _DIGITS_RE.match(eid)
+        if m:
+            ids.append(m.group())
     return ids
 
 

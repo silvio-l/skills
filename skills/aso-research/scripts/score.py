@@ -13,10 +13,15 @@ Formulas (all shares are 0..1, scores rounded to int 0..100):
 
     Relevance (0..100)
         = cosine TF-IDF similarity of the term to the seed description,
-          scaled to 100, +15 if the term appears in Apple Search-Suggest
-          autocomplete, clamped to [0, 100]. Cosine for a single-term
-          query reduces to the term's normalised TF-IDF weight inside the
-          seed description's profile.
+          **max-normalised** across the run (cosine / max_cosine × 100) so
+          the most-relevant term reaches ~100 and the fixed thresholds
+          (split ≥ 50, niche > 50) stay comparable; +15 if the term appears
+          in Apple/Play Search-Suggest autocomplete; clamped to [0, 100].
+          A single-term cosine reduces to the term's normalised TF-IDF
+          weight in the seed profile. A **phrase**'s cosine is the mean of
+          its component tokens' seed weights (the exact phrase string never
+          occurs verbatim in the tokenised seed, so a naive lookup scored
+          every phrase 0 — the bug this aggregation fixes).
 
     Opportunity
         = round( Relevance * (100 - Competition) / 100 )
@@ -183,12 +188,25 @@ def _seed_tfidf_profile(
     return {t: (tf.get(t, 0) * idf.get(t, 0.0)) for t in vocabulary}
 
 
-def _cosine_relevance(seed_profile: Mapping[str, float], term: str) -> float:
-    """Cosine similarity between a single-term query and the seed profile."""
+def _cosine_relevance(seed_profile: Mapping[str, float], term: str, *, is_phrase: bool = False) -> float:
+    """Cosine similarity between a term and the seed profile.
+
+    Single term: the term's own normalised TF-IDF weight in the seed. Phrase:
+    the **mean of its component tokens'** seed weights — the verbatim phrase
+    string never appears in the (single-token) seed profile, so a direct
+    lookup scored every multi-word ASO phrase 0. Component tokens are the
+    phrase's stopword-stripped tokens (``extract.tokenize``).
+    """
     norm = math.sqrt(sum(v * v for v in seed_profile.values()))
     if norm <= 0.0:
         return 0.0
-    return seed_profile.get(term, 0.0) / norm
+    if not is_phrase and " " not in term:
+        return seed_profile.get(term, 0.0) / norm
+    toks = _seed_term_tokens(term)
+    if not toks:
+        return seed_profile.get(term, 0.0) / norm
+    agg = sum(seed_profile.get(t, 0.0) for t in toks) / len(toks)
+    return agg / norm
 
 
 def _seed_term_tokens(term: str) -> set:
@@ -248,7 +266,7 @@ def score_keywords(
     max_cos = 0.0
     for c in extracted:
         term = c["term"]
-        raw = _cosine_relevance(seed_profile, term)
+        raw = _cosine_relevance(seed_profile, term, is_phrase=bool(c.get("is_phrase")))
         raw_cos[term] = raw
         if raw > max_cos:
             max_cos = raw

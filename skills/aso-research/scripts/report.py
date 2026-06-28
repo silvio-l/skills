@@ -640,48 +640,59 @@ def _html_esc(text) -> str:
 
 
 def _html_source_card(key, label, entry):
-    """Render one source-health card as an HTML snippet."""
+    """Render one source-health entry as a signal-channel card."""
     if not isinstance(entry, dict):
-        status = str(entry)
-        result_count = None
-        reason = ""
+        status, result_count, reason = str(entry), None, ""
     else:
         status = entry.get("status", "?")
         result_count = entry.get("result_count")
         reason = _html_esc(entry.get("reason", ""))
 
-    if status == "ok":
-        if result_count is not None and result_count == 0:
-            css_class = "ok-empty"
-            count_str = "0 Ergebnisse"
-        elif result_count is not None:
-            css_class = "ok"
-            count_str = f"{result_count} Ergebnis(se)"
-        else:
-            css_class = "ok"
-            count_str = "lief"
+    if status == "ok" and result_count == 0:
+        cls, read = "empty", "0 Treffer"
+    elif status == "ok" and result_count is not None:
+        cls, read = "ok", f"{result_count} Treffer"
+    elif status == "ok":
+        cls, read = "ok", "aktiv"
     else:
-        css_class = "unavailable"
-        count_str = "nicht verfügbar"
+        cls, read = "down", "nicht verfügbar"
 
-    note_cell = f'<span class="note">{reason}</span>' if reason else ""
+    note = f'<span class="channel__note">{reason}</span>' if reason else ""
     return (
-        f'<div class="source-card {css_class}">'
-        f'<span class="source-label">{_html_esc(label)}</span>'
-        f'<span class="source-status">{count_str}</span>'
-        f'{note_cell}'
+        f'<div class="channel channel--{cls}">'
+        f'<span class="channel__name">{_html_esc(label)}</span>'
+        f'<span class="channel__read">{read}</span>{note}'
         f'</div>'
     )
 
 
-def _html_score_cell(score, max_score=100):
-    """Render a score cell with an inline bar indicator."""
-    pct = min(max(int(score), 0), max_score)
+def _meter_band(score, direction):
+    """Traffic-light band for a meter value (Astro semantics).
+
+    ``direction`` ``"up"`` = high is good (green high → red low; relevance,
+    opportunity); ``"down"`` = high is bad (red high → green low; competition,
+    mirroring Astro's Popularity vs Difficulty colouring).
+    """
+    s = min(max(int(score), 0), 100)
+    if direction == "down":
+        return "bad" if s >= 66 else "mid" if s >= 33 else "good"
+    return "good" if s >= 66 else "mid" if s >= 33 else "bad"
+
+
+def _html_meter_cell(score, metric):
+    """Render a score cell as a traffic-light bar meter (track + fill + number).
+
+    ``metric`` is ``"comp"`` (high = bad), ``"rel"`` or ``"opp"`` (high = good).
+    The ``width`` is a data-driven value, so it stays inline; the colour is a
+    value-derived class.
+    """
+    pct = min(max(int(score), 0), 100)
+    band = _meter_band(pct, "down" if metric == "comp" else "up")
     return (
-        f'<td class="score-cell">'
-        f'<div class="score-bar"><div class="score-fill" style="width:{pct}%"></div></div>'
-        f'<span class="score-num">{pct}</span>'
-        f'</td>'
+        f'<td class="num"><div class="meter">'
+        f'<span class="bar bar--{band}"><span class="bar__fill" style="width:{pct}%"></span></span>'
+        f'<span class="bar__num">{pct}</span>'
+        f'</div></td>'
     )
 
 
@@ -691,23 +702,28 @@ _SPLIT_LABELS_DE = {
 }
 
 
+def _html_tag(on, label):
+    cls = "tag tag--on" if on else "tag"
+    return f'<span class="{cls}">{label}</span>' if on else '<span class="sub">—</span>'
+
+
 def _html_keyword_table(keywords, *, include_platform=False):
-    """Render the keyword table as an HTML snippet with score bars."""
+    """Render the keyword table with signal meters per metric."""
     rows = []
     for k in keywords[:_KEYWORD_REPORT_LIMIT]:
         split_key = k.get("split", "")
         split_label = _SPLIT_LABELS_DE.get(split_key, split_key.replace("-candidate", ""))
         cells = [
-            f"<td>{_html_esc(k.get('term', ''))}</td>",
-            _html_score_cell(k.get("competition", 0)),
-            _html_score_cell(k.get("relevance", 0)),
-            _html_score_cell(k.get("opportunity", 0)),
-            f"<td>{_html_esc(split_label)}</td>",
-            f"<td>{'ja' if k.get('is_gap') else ''}</td>",
-            f"<td>{'ja' if k.get('suggest') else ''}</td>",
+            f'<td class="table__name">{_html_esc(k.get("term", ""))}</td>',
+            _html_meter_cell(k.get("competition", 0), "comp"),
+            _html_meter_cell(k.get("relevance", 0), "rel"),
+            _html_meter_cell(k.get("opportunity", 0), "opp"),
+            f'<td><span class="split">{_html_esc(split_label)}</span></td>',
+            f'<td>{_html_tag(k.get("is_gap"), "Lücke")}</td>',
+            f'<td>{_html_tag(k.get("suggest"), "Suggest")}</td>',
         ]
         if include_platform:
-            cells.insert(1, f"<td>{_html_esc(k.get('platform', 'apple'))}</td>")
+            cells.insert(1, f'<td><span class="split">{_html_esc(k.get("platform", "apple"))}</span></td>')
         rows.append(f"<tr>{''.join(cells)}</tr>")
 
     header_cells = [
@@ -716,57 +732,55 @@ def _html_keyword_table(keywords, *, include_platform=False):
         "<th>Wettbewerb</th>",
         "<th>Relevanz</th>",
         "<th>Chance</th>",
-        "<th>Kategorie</th>",
-        "<th>Lücke</th>",
+        "<th>Klasse</th>",
+        "<th>Gap</th>",
         "<th>Suggest</th>",
     ]
     colspan = 7 + (1 if include_platform else 0)
+    body = "".join(rows) if rows else f'<tr><td colspan="{colspan}" class="empty">Keine Keywords bewertet.</td></tr>'
     return (
-        f'<table class="kw-table">'
+        f'<table class="table table--kw">'
         f'<thead><tr>{"".join(header_cells)}</tr></thead>'
-        f'<tbody>{"".join(rows) if rows else f"<tr><td colspan={colspan}>Keine Keywords bewertet.</td></tr>"}'
-        f'</tbody></table>'
+        f'<tbody>{body}</tbody></table>'
     )
 
 
-def _html_bucket_card(title, keywords, accent_class):
-    """Render an opportunity-bucket card as an HTML snippet."""
-    terms = ", ".join(_html_esc(k["term"]) for k in keywords) if keywords else "&mdash;"
-    css_map = {
-        "schnelle-gewinne": "schnelle-gewinne",
-        "nischen-hebel": "nischen-hebel",
-        "abdeckungsluecken": "abdeckungsluecken",
-    }
+def _html_bucket_card(title, keywords, kind):
+    """Render an opportunity-bucket card (kind: win | niche | gap)."""
+    if keywords:
+        terms = ", ".join(_html_esc(k["term"]) for k in keywords)
+        cls = "bucket__terms"
+    else:
+        terms = "keine"
+        cls = "bucket__terms is-empty"
     return (
-        f'<div class="bucket-card {css_map.get(accent_class, accent_class)}">'
-        f'<h4>{_html_esc(title)}</h4>'
-        f'<p>{terms}</p>'
+        f'<div class="bucket bucket--{kind}">'
+        f'<p class="bucket__title">{_html_esc(title)}</p>'
+        f'<p class="{cls}">{terms}</p>'
         f'</div>'
     )
 
 
 def _html_brand_conflict_row(c):
-    strat_list = ", ".join(c.get("strategies", []))
+    strat_list = _html_esc(", ".join(c.get("strategies", [])))
     return (
-        f'<tr class="brand-conflict">'
-        f'<td><span class="badge-danger">&#9888;</span> {_html_esc(c.get("term", ""))}</td>'
-        f'<td><span class="badge-danger">FORBIDDEN</span> {_html_esc(c.get("forbidden_match", ""))}</td>'
-        f'<td>{_html_esc(c.get("replacement", "") or "&mdash;")}</td>'
-        f'<td>{c.get("opportunity", 0)}</td>'
-        f'<td>{c.get("relevance", 0)}</td>'
-        f'<td class="strat-cell">{_html_esc(strat_list)}</td>'
-        f'</tr>'
+        f"<tr>"
+        f'<td class="table__name">{_html_esc(c.get("term", ""))}</td>'
+        f'<td><span class="pill">verboten</span> {_html_esc(c.get("forbidden_match", ""))}</td>'
+        f'<td>{_html_esc(c.get("replacement", "") or "—")}</td>'
+        f'<td class="num">{c.get("opportunity", 0)}</td>'
+        f'<td class="num">{c.get("relevance", 0)}</td>'
+        f'<td class="sub">{strat_list}</td>'
+        f"</tr>"
     )
 
 
-def _html_listing_slots(s2_output, h2_output, *, store_label="Apple", slot_limits=""):
-    """Render S2 listing proposals as HTML."""
+def _html_listing_slots(s2_output, h2_output, *, store_label="Apple"):
+    """Render S2 listing proposals (1 recommended + 2 alternatives per slot)."""
     if not s2_output or not s2_output.get("slots"):
         return (
-            f'<p class="pending">'
-            f'<em>{_html_esc(store_label)} Listing-Empfehlung ausstehend &mdash; '
-            f'S2 Listing-Stratege (Sonnet) Subagent ausführen.</em>'
-            f'</p>'
+            f'<p class="pending">{_html_esc(store_label)}-Listing-Empfehlung ausstehend '
+            f'— S2 Listing-Strategen (Sonnet) ausführen.</p>'
         )
     parts = []
     for slot in s2_output.get("slots", []):
@@ -775,129 +789,177 @@ def _html_listing_slots(s2_output, h2_output, *, store_label="Apple", slot_limit
         rec_text = _html_esc(rec.get("text", ""))
         rec_count = rec.get("char_count", len(rec.get("text", "")))
         parts.append(
-            f'<div class="listing-slot">'
-            f'<strong>{name}</strong> (empfohlen): '
-            f'<code>{rec_text}</code> <span class="char-count">({rec_count} Zeichen)</span>'
+            f'<div class="slot">'
+            f'<span class="slot__name">{name}</span>'
+            f'<p class="slot__rec"><code>{rec_text}</code>'
+            f'<span class="count">{rec_count} Z.</span></p>'
         )
-        alts = slot.get("alternatives") or []
-        for i, alt in enumerate(alts[:2], start=1):
+        for i, alt in enumerate((slot.get("alternatives") or [])[:2], start=1):
             alt_text = _html_esc(alt.get("text", ""))
             alt_count = alt.get("char_count", len(alt.get("text", "")))
             parts.append(
-                f'<span class="alt">Alt {i}: <code>{alt_text}</code> ({alt_count} Zeichen)</span>'
+                f'<span class="slot__alt">Alt {i}: <code>{alt_text}</code> '
+                f'<span class="count">{alt_count} Z.</span></span>'
             )
         parts.append("</div>")
     if h2_output:
-        status = _html_esc(str(h2_output.get("status", "&mdash;")))
+        status = _html_esc(str(h2_output.get("status", "—")))
         note = _html_esc(h2_output.get("note", ""))
         parts.append(
-            f'<div class="h2-crosscheck">'
-            f'<strong>H2-Cross-Check ({_html_esc(store_label)}):</strong> {status} &mdash; {note}'
-            f'</div>'
+            f'<div class="crosscheck"><strong>H2-Cross-Check ({_html_esc(store_label)}):</strong> '
+            f'{status} — {note}</div>'
         )
     return "\n".join(parts)
 
 
 _HTML_CSS = r"""
-body{margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:#1A1D23;background:#F7F8FA;line-height:1.6}
-.container{max-width:960px;margin:0 auto;padding:24px 20px 60px}
+:root{
+  --ink:#1D1D1F;--ink-soft:#3A3A3E;--mute:#6E6E73;
+  --bg:#F2F2F5;--card:#FFFFFF;--field:#F5F5F7;--line:#E6E6EA;--line-2:#D7D7DC;
+  --indigo:#5B5BD6;--indigo-ink:#4646C0;--indigo-tint:#EDEDFB;
+  --orange:#F59E0B;--orange-ink:#B4730A;--orange-tint:#FEF1DC;
+  --good:#1FA971;--good-tint:#E4F5EC;
+  --mid:#E0922F;--mid-tint:#FBEFDE;
+  --bad:#E0544C;--bad-tint:#FBE7E5;
+  --shadow:0 1px 2px rgba(20,20,30,.04),0 4px 16px rgba(20,20,40,.05);
+  --mono:"SF Mono","JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,system-ui,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:var(--sans);color:var(--ink);background:var(--bg);line-height:1.55;-webkit-font-smoothing:antialiased}
+.sheet{max-width:1080px;margin:0 auto;padding:32px 22px 72px}
+a{color:var(--indigo)}
+.num,.kpi__value,.bar__num,.count{font-variant-numeric:tabular-nums}
+.eyebrow{font-size:.7rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--indigo)}
 
-header{background:linear-gradient(135deg,#4338CA 0%,#3730A3 100%);color:#fff;padding:32px 28px;border-radius:10px;margin-bottom:24px}
-header h1{font-family:Georgia,ui-serif,serif;font-size:1.75rem;margin:0 0 8px;font-weight:400;letter-spacing:-0.01em}
-header .meta{font-size:.8rem;color:rgba(255,255,255,.65)}
-header .modus{display:inline-block;background:rgba(255,255,255,.12);color:rgba(255,255,255,.85);padding:3px 10px;border-radius:4px;font-size:.75rem;margin-top:8px}
-header .en-caveat{background:#FEF3C7;color:#92400E;padding:6px 12px;border-radius:4px;margin-top:10px;font-size:.8rem;display:inline-block}
+/* --- masthead: the app's toolbar identity --- */
+.masthead{background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);padding:26px 28px;display:flex;flex-direction:column;gap:8px}
+.masthead__eyebrow{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.masthead__title{font-size:2rem;font-weight:700;letter-spacing:-.03em;line-height:1.1;margin:2px 0 0}
+.masthead__meta{font-size:.8rem;color:var(--mute);display:flex;flex-wrap:wrap;gap:5px 16px;margin-top:6px}
+.masthead__meta span::before{content:"";display:inline-block;width:4px;height:4px;border-radius:50%;background:var(--line-2);margin-right:8px;vertical-align:middle}
+.pill-stat{display:inline-flex;align-items:center;gap:6px;background:var(--orange-tint);color:var(--orange-ink);font-size:.78rem;font-weight:600;padding:5px 12px;border-radius:999px}
+.pill-stat b{font-variant-numeric:tabular-nums}
+.badge{display:inline-block;font-size:.7rem;font-weight:600;padding:4px 11px;border-radius:999px;background:var(--indigo-tint);color:var(--indigo-ink)}
+.chip{display:inline-block;font-size:.72rem;font-weight:500;padding:4px 10px;border-radius:999px;background:var(--field);color:var(--ink-soft);border:1px solid var(--line)}
+.caveat{margin-top:12px;padding:10px 14px;background:var(--mid-tint);border:1px solid #EBC892;border-radius:10px;color:#7A4E12;font-size:.82rem}
 
-section{background:#fff;border-radius:10px;padding:28px;margin-bottom:20px;box-shadow:0 1px 2px rgba(0,0,0,.04),0 2px 8px rgba(0,0,0,.04);border:1px solid #E5E7EB}
-section h2{font-family:Georgia,ui-serif,serif;font-size:1.3rem;margin:0 0 18px;color:#4338CA;font-weight:400;letter-spacing:-0.01em;border-bottom:2px solid #EEF2FF;padding-bottom:10px}
-section h3{font-size:1.05rem;margin:20px 0 10px;color:#3730A3;font-family:Georgia,ui-serif,serif;font-weight:400}
-section h4{font-size:.9rem;margin:0 0 6px;color:#4338CA}
+/* --- sections: clean white panels --- */
+.section{background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);padding:24px 26px;margin-top:18px}
+.section__head{display:flex;align-items:center;gap:12px;margin-bottom:18px}
+.section__title{font-size:1.2rem;font-weight:650;letter-spacing:-.015em;margin:0}
+.section h3{font-size:.95rem;font-weight:650;margin:22px 0 10px;color:var(--ink)}
+.section__intro{font-size:.85rem;color:var(--mute);max-width:78ch;margin:0 0 16px}
 
-.source-board{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-bottom:12px}
-.source-card{border-radius:8px;padding:12px 14px;display:flex;flex-direction:column;gap:4px;border:1px solid #E5E7EB}
-.source-card.ok{background:#ECFDF5;border-color:#A7F3D0}
-.source-card.ok-empty{background:#F9FAFB;border-color:#E5E7EB}
-.source-card.unavailable{background:#FEF3C7;border-color:#FDE68A}
-.source-label{font-size:.72rem;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:.04em}
-.source-status{font-size:.75rem;font-weight:700}
-.source-card.ok .source-status{color:#059669}
-.source-card.ok-empty .source-status{color:#6B7280}
-.source-card.unavailable .source-status{color:#92400E}
-.source-card .note{font-size:.68rem;color:#6B7280;word-break:break-word}
-.source-summary{font-size:.78rem;color:#6B7280;margin-top:8px}
+/* --- signal channels (source health) --- */
+.channels{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:10px}
+.channel{background:var(--field);border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:5px}
+.channel--down{background:var(--mid-tint);border-color:#EBC892}
+.channel__name{font-size:.76rem;font-weight:600;color:var(--ink-soft)}
+.channel__read{font-size:.84rem;font-weight:700;display:flex;align-items:center;gap:6px}
+.channel__read::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--line-2);flex:none}
+.channel--ok .channel__read{color:var(--good)}.channel--ok .channel__read::before{background:var(--good)}
+.channel--empty .channel__read{color:var(--mute)}
+.channel--down .channel__read{color:var(--mid)}.channel--down .channel__read::before{background:var(--mid)}
+.channel__note{font-size:.68rem;color:var(--mute);word-break:break-word}
+.provenance{font-size:.8rem;color:var(--mute);margin-top:14px;line-height:1.7}
+.provenance strong{color:var(--ink-soft)}
 
-.kpi-row{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px}
-.kpi{background:#F7F8FA;border-radius:8px;padding:12px 16px;min-width:100px;border:1px solid #E5E7EB}
-.kpi-label{font-size:.68rem;color:#6B7280;text-transform:uppercase;letter-spacing:.05em;display:block}
-.kpi-value{font-size:1.2rem;font-weight:700;color:#4338CA;font-variant-numeric:tabular-nums}
+/* --- KPI readout --- */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(98px,1fr));gap:10px}
+.kpi{background:var(--field);border:1px solid var(--line);border-radius:12px;padding:13px 15px}
+.kpi__label{display:block;font-size:.68rem;font-weight:600;letter-spacing:.02em;text-transform:uppercase;color:var(--mute);margin-bottom:3px}
+.kpi__value{font-size:1.55rem;font-weight:700;letter-spacing:-.02em}
+.lead{font-size:.88rem;margin:16px 0 0}
+.lead strong{font-weight:650}
 
-.comp-table{width:100%;border-collapse:collapse;font-size:.85rem}
-.comp-table th{text-align:left;padding:8px 10px;background:#F7F8FA;font-weight:600;color:#6B7280;font-size:.72rem;text-transform:uppercase;letter-spacing:.04em}
-.comp-table td{padding:8px 10px;border-bottom:1px solid #F3F4F6}
-.comp-table tr:hover{background:#FAFBFC}
+/* --- data tables --- */
+.table{width:100%;border-collapse:collapse;font-size:.85rem}
+.table th{text-align:left;padding:8px 12px;border-bottom:1px solid var(--line-2);font-size:.7rem;font-weight:600;letter-spacing:.02em;text-transform:uppercase;color:var(--mute);white-space:nowrap}
+.table td{padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:middle}
+.table tbody tr:last-child td{border-bottom:0}
+.table tbody tr:hover{background:var(--field)}
+.table .num{text-align:right}
+.table__name{font-weight:600}
+.sub{color:var(--mute);font-weight:400}
 
-.bucket-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
-.bucket-card{border-radius:10px;padding:18px;border:1px solid #E5E7EB}
-.bucket-card.schnelle-gewinne{background:#ECFDF5;border-color:#A7F3D0}
-.bucket-card.nischen-hebel{background:#EEF2FF;border-color:#C7D2FE}
-.bucket-card.abdeckungsluecken{background:#FEF3C7;border-color:#FDE68A}
-.bucket-card h4{font-size:.85rem;margin-bottom:6px}
-.bucket-card p{font-size:.8rem;color:#6B7280;margin:4px 0 0}
+/* --- traffic-light bar meters (the Astro signature) --- */
+.meter{display:flex;align-items:center;gap:9px;min-width:124px}
+.bar{position:relative;flex:1;height:7px;background:var(--line);border-radius:99px;overflow:hidden}
+.bar__fill{position:absolute;inset:0 auto 0 0;height:100%;border-radius:99px}
+.bar--good .bar__fill{background:var(--good)}
+.bar--mid .bar__fill{background:var(--mid)}
+.bar--bad .bar__fill{background:var(--bad)}
+.bar__num{font-size:.8rem;font-weight:600;width:2.2ch;text-align:right;color:var(--ink-soft)}
+.tag{display:inline-block;font-size:.68rem;font-weight:600;padding:2px 8px;border-radius:999px;background:var(--field);color:var(--mute);border:1px solid var(--line)}
+.tag--on{border-color:transparent;color:var(--indigo-ink);background:var(--indigo-tint)}
+.split{font-size:.78rem;color:var(--ink-soft)}
 
-.kw-table{width:100%;border-collapse:collapse;font-size:.85rem;margin-top:8px}
-.kw-table th{text-align:left;padding:6px 10px;background:#F7F8FA;font-weight:600;color:#6B7280;font-size:.72rem;text-transform:uppercase;letter-spacing:.04em}
-.kw-table td{padding:6px 10px;border-bottom:1px solid #F3F4F6;font-variant-numeric:tabular-nums}
-.kw-table tr:hover{background:#FAFBFC}
+/* --- opportunity buckets --- */
+.buckets{display:grid;grid-template-columns:repeat(auto-fit,minmax(244px,1fr));gap:12px}
+.bucket{border:1px solid var(--line);border-radius:12px;padding:16px 18px;background:var(--field)}
+.bucket--win{background:var(--good-tint);border-color:#BBE6CE}
+.bucket--niche{background:var(--indigo-tint);border-color:#D5D5F4}
+.bucket--gap{background:var(--mid-tint);border-color:#EBC892}
+.bucket__title{font-size:.72rem;font-weight:700;letter-spacing:.01em;text-transform:uppercase;margin:0 0 8px;color:var(--ink-soft)}
+.bucket__terms{font-size:.86rem;margin:0;color:var(--ink)}
+.bucket__terms.is-empty{color:var(--mute)}
 
-.score-cell{min-width:95px;white-space:nowrap}
-.score-bar{display:inline-block;width:64px;height:6px;background:#E5E7EB;border-radius:3px;vertical-align:middle;margin-right:6px;overflow:hidden}
-.score-fill{height:100%;background:#4338CA;border-radius:3px;transition:width .3s ease}
-.score-num{font-size:.8rem;font-weight:600;color:#1A1D23;vertical-align:middle;font-variant-numeric:tabular-nums}
+/* --- positioning / generic lists --- */
+.facts{list-style:none;padding:0;margin:0}
+.facts li{font-size:.88rem;padding:8px 0;border-bottom:1px solid var(--line)}
+.facts li:last-child{border-bottom:0}
+.facts b{font-weight:650}
+.quotes{list-style:none;padding:0;margin:8px 0 0}
+.quotes li{font-size:.8rem;color:var(--mute);padding:3px 0}
 
-.brand-panel{border:2px solid #991B1B;border-radius:10px;padding:22px;background:#FEF2F2;margin-top:16px}
-.brand-panel h3{color:#991B1B;margin-top:0}
-.brand-note{font-size:.8rem;color:#991B1B;margin-bottom:14px}
-.brand-table{width:100%;border-collapse:collapse;font-size:.85rem}
-.brand-table th{text-align:left;padding:6px 10px;background:#FECACA;font-weight:600;color:#991B1B;font-size:.72rem;text-transform:uppercase;letter-spacing:.04em}
-.brand-table td{padding:6px 10px;border-bottom:1px solid #FECACA}
-tr.brand-conflict{background:#FEF2F2}
-tr.brand-conflict:hover{background:#FEE2E2}
-.badge-danger{display:inline-block;background:#991B1B;color:#fff;padding:1px 7px;border-radius:4px;font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.03em}
-.strat-cell{max-width:260px;font-size:.78rem;color:#6B7280}
+/* --- brand conflicts --- */
+.brand{border:1px solid #EFC4C0;background:var(--bad-tint);border-radius:12px;padding:18px 20px;margin-top:18px}
+.brand__title{font-size:1rem;font-weight:650;color:#B23B33;margin:0 0 8px}
+.brand__note{font-size:.82rem;color:#7C342D;margin:0 0 14px;max-width:78ch}
+.table--brand th{border-bottom-color:#EFC4C0}
+.table--brand td{border-bottom-color:#F0D4D1}
+.pill{display:inline-block;font-size:.66rem;font-weight:700;letter-spacing:.02em;text-transform:uppercase;padding:2px 8px;border-radius:999px;background:var(--bad);color:#fff}
 
-.listing-slot{margin:6px 0;font-size:.88rem}
-.listing-slot code{background:#F3F4F6;padding:1px 6px;border-radius:4px;font-size:.82rem;font-family:"SF Mono",ui-monospace,monospace}
-.char-count{color:#6B7280;font-size:.78rem}
-.listing-slot .alt{display:block;margin-left:20px;font-size:.82rem;color:#6B7280}
-.h2-crosscheck{font-size:.82rem;margin-top:12px;padding:8px 14px;background:#ECFDF5;border-radius:6px;color:#065F46}
-.listing-store{margin-bottom:22px}
-.pending{color:#6B7280;font-size:.82rem;font-style:italic}
+/* --- listing recommendations --- */
+.listing{margin-bottom:18px}
+.slot{padding:12px 0;border-bottom:1px solid var(--line)}
+.slot:last-child{border-bottom:0}
+.slot__name{font-size:.7rem;font-weight:700;letter-spacing:.02em;text-transform:uppercase;color:var(--indigo-ink)}
+.slot__rec{font-size:.9rem;margin:5px 0 0}
+code{font-family:var(--mono);font-size:.82rem;background:var(--field);border:1px solid var(--line);padding:2px 7px;border-radius:6px}
+.count{font-size:.74rem;color:var(--mute);margin-left:6px}
+.slot__alt{display:block;font-size:.82rem;color:var(--mute);margin:5px 0 0 16px}
+.crosscheck{font-size:.78rem;margin-top:12px;padding:9px 13px;background:var(--good-tint);border:1px solid #BBE6CE;border-radius:10px;color:#13694A}
+.pending{color:var(--mute);font-size:.85rem}
 
-.glossary-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px}
-.glossary-card{padding:16px;border-radius:8px;background:#F7F8FA;border:1px solid #E5E7EB}
-.glossary-card dt{font-size:.85rem;font-weight:700;color:#4338CA;margin-bottom:4px}
-.glossary-card dd{font-size:.78rem;color:#6B7280;margin:0;line-height:1.5}
+/* --- methodology + honesty --- */
+.honesty{border:1px solid var(--indigo-tint);background:var(--indigo-tint);border-radius:12px;padding:16px 20px;margin-top:14px}
+.honesty__title{font-size:.74rem;font-weight:700;letter-spacing:.01em;text-transform:uppercase;color:var(--indigo-ink);margin:0 0 10px}
+.honesty ul{margin:0;padding-left:18px}
+.honesty li{font-size:.83rem;margin:7px 0}
+.meth-note{font-size:.84rem;color:var(--ink-soft);max-width:80ch;margin:0 0 12px}
 
-.meth-list{font-size:.82rem;color:#1A1D23;margin:6px 0 12px 20px}
-.meth-list li{margin:6px 0}
+/* --- glossary --- */
+.glossary{display:grid;grid-template-columns:repeat(auto-fit,minmax(288px,1fr));gap:10px;margin:0}
+.glossary>div{background:var(--field);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.glossary dt{font-size:.84rem;font-weight:700;color:var(--indigo-ink);margin:0 0 5px}
+.glossary dd{font-size:.8rem;color:var(--ink-soft);margin:0;line-height:1.55}
 
-ul li{font-size:.85rem;color:#1A1D23;margin:4px 0}
+.empty{color:var(--mute);font-size:.86rem}
 
 @media(max-width:640px){
-  .container{padding:12px 10px}
-  header{padding:22px 16px}
-  section{padding:18px}
-  .source-board{grid-template-columns:repeat(auto-fill,minmax(140px,1fr))}
-  .bucket-grid{grid-template-columns:1fr}
-  .glossary-grid{grid-template-columns:1fr}
-  .kpi-row{gap:8px}
-  .kpi{min-width:80px;padding:10px 12px}
-  .kpi-value{font-size:1rem}
+  .sheet{padding:18px 12px 48px}
+  .masthead,.section{padding:18px 18px;border-radius:14px}
+  .masthead__title{font-size:1.55rem}
+  .channels,.kpis,.glossary{grid-template-columns:1fr 1fr}
+  .buckets{grid-template-columns:1fr}
+  .table{font-size:.8rem}
+  .table th,.table td{padding:7px 8px}
 }
-
-@media(prefers-reduced-motion:reduce){
-  .score-fill{transition:none}
-}
+@media(max-width:430px){.channels,.kpis,.glossary{grid-template-columns:1fr}}
+@media(prefers-reduced-motion:no-preference){.bar__fill{transition:width .5s cubic-bezier(.2,.7,.2,1)}}
+@media print{body{background:#fff}.section,.masthead{box-shadow:none;break-inside:avoid}}
 """.strip()
 
 
@@ -952,26 +1014,52 @@ def build_report_html(
     parts.append(f"<style>{_HTML_CSS}</style>")
     parts.append("</head>")
     parts.append("<body>")
-    parts.append('<div class="container">')
+    parts.append('<div class="sheet">')
 
-    # --- Header ---
-    parts.append("<header>")
-    parts.append(f"<h1>ASO-Recherche &mdash; {_html_esc(config['app_name'])}</h1>")
-    parts.append(f'<div class="meta">Erstellt: {_html_esc(generated)}</div>')
-    modus_label = f"Modus A (nach Launch) &mdash; {_html_esc(own_app_id)}" if modus_a else "Modus B (Pre-Launch)"
-    parts.append(f'<span class="modus">{modus_label}</span>')
+    cat = config.get("category", "other")
+    lang = config.get("language", "de")
+    country = config.get("country", "de")
+    seeds = config.get("seed_keywords") or []
+
+    # --- Masthead (Astro-style toolbar identity) ---
+    parts.append('<header class="masthead">')
+    mode_badge = (
+        f'Modus A · nach Launch · {_html_esc(own_app_id)}' if modus_a else "Modus B · Pre-Launch"
+    )
+    parts.append(
+        '<div class="masthead__eyebrow">'
+        '<span class="eyebrow">ASO-Recherche</span>'
+        f'<span class="badge">{mode_badge}</span>'
+        f'<span class="pill-stat">💡 <b>{len(keywords)}</b> Keywords bewertet</span>'
+        '</div>'
+    )
+    parts.append(f'<h1 class="masthead__title">{_html_esc(config["app_name"])}</h1>')
+    meta_bits = [
+        f"<span>{_html_esc(generated)}</span>",
+        f"<span>{_html_esc(country)} / {_html_esc(lang)}</span>",
+        f"<span>Kategorie: {_html_esc(cat)}</span>",
+    ]
+    if seeds:
+        meta_bits.append(f"<span>Seeds: {_html_esc(', '.join(seeds))}</span>")
+    parts.append('<div class="masthead__meta">' + "".join(meta_bits) + "</div>")
     if en_without_us:
         parts.append(
-            '<div class="en-caveat">&#9888; Sprache ist EN, Land aber nicht US &mdash; '
-            'die EN-Listing-Empfehlungen stammen aus einem Nicht-US-Markt-Crawl und '
-            'sollten NICHT als EN-Markt(US)-Ergebnisse behandelt werden.</div>'
+            '<div class="caveat">Sprache ist EN, Land aber nicht US — die EN-Listing-'
+            'Empfehlungen stammen aus einem Nicht-US-Markt-Crawl und sind NICHT als '
+            'EN-Markt(US)-Ergebnisse zu lesen.</div>'
         )
     parts.append("</header>")
 
-    # --- Quellenstatus ---
-    parts.append("<section>")
-    parts.append("<h2>Quellenstatus</h2>")
-    parts.append('<div class="source-board">')
+    def _section(eyebrow, title):
+        parts.append('<section class="section">')
+        parts.append(
+            f'<div class="section__head"><span class="eyebrow">{eyebrow}</span>'
+            f'<h2 class="section__title">{title}</h2></div>'
+        )
+
+    # --- Quellen-Signal (source health) ---
+    _section("Provenienz", "Quellen-Signal")
+    parts.append('<div class="channels">')
     for key, label in _HTML_SOURCE_ORDER:
         entry = source_status.get(key)
         if entry is None:
@@ -979,84 +1067,68 @@ def build_report_html(
         parts.append(_html_source_card(key, label, entry))
     parts.append("</div>")
     ran, unavailable = _source_split(source_status)
-    parts.append(
-        f'<div class="source-summary">'
-        f'<strong>Verfügbare Quellen:</strong> {", ".join(ran) if ran else "iTunes Search API"}'
-    )
+    prov = f'<div class="provenance"><strong>Aktiv:</strong> {", ".join(ran) if ran else "iTunes Search API"}'
     if unavailable:
-        parts.append(
-            f'<br><strong>Nicht verfügbar</strong> (nie blockierend): {", ".join(unavailable)}'
-        )
-    parts.append("</div>")
+        prov += f'<br><strong>Nicht verfügbar</strong> (nie blockierend): {", ".join(unavailable)}'
+    parts.append(prov + "</div>")
     parts.append("</section>")
 
-    # --- Zusammenfassung ---
-    parts.append("<section>")
-    parts.append("<h2>Zusammenfassung</h2>")
-    cat = config.get("category", "other")
-    lang = config.get("language", "de")
-    country = config.get("country", "de")
-    parts.append(f"<p><strong>Kategorie:</strong> {_html_esc(cat)} &middot; "
-                 f"<strong>Land / Sprache:</strong> {country} / {lang}</p>")
-    seeds = config.get("seed_keywords") or []
-    if seeds:
-        parts.append(f"<p><strong>Seed-Keywords:</strong> {', '.join(_html_esc(s) for s in seeds)}</p>")
-    parts.append('<div class="kpi-row">')
-    parts.append(f'<div class="kpi"><span class="kpi-label">Apple-Wettbewerber</span><span class="kpi-value">{len(apple_comps)}</span></div>')
+    # --- Überblick (KPI readout) ---
+    _section("Überblick", "Zusammenfassung")
+    parts.append('<div class="kpis">')
+    parts.append(f'<div class="kpi"><span class="kpi__label">Apple</span><span class="kpi__value">{len(apple_comps)}</span></div>')
     if has_play:
-        parts.append(f'<div class="kpi"><span class="kpi-label">Play-Wettbewerber</span><span class="kpi-value">{len(play_comps)}</span></div>')
-    parts.append(f'<div class="kpi"><span class="kpi-label">Nische</span><span class="kpi-value">{len(niche)}</span></div>')
-    parts.append(f'<div class="kpi"><span class="kpi-label">Keywords</span><span class="kpi-value">{len(keywords)}</span></div>')
-    parts.append(f'<div class="kpi"><span class="kpi-label">Primär</span><span class="kpi-value">{len(primary)}</span></div>')
-    parts.append(f'<div class="kpi"><span class="kpi-label">Long-Tail</span><span class="kpi-value">{len(longtail)}</span></div>')
-    parts.append(f'<div class="kpi"><span class="kpi-label">Lücken</span><span class="kpi-value">{len(gaps)}</span></div>')
+        parts.append(f'<div class="kpi"><span class="kpi__label">Play</span><span class="kpi__value">{len(play_comps)}</span></div>')
+    parts.append(f'<div class="kpi"><span class="kpi__label">Nische</span><span class="kpi__value">{len(niche)}</span></div>')
+    parts.append(f'<div class="kpi"><span class="kpi__label">Keywords</span><span class="kpi__value">{len(keywords)}</span></div>')
+    parts.append(f'<div class="kpi"><span class="kpi__label">Primär</span><span class="kpi__value">{len(primary)}</span></div>')
+    parts.append(f'<div class="kpi"><span class="kpi__label">Long-Tail</span><span class="kpi__value">{len(longtail)}</span></div>')
+    parts.append(f'<div class="kpi"><span class="kpi__label">Gaps</span><span class="kpi__value">{len(gaps)}</span></div>')
     parts.append("</div>")
-    parts.append(f"<p style='margin-top:12px;font-size:.85rem'><strong>Top-Keywords:</strong> {_html_esc(top_kw)}</p>")
+    parts.append(f'<p class="lead"><strong>Top-Keywords:</strong> {_html_esc(top_kw)}</p>')
     if s1_output and s1_output.get("dominant_themes"):
         themes = ", ".join(_html_esc(t) for t in s1_output["dominant_themes"][:5])
-        parts.append(f"<p style='font-size:.85rem'><strong>Dominante Themen (S1):</strong> {themes}</p>")
+        parts.append(f'<p class="lead"><strong>Dominante Themen (S1):</strong> {themes}</p>')
     parts.append("</section>")
 
     # --- Wettbewerbslandschaft ---
-    parts.append("<section>")
-    parts.append("<h2>Wettbewerbslandschaft</h2>")
+    _section("Markt", "Wettbewerbslandschaft")
     if not competitors:
-        parts.append("<p><em>Keine Wettbewerber zu diesem Seed gefunden.</em></p>")
+        parts.append('<p class="empty">Keine Wettbewerber zu diesem Seed gefunden.</p>')
     else:
         rows = []
         for c in competitors:
             rating = c.get("rating_avg")
             rating_str = f"{float(rating):.1f}" if isinstance(rating, (int, float)) else "—"
-            source = "Nische" if c.get("discovery") == "niche_similar" else "Chart/Suche"
+            disc = c.get("discovery")
+            source = {"niche_similar": "Nische", "chart": "Chart"}.get(disc, "Suche")
             sub = c.get("subtitle") or ""
-            title = _html_esc(c.get("title", ""))
+            title = f'<span class="table__name">{_html_esc(c.get("title", ""))}</span>'
             if sub:
-                title = f"{title} — <em>{_html_esc(sub)}</em>"
+                title += f' <span class="sub">— {_html_esc(sub)}</span>'
             rows.append(
-                f"<tr>"
+                "<tr>"
                 f"<td>{title}</td>"
-                f"<td>{_html_esc(c.get('developer', ''))}</td>"
-                f"<td>{_html_esc(str(c.get('category', '')))}</td>"
-                f"<td>{rating_str}</td>"
-                f"<td>{c.get('rating_count', 0)}</td>"
-                f"<td>{_html_esc(str(c.get('price_model', '')))}</td>"
-                f"<td>{source}</td>"
-                f"</tr>"
+                f'<td class="sub">{_html_esc(c.get("developer", ""))}</td>'
+                f'<td class="sub">{_html_esc(str(c.get("category", "")))}</td>'
+                f'<td class="num">{rating_str}</td>'
+                f'<td class="num">{c.get("rating_count", 0)}</td>'
+                f'<td class="sub">{_html_esc(str(c.get("price_model", "")))}</td>'
+                f'<td><span class="split">{source}</span></td>'
+                "</tr>"
             )
         parts.append(
-            '<table class="comp-table">'
-            '<thead><tr>'
+            '<table class="table table--comp"><thead><tr>'
             '<th>Titel</th><th>Entwickler</th><th>Kategorie</th>'
-            '<th>Bewertung</th><th># Bewertungen</th><th>Preis</th><th>Quelle</th>'
-            '</tr></thead>'
-            f'<tbody>{"".join(rows)}</tbody></table>'
+            '<th>Bewertung</th><th>#&nbsp;Bew.</th><th>Preis</th><th>Quelle</th>'
+            f'</tr></thead><tbody>{"".join(rows)}</tbody></table>'
         )
     parts.append("</section>")
 
     # --- Positionierungsmap ---
-    parts.append("<section>")
-    parts.append("<h2>Positionierungsmap</h2>")
+    _section("Positionierung", "Positionierungsmap")
     if s1_output:
+        items = []
         for key, label in (
             ("niches", "Nischen"),
             ("dominant_themes", "Dominante Themen"),
@@ -1066,54 +1138,54 @@ def build_report_html(
             values = s1_output.get(key) or []
             if values:
                 joined = "; ".join(_html_esc(v) for v in values[:8])
-                parts.append(f"<li><strong>{_html_esc(label)}:</strong> {joined}</li>")
+                items.append(f"<li><b>{_html_esc(label)}:</b> {joined}</li>")
+        if items:
+            parts.append('<ul class="facts">' + "".join(items) + "</ul>")
         if reddit_threads:
-            parts.append("<p style='margin-top:12px'><strong>Qualitative Untermauerung (Reddit):</strong></p>")
-            for t in reddit_threads[:6]:
-                sub = t.get("subreddit") or "—"
-                parts.append(f"<li style='font-size:.8rem;color:#6B7280;margin:2px 0'>r/{_html_esc(sub)} — {_html_esc(t.get('title', ''))}</li>")
+            parts.append("<h3>Qualitative Untermauerung · Reddit</h3>")
+            quotes = "".join(
+                f'<li>r/{_html_esc(t.get("subreddit") or "—")} — {_html_esc(t.get("title", ""))}</li>'
+                for t in reddit_threads[:6]
+            )
+            parts.append(f'<ul class="quotes">{quotes}</ul>')
     else:
         parts.append(
-            "<p><em>Vollständige LLM-Positionierungsanalyse ausstehend (S1 Nische &amp; "
-            "Positionierungs-Analyst, Sonnet ausführen). Deterministische Kategorie-"
-            "Clusterung unten als Platzhalter.</em></p>"
+            '<p class="section__intro">Vollständige LLM-Positionierungsanalyse ausstehend '
+            '(S1 Nischen- &amp; Positionierungs-Analyst, Sonnet). Deterministische '
+            'Kategorie-Clusterung als Platzhalter:</p>'
         )
         clusters: Dict[str, List[str]] = {}
         for c in competitors:
-            cat = str(c.get("category", "other"))
-            clusters.setdefault(cat, []).append(c.get("title", ""))
-        for cat in sorted(clusters):
-            titles = ", ".join(_html_esc(t) for t in clusters[cat][:6])
-            parts.append(f"<li><strong>{_html_esc(cat)}:</strong> {titles}</li>")
-    parts.append("</ul>")
-
-    # MS qualitative
+            ccat = str(c.get("category", "other"))
+            clusters.setdefault(ccat, []).append(c.get("title", ""))
+        items = "".join(
+            f'<li><b>{_html_esc(ccat)}:</b> {", ".join(_html_esc(t) for t in clusters[ccat][:6])}</li>'
+            for ccat in sorted(clusters)
+        )
+        parts.append(f'<ul class="facts">{items}</ul>')
     if ms_entries and _entry_is_ok(source_status.get("ms")):
         ms_titles = ", ".join(_html_esc(e.get("title", "")) for e in ms_entries[:8])
         parts.append(
-            f"<p style='font-size:.85rem;margin-top:12px;color:#6B7280'>"
-            f"<strong>Microsoft Store (qualitativ, Best-Effort):</strong> {len(ms_entries)} App(s) "
-            f"beobachtet &mdash; {ms_titles}. Rein qualitativer Kontext; "
-            f"fließt NICHT in das Keyword-Scoring ein."
-            f"</p>"
+            f'<p class="section__intro" style="margin-top:14px"><strong>Microsoft Store '
+            f'(qualitativ, Best-Effort):</strong> {len(ms_entries)} App(s) beobachtet — '
+            f'{ms_titles}. Rein qualitativer Kontext; fließt NICHT ins Scoring ein.</p>'
         )
     parts.append("</section>")
 
     # --- Keyword-Bericht ---
-    parts.append("<section>")
-    parts.append("<h2>Keyword-Bericht</h2>")
+    _section("Signal", "Keyword-Bericht")
     parts.append(
-        '<p style="font-size:.85rem;color:#6B7280">'
-        "Die Werte sind ein deterministisches <strong>Wettbewerbs-/Relevanz-Signal</strong> &mdash; ein Proxy, "
-        "<strong>kein</strong> echtes Suchvolumen. Wettbewerb = positionsgewichteter Slot-Anteil "
-        "(Apple: Titel &times;5 &middot; Untertitel &times;3 &middot; Beschreibung &times;1; "
-        "Play: Titel &times;5 &middot; Kurzbeschreibung &times;4 &middot; Langbeschreibung &times;2); "
-        "Relevanz = Cosinus-TF-IDF zum Seed-Konzept (+15 Apple/Play Search-Suggest-Bonus); "
-        "Chance = Relevanz &times; (100 &minus; Wettbewerb) (+10 Nischen-Bonus)."
-        "</p>"
+        '<p class="section__intro">Die Werte sind ein deterministisches '
+        '<strong>Wettbewerbs-/Relevanz-Signal</strong> — ein Proxy, '
+        '<strong>kein</strong> echtes Suchvolumen. Wettbewerb = positionsgewichteter '
+        'Slot-Anteil (Apple Titel&times;5 · Untertitel&times;3 · Beschreibung&times;1; '
+        'Play Titel&times;5 · Kurz&times;4 · Lang&times;2); Relevanz = max-normalisierte '
+        'TF-IDF-Nähe zum Seed-Konzept (+15 Search-Suggest-Bonus); '
+        'Chance = Relevanz &times; (100 − Wettbewerb) (+10 Nischen-Bonus). '
+        'Balken-Farbe: grün = günstig, rot = ungünstig (Wettbewerb invers).</p>'
     )
     if not keywords:
-        parts.append("<p><em>Keine Keywords bewertet (leerer Wettbewerber-Korpus).</em></p>")
+        parts.append('<p class="empty">Keine Keywords bewertet (leerer Wettbewerber-Korpus).</p>')
     else:
         if has_play and play_kws:
             parts.append("<h3>Apple</h3>")
@@ -1122,220 +1194,169 @@ def build_report_html(
             parts.append(_html_keyword_table(play_kws))
         else:
             parts.append(_html_keyword_table(keywords))
-
         if gaps:
-            gap_terms = ", ". join(_html_esc(k["term"]) for k in gaps[:15])
+            gap_terms = ", ".join(_html_esc(k["term"]) for k in gaps[:15])
             parts.append(
-                f"<p style='font-size:.85rem;margin-top:12px'>"
-                f"<strong>Abdeckungslücken</strong> (Wettbewerber führen im Titel, Seed nicht): {gap_terms}"
-                f"</p>"
+                f'<p class="section__intro" style="margin-top:14px"><strong>Abdeckungslücken</strong> '
+                f'(Wettbewerber führen im Titel, Seed nicht): {gap_terms}</p>'
             )
 
-    # Markenkonflikte
     if brand_conflicts:
+        parts.append('<div class="brand">')
+        parts.append('<p class="brand__title">⚠ Markenkonflikte</p>')
         parts.append(
-            '<div class="brand-panel">'
-            '<h3>&#9888; Markenkonflikte</h3>'
-            '<p class="brand-note">'
-            "Keywords, die Begriffe aus dem Anti-Vokabular des Projekts enthalten. "
-            "Jeder Konflikt zeigt die kanonische Ersetzung und vier Strategien "
-            "&mdash; <strong>keine automatisch angewandt</strong>, "
-            "die Entscheidung liegt beim Projektinhaber."
-            "</p>"
-            '<table class="brand-table">'
-            '<thead><tr>'
+            '<p class="brand__note">Keywords, die Begriffe aus dem Anti-Vokabular des '
+            'Projekts enthalten. Jeder Konflikt zeigt die kanonische Ersetzung und vier '
+            'Strategien — <strong>keine automatisch angewandt</strong>, die Entscheidung '
+            'liegt beim Projektinhaber.</p>'
+        )
+        parts.append(
+            '<table class="table table--brand"><thead><tr>'
             '<th>Keyword</th><th>Verbotener Treffer</th><th>Ersetzung</th>'
             '<th>Chance</th><th>Rel.</th><th>Strategien</th>'
-            '</tr></thead>'
-            f'<tbody>{"".join(_html_brand_conflict_row(c) for c in brand_conflicts)}</tbody>'
-            '</table></div>'
+            f'</tr></thead><tbody>{"".join(_html_brand_conflict_row(c) for c in brand_conflicts)}</tbody></table>'
         )
+        parts.append("</div>")
     parts.append("</section>")
 
     # --- Chancen ---
-    parts.append("<section>")
-    parts.append("<h2>Chancen</h2>")
+    _section("Chancen", "Hebel & Quick Wins")
     buckets = _opportunity_buckets(keywords)
-    parts.append('<div class="bucket-grid">')
+    parts.append('<div class="buckets">')
     parts.append(_html_bucket_card(
-        f"Schnelle Gewinne (Chance &ge; {_QUICK_WIN_OPP_MIN}, Wettb. &le; {_QUICK_WIN_COMP_MAX})",
-        buckets["quick_win"], "schnelle-gewinne"))
+        f"Schnelle Gewinne · Chance ≥ {_QUICK_WIN_OPP_MIN}, Wettb. ≤ {_QUICK_WIN_COMP_MAX}",
+        buckets["quick_win"], "win"))
     parts.append(_html_bucket_card(
-        f"Nischen-Hebel (Wettb. &le; {_NICHE_LEVER_COMP_MAX}, Rel. &ge; {_NICHE_LEVER_REL_MIN})",
-        buckets["niche_lever"], "nischen-hebel"))
+        f"Nischen-Hebel · Wettb. ≤ {_NICHE_LEVER_COMP_MAX}, Rel. ≥ {_NICHE_LEVER_REL_MIN}",
+        buckets["niche_lever"], "niche"))
     parts.append(_html_bucket_card(
-        "Abdeckungslücken (Wettbewerber führen im Titel, Seed nicht)",
-        buckets["coverage_gap"], "abdeckungsluecken"))
+        "Abdeckungslücken · Wettbewerber führen im Titel",
+        buckets["coverage_gap"], "gap"))
     parts.append("</div>")
     if s1_output and s1_output.get("missing_themes"):
         missing = "; ".join(_html_esc(t) for t in s1_output["missing_themes"][:8])
-        parts.append(
-            f"<p style='margin-top:14px;font-size:.85rem'>"
-            f"<strong>Fehlende Themen (S1):</strong> {missing}"
-            f"</p>"
-        )
+        parts.append(f'<p class="lead"><strong>Fehlende Themen (S1):</strong> {missing}</p>')
     parts.append("</section>")
 
     # --- Risiken / Bedrohungen ---
-    parts.append("<section>")
-    parts.append("<h2>Risiken / Bedrohungen</h2>")
+    _section("Risiko", "Risiken & Bedrohungen")
     if s1_output and s1_output.get("threats"):
-        parts.append("<ul>")
-        for t in s1_output["threats"][:10]:
-            parts.append(f"<li>{_html_esc(t)}</li>")
-        parts.append("</ul>")
+        lis = "".join(f"<li>{_html_esc(t)}</li>" for t in s1_output["threats"][:10])
+        parts.append(f'<ul class="facts">{lis}</ul>')
     else:
         top_comp = sorted(keywords, key=lambda k: -int(k.get("competition", 0)))[:8]
         parts.append(
-            "<p><em>Vollständige LLM-Bedrohungsanalyse ausstehend (S1 ausführen). "
-            "Begriffe mit höchstem Wettbewerb unten als deterministischer Proxy.</em></p>"
+            '<p class="section__intro">Vollständige LLM-Bedrohungsanalyse ausstehend (S1). '
+            'Begriffe mit höchstem Wettbewerb als deterministischer Proxy:</p>'
         )
-        parts.append("<ul>")
-        for k in top_comp:
-            parts.append(
-                f"<li><strong>{_html_esc(k.get('term', ''))}</strong> &mdash; "
-                f"Wettbewerbssignal {k.get('competition', 0)}</li>"
-            )
-        parts.append("</ul>")
+        lis = "".join(
+            f'<li><b>{_html_esc(k.get("term", ""))}</b> — Wettbewerbssignal '
+            f'<span class="num">{k.get("competition", 0)}</span></li>'
+            for k in top_comp
+        )
+        parts.append(f'<ul class="facts">{lis}</ul>')
     parts.append("</section>")
 
     # --- Listing-Empfehlung ---
-    parts.append("<section>")
-    parts.append("<h2>Listing-Empfehlung</h2>")
-
-    parts.append('<div class="listing-store">')
+    _section("Listing", "Listing-Empfehlung")
+    parts.append('<div class="listing">')
     parts.append("<h3>Apple</h3>")
     if en_without_us:
         parts.append(
-            '<div class="en-caveat" style="margin-bottom:12px">&#9888; '
-            'Sprache ist EN, Land aber nicht US &mdash; die EN-Listing-Empfehlungen '
-            'stammen aus einem Nicht-US-Markt-Crawl und sollten NICHT als '
-            'EN-Markt(US)-Ergebnisse behandelt werden.</div>'
+            '<div class="caveat">Sprache ist EN, Land aber nicht US — die EN-Listing-'
+            'Empfehlungen stammen aus einem Nicht-US-Markt-Crawl.</div>'
         )
-    limits = "Titel 30 / Untertitel 30 / Keyword-Feld 100"
     parts.append(
-        f'<p style="font-size:.85rem;color:#6B7280">'
-        f'1 empfohlen + 2 Alternativen pro Apple-Slot ({limits}), '
-        f'validiert durch den H2-Cross-Check.</p>'
+        '<p class="section__intro">1 empfohlen + 2 Alternativen pro Apple-Slot '
+        '(Titel 30 / Untertitel 30 / Keyword-Feld 100), validiert durch den H2-Cross-Check.</p>'
     )
     parts.append(_html_listing_slots(s2_output, h2_output, store_label="Apple"))
     parts.append("</div>")
 
     if has_play:
-        parts.append('<div class="listing-store">')
+        parts.append('<div class="listing">')
         parts.append("<h3>Google Play</h3>")
         parts.append(
-            '<p style="font-size:.85rem;color:#6B7280">'
-            "1 empfohlen + 2 Alternativen pro Play-Slot (Titel 30 / Kurzbeschreibung 80 / "
-            "Langbeschreibung 4000), optimiert für Plays Ranking-Modell, validiert durch den "
-            "H2-Cross-Check.</p>"
+            '<p class="section__intro">1 empfohlen + 2 Alternativen pro Play-Slot '
+            '(Titel 30 / Kurz 80 / Lang 4000), optimiert für Plays Ranking-Modell, '
+            'validiert durch den H2-Cross-Check.</p>'
         )
-        parts.append(_html_listing_slots(s2_play_output, h2_play_output,
-                                          store_label="Google Play"))
+        parts.append(_html_listing_slots(s2_play_output, h2_play_output, store_label="Google Play"))
         parts.append("</div>")
 
-    # Modus A self-audit
     if modus_a:
-        parts.append("<h3>Selbstaudit (Modus A)</h3>")
-        if s1_output and s1_output.get("own_app_audit"):
-            audit = s1_output["own_app_audit"]
+        parts.append("<h3>Selbstaudit · Modus A</h3>")
+        audit = (s1_output or {}).get("own_app_audit") or (s2_output or {}).get("own_app_audit")
+        if audit:
             items = audit if isinstance(audit, list) else [audit]
-            parts.append("<ul>")
-            for item in items:
-                parts.append(f"<li>{_html_esc(item)}</li>")
-            parts.append("</ul>")
-        elif s2_output and s2_output.get("own_app_audit"):
-            audit = s2_output["own_app_audit"]
-            items = audit if isinstance(audit, list) else [audit]
-            parts.append("<ul>")
-            for item in items:
-                parts.append(f"<li>{_html_esc(item)}</li>")
-            parts.append("</ul>")
+            lis = "".join(f"<li>{_html_esc(i)}</li>" for i in items)
+            parts.append(f'<ul class="facts">{lis}</ul>')
         else:
             parts.append(
-                f"<p><em>Eigene App `{_html_esc(own_app_id)}` als Referenzeintrag geführt; "
-                f"S1/S2 mit Own-App-Kontext ausführen, um den Selbstaudit zu befüllen.</em></p>"
+                f'<p class="pending">Eigene App <code>{_html_esc(own_app_id)}</code> '
+                f'als Referenzeintrag geführt; S1/S2 mit Own-App-Kontext ausführen, um den '
+                f'Selbstaudit zu befüllen.</p>'
             )
     parts.append("</section>")
 
-    # --- Methodik ---
-    parts.append("<section>")
-    parts.append("<h2>Methodik</h2>")
+    # --- Methodik & Ehrlichkeit ---
+    _section("Methode", "Methodik & Ehrlichkeit")
     parts.append(
-        "<p style='font-size:.85rem;color:#1A1D23'>"
-        "Apple <strong>Core + Slots</strong>-Metadaten gesammelt (Untertitel via Playwright, "
-        "Beschreibung aus der iTunes-API, keyword_hints durch Inversion abgeleitet &mdash; "
-        "niemals das versteckte 100-Zeichen-Feld). Keyword-Extraktion: YAKE-Phrasen + "
-        "TF-IDF mit Positionsgewichtung (Titel &times;5 &middot; Untertitel &times;3 "
-        "&middot; Beschreibung &times;1) + Apple Search-Suggest-Anreicherung; DE+EN-"
-        "Stopwörter, Generika gefiltert, leichte Morphologie-Gruppierung."
-        "</p>"
+        '<p class="meth-note">Apple <strong>Core + Slots</strong> gesammelt (Untertitel via '
+        'Playwright, Beschreibung aus der iTunes-API, keyword_hints durch Inversion — niemals '
+        'das versteckte 100-Zeichen-Feld). Extraktion: YAKE-Phrasen + positionsgewichtetes '
+        'TF-IDF (Titel&times;5 · Untertitel&times;3 · Beschreibung&times;1) + Apple-Search-Suggest; '
+        'DE+EN-Stopwörter, Generika &amp; reine Zahlen gefiltert, leichte Morphologie-Gruppierung.</p>'
     )
     if has_play:
         parts.append(
-            "<p style='font-size:.85rem;color:#1A1D23'>"
-            "Google Play <strong>Core + Slots</strong>-Metadaten gesammelt via "
-            "google-play-scraper (Suche, Charts, Similar-Apps): Titel + "
-            "Kurzbeschreibung (80, starker Ranking-Faktor) + Langbeschreibung "
-            "(4000, vollständig indexiert). Play-<strong>Tags werden nicht erfasst</strong> "
-            "(nicht zuverlässig extrahierbar). Play-Keywords fließen in DIESELBE "
-            "Scoring-Engine mit Play-eigener Positionsgewichtung (Titel &times;5 "
-            "&middot; Kurzbeschreibung &times;4 &middot; Langbeschreibung &times;2) "
-            "und Play-Autocomplete ergänzt das Suggest-Set."
-            "</p>"
+            '<p class="meth-note">Google Play <strong>Core + Slots</strong> via google-play-scraper '
+            '(Suche, Charts, Similar): Titel + Kurzbeschreibung (80, starker Ranking-Faktor) + '
+            'Langbeschreibung (4000, voll indexiert). Tags werden nicht erfasst. Play-Keywords '
+            'fließen in DIESELBE Engine mit Play-Gewichtung (Titel&times;5 · Kurz&times;4 · '
+            'Lang&times;2); Play-Autocomplete ergänzt das Suggest-Set.</p>'
         )
     if _entry_is_ok(source_status.get("ms")):
         parts.append(
-            "<p style='font-size:.85rem;color:#1A1D23'>"
-            "Microsoft Store-Metadaten <strong>per Best-Effort</strong> via Playwright gesammelt "
-            "(<code>apps.microsoft.com</code> ist eine Single-Page-App, daher mit "
-            "<code>networkidle</code> + <code>wait_for_selector</code>). MS hat nur den "
-            "<code>description</code>-Slot &mdash; <strong>es gibt kein MS-ASO-Slot-Modell "
-            "und MS-Daten fließen niemals in Keyword-Extraktion oder Scoring ein</strong>. "
-            "Sie werden als zusätzlicher qualitativer Kontext an den S1-Analysten übergeben."
-            "</p>"
+            '<p class="meth-note">Microsoft Store <strong>per Best-Effort</strong> via Playwright '
+            '(<code>apps.microsoft.com</code> ist eine SPA → <code>networkidle</code> + '
+            '<code>wait_for_selector</code>). Nur der <code>description</code>-Slot — '
+            '<strong>kein MS-ASO-Slot-Modell; MS-Daten fließen nie in Extraktion oder Scoring</strong>, '
+            'nur als qualitativer Kontext an S1.</p>'
         )
     elif "ms" in source_status:
         parts.append(
-            "<p style='font-size:.85rem;color:#1A1D23'>"
-            "Microsoft Store war in diesem Durchlauf <strong>nicht verfügbar</strong> (Best-Effort, "
-            "nie blockierend &mdash; die Pipeline wurde mit Apple + Play-Ergebnissen abgeschlossen). "
-            "MS ist rein qualitativ und wäre ohnehin nicht ins Scoring eingeflossen."
-            "</p>"
+            '<p class="meth-note">Microsoft Store war in diesem Durchlauf <strong>nicht '
+            'verfügbar</strong> (Best-Effort, nie blockierend). MS ist rein qualitativ und '
+            'wäre ohnehin nicht ins Scoring eingeflossen.</p>'
         )
-    parts.append("<p style='font-size:.85rem;color:#4338CA'><strong>Ehrlichkeit &mdash; was ist ein Proxy, was ist echt:</strong></p>")
+    parts.append('<div class="honesty">')
+    parts.append('<p class="honesty__title">Proxy vs. echt — was die Zahlen sind</p>')
     parts.append(
-        "<ul class='meth-list'>"
-        "<li>Wettbewerb / Relevanz / Chance sind <strong>deterministische Proxy-"
-        "Signale</strong>, ausdrücklich <strong>kein echtes Suchvolumen und keine echte Difficulty</strong> &mdash; "
-        "sie werden durchgängig als &quot;Signal&quot; bezeichnet. Die einzigen kostenlosen "
-        "<em>Echtsuche</em>-Signale sind Apple- und Play-Search-Suggest-Autovervollständigung "
-        "(ein +15-Relevanz-Bonus).</li>"
-        "<li>Keyword-Zahlen stammen aus dem gesammelten Wettbewerber-Korpus, nicht aus "
-        "einem proprietären Suchvolumen-Panel.</li>"
-        "<li><strong>LLM-Phase (Claude-nativ, keine kostenpflichtigen API-Keys):</strong> "
-        "das deterministische Grundgerüst bereitet eine Token-Budget-begrenzte, "
-        "kondensierte Repräsentation vor (~70k Token-Cap, Zeichen/4-Schätzung); "
-        "der H1 (Haiku) Metadaten-Kondensierer, S1 (Sonnet) Nischen- &amp; Positionierungs-"
-        "Analyst, S2 (Sonnet) Listing-Stratege und H2 (Haiku) Cross-Checker "
-        "interpretieren sie &mdash; jeder Subagent-Aufruf setzt sein Modell explizit. "
-        "Höflichkeit: &le;1 Anfrage/s/Domain + Jitter, exponentielles Backoff bei "
-        "429/503 (max. 3, dann überspringen), robots.txt respektiert, "
-        "<strong>keine Stealth-Plugins</strong>. HTTP-Cache 24h / Browser-Cache 12h "
-        "unter <code>~/.cache/aso-research/</code>.</li>"
-        "</ul>"
+        '<ul>'
+        '<li>Wettbewerb / Relevanz / Chance sind <strong>deterministische Proxy-Signale</strong>, '
+        'ausdrücklich <strong>kein echtes Suchvolumen und keine echte Difficulty</strong> — '
+        'durchgängig als „Signal" bezeichnet. Die einzigen kostenlosen <em>Echtsuche</em>-Signale '
+        'sind Apple- &amp; Play-Search-Suggest (ein +15-Relevanz-Bonus).</li>'
+        '<li>Keyword-Zahlen stammen aus dem gesammelten Wettbewerber-Korpus, nicht aus einem '
+        'proprietären Suchvolumen-Panel.</li>'
+        '<li><strong>LLM-Phase (Claude-nativ, keine kostenpflichtigen API-Keys):</strong> das '
+        'deterministische Grundgerüst bereitet eine token-budget-begrenzte, kondensierte '
+        'Repräsentation vor (~70k-Cap); H1 (Haiku), S1 (Sonnet), S2 (Sonnet), H2 (Haiku) '
+        'interpretieren sie — jeder Subagent-Aufruf setzt sein Modell explizit. Höflichkeit: '
+        '≤1 Anfrage/s/Domain + Jitter, Backoff bei 429/503, HTTP-Cache 24h / Browser-Cache 12h.</li>'
+        '</ul>'
     )
+    parts.append("</div>")
     parts.append("</section>")
 
     # --- Glossar ---
-    parts.append("<section>")
-    parts.append("<h2>Glossar</h2>")
-    parts.append('<div class="glossary-grid">')
+    _section("Begriffe", "Glossar")
     glossary_terms = [
         ("Relevanz",
-         "Maß für die thematische Nähe eines Keywords zum Produktkonzept. "
-         "Berechnet als gewichtete TF-IDF-Ähnlichkeit zu den Seed-Keywords — "
-         "je höher, desto passender zum Produkt."),
+         "Thematische Nähe eines Keywords zum Produktkonzept — max-normalisierte "
+         "TF-IDF-Ähnlichkeit zur Seed-Beschreibung (der relevanteste Begriff erreicht "
+         "~100). Je höher, desto passender zum Produkt."),
         ("Chance (Opportunity)",
          "Kombinierter Kennwert aus Relevanz und Wettbewerb. Je relevanter ein "
          "Keyword und je weniger umkämpft, desto höher die Chance. Der wichtigste "
@@ -1370,17 +1391,13 @@ def build_report_html(
          "beginnt. Ausgehend davon werden Wettbewerber gefunden und der "
          "Keyword-Korpus aufgebaut."),
     ]
+    parts.append('<dl class="glossary">')
     for term, definition in glossary_terms:
-        parts.append(
-            f'<div class="glossary-card">'
-            f'<dt>{_html_esc(term)}</dt>'
-            f'<dd>{_html_esc(definition)}</dd>'
-            f'</div>'
-        )
-    parts.append("</div>")
+        parts.append(f'<div><dt>{_html_esc(term)}</dt><dd>{_html_esc(definition)}</dd></div>')
+    parts.append("</dl>")
     parts.append("</section>")
 
-    parts.append("</div>")  # .container
+    parts.append("</div>")  # .sheet
     parts.append("</body>")
     parts.append("</html>")
 

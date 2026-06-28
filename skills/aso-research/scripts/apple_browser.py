@@ -139,13 +139,25 @@ def _ensure_chromium(
 
     return _ensure_chromium_result
 # Tolerant subtitle selectors (Apple markup shifts; try several, take first).
+# Current (2026) apps.apple.com is a Svelte SPA: the subtitle is a
+# ``<p class="subtitle">`` sibling right after the ``<h1>`` title. The older
+# ``product-header__subtitle`` classes are kept as fallbacks for cached/older
+# markup; the broad ``[class*='subtitle']`` is the last-resort net.
 _SUBTITLE_SELECTORS = (
+    "p.subtitle",
+    "section > h1 + p.subtitle",
     "h2.product-header__subtitle",
-    "header.product-app__app__subtitle",
-    "h2.app-header__subtitle",
+    ".product-header__subtitle",
     "[data-test-id='app-subtitle']",
+    "[class*='subtitle']",
 )
 _APP_ID_RE = re.compile(r"/app/(?:[^/]+/)?id(\d+)")
+
+# Module-level rate limiter: ONE instance so the >=1 req/s/domain interval is
+# enforced ACROSS product-page fetches. A fresh limiter per call (the previous
+# bug) reset the per-host clock every time, so ~10 rapid fetches tripped
+# Apple's 429 throttle — the real cause of empty subtitle/similar runs.
+_RATE = POLITE.RateLimiter(seed=7)
 
 
 def _product_url(app_id: str, country: str) -> str:
@@ -243,7 +255,8 @@ def fetch_apple_app(
             )
             page = context.new_page()
             # politeness: <= 1 req/s + jitter before the live navigation
-            POLITE.RateLimiter().wait(url)
+            # (module-level limiter so the interval holds across fetches)
+            _RATE.wait(url)
             for attempt in range(POLITE.MAX_RETRIES):
                 try:
                     resp = page.goto(url, wait_until="domcontentloaded", timeout=30000)

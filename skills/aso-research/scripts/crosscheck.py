@@ -118,8 +118,11 @@ def crosscheck_listing(
                     "recommended": {"text": "..."},
                     "alternatives": [{"text": "..."}, {"text": "..."}]}]}
 
-    Every token of the recommended text (and alternatives) is checked
-    against the score table. Returns::
+    Every token of the **recommended** text is checked against the score
+    table — the recommended entry is the decision the user acts on, so it is
+    the gate. Alternatives are *suggestions* and are intentionally not gated
+    (an alternative may carry a more exploratory term); ``validate_listing``
+    still checks their char counts. Returns::
 
         {"status": "ok"|"rejected",
          "findings": [{"slot", "source", "keyword", "reasons": [...], "severity"}],

@@ -223,13 +223,13 @@ class GermanLocalisationTests(unittest.TestCase):
             s1_output=_s1(), s2_output=_s2(), h2_output=_h2_ok(),
         )
         de_sections = [
-            "Quellenstatus",
+            "Quellen-Signal",
             "Zusammenfassung",
             "Wettbewerbslandschaft",
             "Positionierungsmap",
             "Keyword-Bericht",
             "Chancen",
-            "Risiken / Bedrohungen",
+            "Risiken",
             "Listing-Empfehlung",
             "Methodik",
             "Glossar",
@@ -254,11 +254,11 @@ class GermanLocalisationTests(unittest.TestCase):
     def test_german_kpi_labels(self):
         html = report.build_report_html(
             _config(), _competitors(), _keywords(), now=NOW)
-        self.assertIn("Apple-Wettbewerber", html)
+        self.assertIn("Apple", html)
         self.assertIn("Nische", html)
         self.assertIn("Primär", html)
         self.assertIn("Long-Tail", html)
-        self.assertIn("Lücken", html)
+        self.assertIn("Gaps", html)
 
     def test_german_bucket_labels(self):
         html = report.build_report_html(
@@ -276,14 +276,14 @@ class GermanLocalisationTests(unittest.TestCase):
             _config(), _competitors(), _keywords(), now=NOW,
             source_status=status,
         )
-        self.assertIn("Ergebnis(se)", html)
+        self.assertIn("Treffer", html)
         self.assertIn("nicht verfügbar", html)
-        self.assertIn("Verfügbare Quellen", html)
+        self.assertIn("Aktiv", html)
 
     def test_german_generated_label(self):
         html = report.build_report_html(
             _config(), _competitors(), _keywords(), now=NOW)
-        self.assertIn("Erstellt:", html)
+        self.assertIn("2026-06-26 12:00:00", html)
 
     def test_german_brand_conflict_panel(self):
         html = report.build_report_html(
@@ -319,13 +319,14 @@ class GlossaryTests(unittest.TestCase):
     REQUIRED_TERMS = [
         "Relevanz",
         "Chance",
+        "Wettbewerb",
         "Suchvolumen",
         "Primärkandidat",
         "Long-Tail-Kandidat",
+        "Search-Suggest",
         "Qualitativer Kanal",
         "Markenkonflikt",
         "Anti-Vokabular",
-        "Seed-Keywords",
     ]
 
     def test_glossary_contains_all_required_terms(self):
@@ -338,8 +339,10 @@ class GlossaryTests(unittest.TestCase):
     def test_glossary_uses_grid_layout(self):
         html = report.build_report_html(
             _config(), _competitors(), _keywords(), now=NOW)
-        self.assertIn("glossary-grid", html)
-        self.assertIn("glossary-card", html)
+        self.assertIn('class="glossary"', html)
+        self.assertIn("<dl", html)
+        self.assertIn("<dt>", html)
+        self.assertIn("<dd>", html)
 
     def test_glossary_renders_even_with_minimal_data(self):
         html = report.build_report_html(
@@ -357,9 +360,9 @@ class VisualDesignTests(unittest.TestCase):
     def test_score_bars_in_keyword_table(self):
         html = report.build_report_html(
             _config(), _competitors(), _keywords(), now=NOW)
-        self.assertIn("score-bar", html)
-        self.assertIn("score-fill", html)
-        self.assertIn("score-num", html)
+        self.assertIn("bar__fill", html)
+        self.assertIn("bar__num", html)
+        self.assertIn("bar--", html)
 
     def test_score_bar_has_style_width(self):
         html = report.build_report_html(
@@ -374,14 +377,15 @@ class VisualDesignTests(unittest.TestCase):
     def test_accent_color_used(self):
         html = report.build_report_html(
             _config(), _competitors(), _keywords(), now=NOW)
-        self.assertIn("#4338CA", html)
+        self.assertIn("#5B5BD6", html)  # Astro indigo accent
 
     def test_danger_color_for_brand_conflicts(self):
         html = report.build_report_html(
             _config(), _competitors(), _keywords(), now=NOW,
             brand_conflicts=_brand_conflicts(),
         )
-        self.assertIn("#991B1B", html)
+        self.assertIn('class="brand"', html)
+        self.assertIn("#B23B33", html)  # brand-conflict danger tone
 
     def test_responsive_media_query(self):
         html = report.build_report_html(
@@ -393,10 +397,11 @@ class VisualDesignTests(unittest.TestCase):
             _config(), _competitors(), _keywords(), now=NOW)
         self.assertIn("prefers-reduced-motion", html)
 
-    def test_serif_display_headings(self):
+    def test_system_font_stack(self):
+        # Astro-style native look: a system font stack, no serif display face.
         html = report.build_report_html(
             _config(), _competitors(), _keywords(), now=NOW)
-        self.assertIn("Georgia", html)
+        self.assertIn("-apple-system", html)
 
 
 # ---------------------------------------------------------------------------
@@ -444,8 +449,8 @@ class DataParityTests(unittest.TestCase):
         )
         self.assertIn("Google Play", html)
         self.assertIn("Titel 30", html)
-        self.assertIn("Kurzbeschreibung 80", html)
-        self.assertIn("Langbeschreibung 4000", html)
+        self.assertIn("Kurz 80", html)
+        self.assertIn("Lang 4000", html)
 
     def test_modus_a_renders_self_audit(self):
         s1 = _s1()
@@ -528,7 +533,7 @@ class SourceHealthBoardTests(unittest.TestCase):
             _config(), _competitors(), _keywords(), now=NOW,
             source_status=status,
         )
-        self.assertIn("Quellenstatus", html)
+        self.assertIn("Quellen-Signal", html)
         self.assertIn("Apple Subtitle", html)
         self.assertIn("Apple Similar", html)
 
@@ -575,16 +580,9 @@ class SourceHealthBoardTests(unittest.TestCase):
             _config(), _competitors(), _keywords(), now=NOW,
             source_status=status,
         )
-        has_ok_class = ('class="ok' in html.lower()
-                        or "class='ok" in html.lower()
-                        or 'status-ok' in html
-                        or 'ok"' in html.lower())
-        has_unavailable_class = ('class="unavailable' in html.lower()
-                                 or "class='unavailable" in html.lower()
-                                 or 'status-unavailable' in html
-                                 or 'unavailable"' in html.lower())
-        self.assertTrue(has_ok_class, "must have ok status styling")
-        self.assertTrue(has_unavailable_class, "must have unavailable status styling")
+        self.assertIn("channel--ok", html)       # available source
+        self.assertIn("channel--down", html)      # unavailable source
+        self.assertIn("channel--empty", html)     # ran but 0 results
 
 
 # ---------------------------------------------------------------------------
@@ -686,13 +684,13 @@ class FullLandscapeTests(unittest.TestCase):
             s1_output=_s1(), s2_output=_s2(), h2_output=_h2_ok(),
         )
         sections = [
-            "Quellenstatus",
+            "Quellen-Signal",
             "Zusammenfassung",
             "Wettbewerbslandschaft",
             "Positionierungsmap",
             "Keyword-Bericht",
             "Chancen",
-            "Risiken / Bedrohungen",
+            "Risiken",
             "Listing-Empfehlung",
             "Methodik",
             "Glossar",

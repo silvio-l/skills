@@ -220,6 +220,22 @@ the Reddit qualitative summaries (US14).
 Apple's limits out of the box (Title 30 / Subtitle 30 / hidden Keyword Field
 100):
 
+> **Copy quality is a hard requirement — human-readable, never keyword-stuffed.**
+> Every `text` the Listing Strategist emits for the **Title** and **Subtitle**
+> (and the Play **Title / Short / Long**) must read as natural, fluent language
+> a real person wrote — the kind of line that belongs on a published store
+> listing, optimised for ASO *and* genuinely readable. A high-opportunity
+> keyword only earns a place if it fits a real sentence/phrase; do **not**
+> chain disconnected keywords ("Transkription Sprache Text Diktat Notizen
+> Audio"). One clear value proposition beats five stuffed terms.
+>
+> The **hidden Apple Keyword Field (100)** is the *only* slot that is a raw,
+> comma-separated keyword list (it is never shown to users) — there, dense
+> single keywords without filler are correct. The Play **Long description**
+> stays prose: paragraphs and benefit-led sentences, not a keyword dump.
+> H2 should flag any visible-slot copy that reads as a keyword pile rather than
+> language.
+
 ```json
 {"store": "apple", "slots": [
   {"slot": "title",        "recommended": {"text": "…", "char_count": N},
@@ -279,7 +295,10 @@ absent. The flag is deterministic (`condense.own_app_is_referenced`).
 - **Run-ID:** `YYYYMMDD-HHMMSS-<app-slug>`. Re-running the same seed
   produces a **new** run directory (the timestamp differs) — nothing is
   clobbered.
-- **Artefacts per run:** `report.md` (8 sections), `keywords.json`,
+- **Artefacts per run:** `report.md` (8 sections) **and `report.html`** (a
+  self-contained, browser-openable visual twin — Astro-inspired light UI with
+  traffic-light keyword signal meters, the canonical deliverable to read),
+  `keywords.json`,
   `competition.json`, `reddit-threads.json`, `run-config.yaml`
   (human echo) + `run-config.json` (machine round-trip),
   `run-summary.json` (includes `source_status` + `stage_timing`),

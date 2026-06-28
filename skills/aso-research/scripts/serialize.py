@@ -11,6 +11,7 @@ newline. This module is the single place that contract lives.
 from __future__ import annotations
 
 import json
+import os
 from typing import Any
 
 # Fixed separators (no trailing whitespace) + sorted keys + ASCII-passthrough
@@ -30,9 +31,18 @@ def dumps_json(obj: Any) -> str:
 
 
 def dump_json(obj: Any, path: str) -> None:
-    """Write ``obj`` to ``path`` as stable JSON (atomic-ish overwrite)."""
-    with open(path, "w", encoding="utf-8") as fh:
+    """Write ``obj`` to ``path`` as stable JSON, atomically (tmp + replace).
+
+    A plain truncating write leaves a corrupt half-file if the process is
+    killed or the disk fills mid-write; the next run then reads invalid JSON.
+    Writing to a sibling temp file and ``os.replace`` makes the swap atomic.
+    """
+    tmp = f"{path}.tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
         fh.write(dumps_json(obj))
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, path)
 
 
 def dumps_yaml(mapping: dict) -> str:

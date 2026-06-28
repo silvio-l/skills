@@ -32,6 +32,7 @@ from typing import Callable, Dict, List, Optional
 import apple_browser
 import apple_rss
 import extract
+import itunes
 import reddit
 import score
 import schema
@@ -41,6 +42,8 @@ from schema import merge_apple_slots
 # How many of the strongest hits to enrich with the subtitle + similar hop.
 SUBTITLE_TOP_N = 10
 SIMILAR_HOP_TOP_N = 5
+# Deckel on RSS-chart ids enriched into the corpus (each is one cached lookup).
+CHART_ENRICH_CAP = 25
 
 
 def _safe(fn, *args, **kwargs):
@@ -118,7 +121,9 @@ def collect_apple(
     chart_fn = chart_fn or apple_rss.collect
     reddit_fn = reddit_fn or reddit.collect
     suggest_fn = suggest_fn or search_suggest.collect
-    lookup_fn = lookup_fn or (lambda *a, **k: {})
+    # The similar-apps + RSS-chart hops resolve ids → Core via the live iTunes
+    # Lookup API. A no-op default silently discarded every niche competitor.
+    lookup_fn = lookup_fn or itunes.lookup
 
     seed_terms = list(seed_terms or config.get("seed_keywords") or [])
     if config.get("app_name"):
@@ -175,12 +180,12 @@ def collect_apple(
         reason = _exc_reason(hop_err) if hop_err else "empty: no similar apps found"
         source_status["apple_similar"] = _unavailable_status(reason)
 
+    from schema import map_itunes_to_core
+
     for sid in niche_ids:
-        raw, err = _safe(lookup_fn, sid, country=country)
+        raw, err = _safe(lookup_fn, sid, country=country, cache_dir=cache_dir, fresh=fresh)
         if err is not None or not raw:
             continue
-        from schema import map_itunes_to_core
-
         core = map_itunes_to_core(raw)
         if not core.get("id") or core["id"] in by_id:
             continue
@@ -203,6 +208,29 @@ def collect_apple(
         source_status["apple_rss_charts"] = _ok_status(len(chart_ids or []))
     chart_ids = chart_ids or []
 
+    # Enrich chart ids → Core records and fold the same-category ones into the
+    # corpus. The v2 marketing-tools feed is overall top-free (no genre path),
+    # so we post-filter by the seed category to keep the keyword corpus on
+    # topic; off-category chart-toppers (games, social) would only add noise.
+    seed_category = config.get("category", "")
+    chart_added = 0
+    for cid in chart_ids[:CHART_ENRICH_CAP]:
+        if cid in by_id:
+            continue
+        raw, err = _safe(lookup_fn, cid, country=country, cache_dir=cache_dir, fresh=fresh)
+        if err is not None or not raw:
+            continue
+        core = map_itunes_to_core(raw)
+        if not core.get("id") or core["id"] in by_id:
+            continue
+        if seed_category and core.get("category") != seed_category:
+            continue
+        core = merge_apple_slots(core, similar_app_ids=[])
+        core["discovery"] = "chart"
+        by_id[core["id"]] = core
+        enriched.append(core)
+        chart_added += 1
+
     # --- Reddit .json (qualitative) ---
     reddit_queries = [f"{q} app" for q in seed_terms][:5] or [config.get("app_name", "")]
     threads, rerr = _safe(
@@ -222,6 +250,7 @@ def collect_apple(
     suggest, serr = _safe(
         suggest_fn,
         seed_terms,
+        country=country,
         cache_dir=cache_dir,
         fresh=fresh,
     )

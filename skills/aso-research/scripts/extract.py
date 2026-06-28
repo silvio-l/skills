@@ -199,7 +199,7 @@ def tokenize(text: str) -> List[str]:
     return [
         tok
         for tok in _TOKEN_RE.findall(text.lower())
-        if len(tok) >= _MIN_TOKEN_LEN and tok not in blocked
+        if len(tok) >= _MIN_TOKEN_LEN and tok not in blocked and not tok.isdigit()
     ]
 
 
@@ -213,9 +213,17 @@ _UMLAUT_MAP = str.maketrans({"ä": "a", "ö": "o", "ü": "u", "ß": "ss"})
 # generates the set {itself, itself-minus-each-matching-suffix}; the
 # group key is the alphabetically smallest variant. Two tokens share a
 # variant iff they share their smallest key, so this collapses the
-# irregular German plurals (gewohnheit-en, routine-n, Mutter/Mütter) and
-# English plurals (-s) without mangling roots like ``tracker``.
-_GROUP_SUFFIXES = ("en", "er", "es", "e", "n", "s")
+# irregular German plurals (gewohnheit-en, routine-n) and English plurals
+# (-s) without mangling roots.
+#
+# ``er`` (and the redundant genitive ``es``) are deliberately EXCLUDED:
+# stripping ``-er`` wrongly merges agent/root nouns that are distinct ASO
+# niches — ``poster``→``post``, ``tracker``→``track``, ``master``→``mast``,
+# ``planner``→``plan``, ``center``→``cent``, ``folder``→``fold`` — inflating
+# both terms' competition with each other's hit sets. ``e``/``en``/``n``/``s``
+# carry the real singular/plural grouping (``routine``/``routinen``,
+# ``gewohnheit``/``gewohnheiten``, ``tracker``/``trackers``).
+_GROUP_SUFFIXES = ("en", "e", "n", "s")
 
 
 def _stem_variants(token: str) -> set:
@@ -309,6 +317,10 @@ def _candidate_phrases(
             for i in range(len(toks) - n + 1):
                 gram = tuple(toks[i : i + n])
                 if gram[0] in stopwords or gram[-1] in stopwords:
+                    continue
+                # drop phrases with a pure-number edge ("4000 zeichen",
+                # "top 100") — numeric edges are ASO noise, not keywords.
+                if gram[0].isdigit() or gram[-1].isdigit():
                     continue
                 phrases[gram] = phrases.get(gram, 0) + 1
     return phrases
@@ -446,7 +458,7 @@ def extract_keywords(
             field_text = doc.get(fname, "") or ""
             field_unique = set()
             for tok in _raw_tokens(field_text):
-                if len(tok) < _MIN_TOKEN_LEN or tok in blocked:
+                if len(tok) < _MIN_TOKEN_LEN or tok in blocked or tok.isdigit():
                     continue
                 field_unique.add(tok)
             for tok in field_unique:

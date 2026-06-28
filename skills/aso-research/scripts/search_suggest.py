@@ -12,53 +12,85 @@ Never-blocking: any failure returns ``[]`` and the caller marks the source
 
 from __future__ import annotations
 
-import json
+import plistlib
 import time
 import urllib.parse
 import urllib.request
 from typing import Callable, Dict, List, Optional
 
-_HTML_SNIFF = b"<html"
-
 import cache as CACHE
 import politeness as POLITE
 
-# App Store search-suggest endpoint (returns JSON list of suggestion strings).
-SUGGEST_URL = "https://search.itunes.apple.com/WebObjects/MZStore.woa/wa/search"
+# The real App Store autocomplete endpoint is MZSearchHints: it returns a
+# **plist (XML)** ``hints`` array of what users actually type. The previous
+# MZStore search URL returned an HTML interstitial (→ 0 terms every run).
+SUGGEST_URL = "https://search.itunes.apple.com/WebObjects/MZSearchHints.woa/wa/hints"
+
+# The ``X-Apple-Store-Front`` header is REQUIRED — without the country's
+# Software storefront id the endpoint returns an empty hint list. Map the
+# common App Store countries; unknown → no header (graceful empty result).
+_STOREFRONTS: Dict[str, str] = {
+    "us": "143441", "de": "143443", "gb": "143444", "uk": "143444",
+    "fr": "143442", "it": "143450", "es": "143454", "at": "143445",
+    "ch": "143459", "nl": "143452", "ca": "143455", "au": "143460",
+    "br": "143503", "jp": "143462", "mx": "143468", "se": "143456",
+    "no": "143457", "dk": "143458", "fi": "143447", "pl": "143478",
+    "pt": "143453", "ie": "143449", "be": "143446", "ru": "143469",
+    "in": "143467", "tr": "143480", "cz": "143489",
+}
 
 _RATE = POLITE.RateLimiter(seed=11)
+
+
+def _storefront(country: str) -> Optional[str]:
+    """Resolve the Software storefront id for a country code (None if unknown)."""
+    sid = _STOREFRONTS.get((country or "").lower())
+    return f"{sid}-1,29" if sid else None
 
 
 def fetch_suggest(
     term: str,
     *,
+    country: str = "de",
     cache_dir: str = CACHE.DEFAULT_CACHE_DIR,
     ttl: float = CACHE.HTTP_TTL,
     now: Optional[float] = None,
     fresh: bool = False,
     rate_limiter: Optional[POLITE.RateLimiter] = None,
 ) -> List[str]:
-    """One Apple autocomplete call, cache-backed. Never raises; [] on failure."""
-    params = {"term": term, "media": "software", "limit": "10"}
-    key = CACHE.cache_key("GET", SUGGEST_URL, params)
+    """One Apple autocomplete (MZSearchHints) call, cache-backed.
+
+    Never raises — returns ``[]`` on any failure. The country is part of the
+    cache key so DE and US hints cache separately.
+    """
+    params = {"clientApplication": "Software", "term": term}
+    key = CACHE.cache_key("GET", SUGGEST_URL, {**params, "country": country})
     path = CACHE.cache_path(cache_dir, key)
     now_ts = time.time() if now is None else now
 
     if not fresh and CACHE.is_fresh(path, ttl, now_ts):
         cached = CACHE.read_cache(path)
         if cached is not None:
-            return _parse(json.loads(cached.decode("utf-8")))
+            return _parse_bytes(cached)
 
     url = SUGGEST_URL + "?" + urllib.parse.urlencode(params)
-    if not POLITE.robots_allows(url):
-        return []
+    # MZSearchHints is the App Store client's own autocomplete API — the same
+    # "official Apple API" class as iTunes Search/Lookup (:mod:`itunes`, which
+    # likewise does not gate on robots.txt). pipeline.md classifies these APIs
+    # as the default channel; the robots gate stays on the genuine web-page
+    # scrapers (apps.apple.com / MS), which are robots-ALLOW anyway. Politeness
+    # (rate-limit + backoff + cache) is still fully enforced below.
+    headers = POLITE.browser_headers()
+    storefront = _storefront(country)
+    if storefront:
+        headers["X-Apple-Store-Front"] = storefront
 
     rl = rate_limiter or _RATE
     payload = None
     for attempt in range(POLITE.MAX_RETRIES):
         try:
             rl.wait(url)
-            req = urllib.request.Request(url, headers=POLITE.browser_headers())
+            req = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(req, timeout=30) as resp:
                 status = getattr(resp, "status", resp.getcode())
                 raw = resp.read()
@@ -75,54 +107,50 @@ def fetch_suggest(
     if payload is None:
         return []
     CACHE.write_cache(path, payload, now=now_ts)
-    try:
-        parsed = json.loads(payload.decode("utf-8"))
-    except json.JSONDecodeError:
-        if payload.lower().startswith(_HTML_SNIFF):
-            raise ValueError("non-JSON response: HTML interstitial from Apple Search-Suggest")
-        raise
-    return _parse(parsed)
+    return _parse_bytes(payload)
 
 
-def _parse(raw) -> List[str]:
-    """Tolerantly extract suggestion strings from a suggest payload.
+def _parse_bytes(raw: bytes) -> List[str]:
+    """Extract suggestion strings from a MZSearchHints plist payload.
 
-    The endpoint historically returns either a bare JSON list of strings
-    or an object wrapping a list. We handle both and never raise.
+    Tolerant: parses the plist ``hints`` array; never raises ([] on any
+    malformed/empty payload, e.g. an HTML interstitial).
     """
-    if isinstance(raw, list):
-        return [str(s).strip() for s in raw if isinstance(s, str) and s.strip()]
-    if isinstance(raw, dict):
-        for k in ("suggestions", "terms", "results"):
-            v = raw.get(k)
-            if isinstance(v, list):
-                return [
-                    (s if isinstance(s, str) else str(s.get("term") or s.get("title") or "")).strip()
-                    for s in v
-                    if s
-                ]
-    return []
+    try:
+        parsed = plistlib.loads(raw)
+    except Exception:
+        return []
+    hints = parsed.get("hints") if isinstance(parsed, dict) else None
+    if not isinstance(hints, list):
+        return []
+    out: List[str] = []
+    for h in hints:
+        term = h.get("term") if isinstance(h, dict) else h
+        term = (str(term) if term else "").strip()
+        if term:
+            out.append(term)
+    return out
 
 
 def collect(
     seed_terms: List[str],
     *,
+    country: str = "de",
     cache_dir: str = CACHE.DEFAULT_CACHE_DIR,
     fresh: bool = False,
     fetch_fn: Optional[Callable[..., List[str]]] = None,
 ) -> List[str]:
     """Probe autocomplete for each seed term; merge + de-dupe suggestions.
 
-    Never-blocking: any per-term failure is skipped.
+    Never-blocking: any per-term failure is skipped (a single bad term never
+    aborts the rest).
     """
     do_fetch = fetch_fn or fetch_suggest
     seen: set = set()
     out: List[str] = []
     for term in seed_terms:
         try:
-            suggestions = do_fetch(term, cache_dir=cache_dir, fresh=fresh)
-        except ValueError:
-            raise
+            suggestions = do_fetch(term, country=country, cache_dir=cache_dir, fresh=fresh)
         except Exception:
             continue
         for s in suggestions:

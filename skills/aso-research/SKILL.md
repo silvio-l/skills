@@ -70,9 +70,11 @@ uv run "$S" --app-name "Habit Hero" \
 ```
 
 The dispatcher prints the absolute path of the written run directory on
-stdout. **Open `report.md` and verify it** before declaring the run
-done. The canonical design source is the PRD at
-`.scratch/aso-research/PRD.md`.
+stdout. Each run writes **`report.md`** (Markdown) **and `report.html`** — a
+self-contained, browser-openable visual twin (Astro-inspired light UI,
+traffic-light keyword signal meters; the deliverable to actually read).
+**Open `report.html` and verify it** before declaring the run done. The
+canonical design source is the PRD at `.scratch/aso-research/PRD.md`.
 
 ## The LLM phase (agent-performed, Claude-native)
 
@@ -84,7 +86,7 @@ with the **model pinned explicitly per call**:
 
 - **H1 Metadata-Condenser — Haiku** → `llm/h1-condensed.json`
 - **S1 Niche & Positioning Analyst — Sonnet** → `llm/s1-analysis.json`
-- **S2 Listing Strategist — Sonnet** → `llm/s2-listing.json` (Apple: 1 + 2 per slot, char counts)
+- **S2 Listing Strategist — Sonnet** → `llm/s2-listing.json` (Apple: 1 + 2 per slot, char counts). **Visible-slot copy (Title/Subtitle, Play Title/Short/Long) must read as natural human language — ASO-optimised but never keyword-stuffed; only the hidden Apple Keyword Field is a raw comma keyword list.** See pipeline.md → "S2 listing".
 - **H2 Cross-Checker — Haiku** → `llm/h2-crosscheck.json` (reject contradictions)
 
 Stitch between them with the deterministic stages:

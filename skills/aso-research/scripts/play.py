@@ -29,18 +29,29 @@ and the caller marks the source ``"unavailable"``.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from typing import Any, Callable, Dict, List, Optional
 
 import cache as CACHE
 
-# The Node helper is shipped inline so there is no second file to keep in
-# sync. It loads google-play-scraper from the npx-installed package, reads a
-# JSON ``{cmd, args}`` blob from argv, and prints a JSON result on stdout.
-# Using async/await because every gplay.* method returns a Promise.
+# google-play-scraper is an **ESM-only** library (v10+, ``"type": "module"``),
+# so ``require()`` cannot load it and ``npx -p … node -e`` leaves it off Node's
+# resolution path. We therefore vendor it once into a stable home-cache dir and
+# run an ESM helper file **from that dir** (so Node resolves ``node_modules``
+# relative to the script). The install is idempotent and mirrors the Chromium
+# bootstrap in :mod:`apple_browser`.
+_GPS_HOME = os.environ.get("ASO_GPS_DIR") or os.path.join(
+    os.path.expanduser("~"), ".cache", "aso-research", "node"
+)
+_HELPER_NAME = "gps_helper.mjs"
+
+# ESM helper: reads a JSON ``{cmd, args}`` blob from argv, prints a JSON result
+# on stdout. ``gplay.default || gplay`` handles the default export shape.
 _NODE_HELPER = r"""
-const gplay = require('google-play-scraper');
+import _gplay from 'google-play-scraper';
+const gplay = _gplay.default || _gplay;
 const input = JSON.parse(process.argv[2]);
 const LANG = (input.args && input.args.lang) || 'de';
 const COUNTRY = (input.args && input.args.country) || 'de';
@@ -52,8 +63,15 @@ function run() {
       return gplay.search({term: a.term, num: a.num || 30, lang: LANG, country: COUNTRY});
     case 'app':
       return gplay.app({appId: a.appId, lang: LANG, country: COUNTRY});
-    case 'list':
-      return gplay.list({category: a.category || gplay.category.GAME, collection: a.collection || gplay.collection.TOP_FREE, num: a.num || 40, lang: LANG, country: COUNTRY});
+    case 'list': {
+      // Map the unified category slug → Play's category enum (PRODUCTIVITY,
+      // BUSINESS, …); an unknown slug omits the category → overall top-free.
+      const key = String(a.category || '').toUpperCase();
+      const cat = gplay.category[key];
+      const opts = {collection: a.collection || gplay.collection.TOP_FREE, num: a.num || 40, lang: LANG, country: COUNTRY};
+      if (cat) opts.category = cat;
+      return gplay.list(opts);
+    }
     case 'similar':
       return gplay.similar({appId: a.appId, lang: LANG, country: COUNTRY});
     case 'suggest':
@@ -69,18 +87,64 @@ run().then(function (out) {
 });
 """
 
+# Idempotent per-process: ensure the vendored install exists exactly once.
+_ensure_gps_done = False
+_ensure_gps_result: Optional[bool] = None
+
+
+def _ensure_gps() -> bool:
+    """Vendor google-play-scraper into ``_GPS_HOME`` once; return availability.
+
+    Idempotent per process. Writes a minimal ``package.json`` + the ESM helper,
+    then ``npm install``s the library if it is not already resolvable. A
+    ``False`` return is a never-blocking degradation — the caller marks the
+    Play sources "unavailable" and the pipeline continues (Apple-only result).
+    """
+    global _ensure_gps_done, _ensure_gps_result
+    if _ensure_gps_done:
+        return bool(_ensure_gps_result)
+    _ensure_gps_done = True
+    try:
+        os.makedirs(_GPS_HOME, exist_ok=True)
+        pkg = os.path.join(_GPS_HOME, "package.json")
+        if not os.path.exists(pkg):
+            with open(pkg, "w", encoding="utf-8") as fh:
+                fh.write('{"name":"aso-gps","private":true,"type":"module"}\n')
+        # (Re)write the helper so a code change here always reaches disk.
+        with open(os.path.join(_GPS_HOME, _HELPER_NAME), "w", encoding="utf-8") as fh:
+            fh.write(_NODE_HELPER)
+        installed = os.path.isdir(os.path.join(_GPS_HOME, "node_modules", "google-play-scraper"))
+        if not installed:
+            print("[play] installing google-play-scraper (one-time)…", file=sys.stderr)
+            proc = subprocess.run(
+                ["npm", "install", "--no-audit", "--no-fund", "--loglevel=error",
+                 "google-play-scraper@^10"],
+                cwd=_GPS_HOME, capture_output=True, text=True, timeout=300,
+            )
+            if proc.returncode != 0:
+                print(f"[play] npm install failed: {(proc.stderr or '').strip()[:160]}", file=sys.stderr)
+                _ensure_gps_result = False
+                return False
+        _ensure_gps_result = True
+    except Exception as exc:  # never-blocking
+        print(f"[play] bootstrap error: {type(exc).__name__}: {exc}", file=sys.stderr)
+        _ensure_gps_result = False
+    return bool(_ensure_gps_result)
+
 
 def _run_node(cmd: str, args: Dict[str, Any], *, country: str = "de") -> Any:
-    """Spawn the google-play-scraper helper via npx; return parsed payload.
+    """Run the google-play-scraper ESM helper from the vendored dir.
 
-    Raises ``RuntimeError`` on any non-zero exit or ``{ok:false}`` payload —
-    callers wrap this in the never-blocking ``_safe`` posture. ``npx -p``
-    installs the package ephemerally into the run environment so
-    ``require('google-play-scraper')`` resolves without a global install.
+    Raises ``RuntimeError`` on a missing install, non-zero exit, or
+    ``{ok:false}`` payload — callers wrap this in the never-blocking ``_safe``
+    posture.
     """
+    if not _ensure_gps():
+        raise RuntimeError("google-play-scraper not available (bootstrap failed)")
     payload = json.dumps({"cmd": cmd, "args": {**args, "country": country}})
     proc = subprocess.run(
-        ["npx", "--yes", "-p", "google-play-scraper", "node", "-e", _NODE_HELPER, payload],
+        ["node", _HELPER_NAME, payload],
+        cwd=_GPS_HOME,
         capture_output=True,
         text=True,
         timeout=90,
