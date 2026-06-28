@@ -87,7 +87,8 @@ def credentials_status() -> Dict:
         "source": None,
         "path": _CREDS_ENV,
         "register_url": REDDIT_APPS_URL,
-        "reason": "no REDDIT_CLIENT_ID/REDDIT_CLIENT_SECRET (anonymous Reddit is 403-blocked)",
+        "reason": "optional source: no approved REDDIT_CLIENT_ID/SECRET (anon .json 403; "
+                  "Reddit gates API access behind approval since Nov 2025)",
     }
 
 
@@ -128,9 +129,10 @@ def _get_token(now_ts: float) -> str:
     creds = _load_credentials()
     if not creds:
         raise RedditAuthError(
-            "Reddit needs free API credentials (anonymous .json is 403-blocked): "
-            "register a 'script' app at https://www.reddit.com/prefs/apps and set "
-            "REDDIT_CLIENT_ID / REDDIT_CLIENT_SECRET in ~/.config/reddit/api.env"
+            "Reddit unavailable (optional source): anonymous .json is 403-blocked and "
+            "since the Nov-2025 Responsible Builder Policy Reddit gates API access "
+            "behind approval. Set approved REDDIT_CLIENT_ID / REDDIT_CLIENT_SECRET in "
+            "~/.config/reddit/api.env to enable; the four stores cover the research."
         )
     cid, secret = creds
     basic = base64.b64encode(f"{cid}:{secret}".encode("utf-8")).decode("ascii")

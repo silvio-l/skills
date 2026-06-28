@@ -412,10 +412,12 @@ def _print_preflight(status: dict) -> None:
     rd = status.get("reddit", {})
     if not rd.get("ok"):
         print(
-            f"[preflight] → Reddit needs free creds: register a 'script' app at "
-            f"{rd.get('register_url')} and run:\n"
-            f"           aso_research.py --setup-reddit --reddit-client-id <ID> "
-            f"--reddit-client-secret <SECRET>",
+            "[preflight] → Reddit is OPTIONAL and currently gated: since the Nov-2025 "
+            "Responsible Builder Policy, Reddit requires approved API access before a "
+            "'script' app can be created, so self-serve creds are no longer instant. "
+            "The other four stores (iOS, Mac, Play, Microsoft) fully cover the research. "
+            "If you already hold approved creds, run: aso_research.py --setup-reddit "
+            "--reddit-client-id <ID> --reddit-client-secret <SECRET>",
             file=sys.stderr,
         )
 

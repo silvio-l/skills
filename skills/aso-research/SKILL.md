@@ -108,26 +108,26 @@ Preflight ensures + reports each dependency:
 - **Chromium** (Playwright) — auto-installed if missing.
 - **google-play-scraper** — auto-vendored into `~/.cache/aso-research/node`
   (`npm install`, needs Node).
-- **Reddit credentials** — Reddit **blocks anonymous `.json`** (HTTP 403), so the
-  user-language signal needs free app-only OAuth creds.
+- **Reddit credentials — OPTIONAL and now gated.** Reddit blocks anonymous
+  `.json` (HTTP 403), and since the **Nov-2025 Responsible Builder Policy**
+  Reddit also **gates API-app creation behind approval** — the old self-serve
+  "create a script app at prefs/apps" no longer issues instant credentials
+  (the button just links to the policy). So **do not send the user on a
+  30-second setup chase.** Reddit is a *supplementary* user-language signal; the
+  four stores cover the research without it.
 
-**When preflight reports `✗ reddit`, drive the setup for the user (don't make
-them read docs):**
-1. Open the registration page for them: `uv run "$S" --preflight --open`
-   (or `open https://www.reddit.com/prefs/apps`).
-2. Tell them concisely: *"create an app → type **script** → name it anything →
-   redirect uri `http://localhost` → Create app"*, then ask them to paste the
-   **client id** (under the app name) and the **secret**.
-3. Write it for them — never make them edit a file by hand:
-   ```bash
-   uv run "$S" --setup-reddit --reddit-client-id <ID> --reddit-client-secret <SECRET>
-   ```
-   (writes `~/.config/reddit/api.env`, mode 0600). Re-run `--preflight` to confirm `✓ reddit`.
-
-Without Reddit creds everything else runs normally and Reddit is honestly
-reported **unavailable** (with the reason). With them, Reddit thread titles +
-selftext become a **user-language keyword signal** folded into the
-Search-Suggest relevance boost (real demand, like store autocomplete).
+  When preflight reports `✗ reddit`, **say it plainly**: Reddit is optional and
+  currently requires Reddit's own API approval; the report will list it
+  "unavailable" and everything else runs normally. Only if the user *already
+  holds approved credentials* (e.g. an app created before the policy, or an
+  approved request) write them for the user — never make them edit a file:
+  ```bash
+  uv run "$S" --setup-reddit --reddit-client-id <ID> --reddit-client-secret <SECRET>
+  ```
+  (writes `~/.config/reddit/api.env`, mode 0600; re-run `--preflight` to confirm
+  `✓ reddit`). With valid creds, Reddit thread titles + selftext become a
+  **user-language keyword signal** folded into the Search-Suggest relevance
+  boost (real demand, like store autocomplete).
 
 ## The LLM phase (agent-performed, Claude-native)
 
