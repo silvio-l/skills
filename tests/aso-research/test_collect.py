@@ -72,6 +72,35 @@ class CollectAppleTests(unittest.TestCase):
         self.assertEqual(entry["status"], "ok")
         self.assertEqual(entry["result_count"], 2)
 
+    def test_selector_fallback_queues_html_on_subtitle_miss(self):
+        # subtitle selectors miss -> the injected fallback's HTML is queued for
+        # the LLM selector-heal, keyed by app id.
+        out = collect.collect_apple(
+            self.config, self.competitors,
+            subtitle_fn=lambda cid, **_k: "",  # every subtitle missed
+            subtitle_fallback_fn=lambda cid, **_k: f"<section><h1>App {cid}</h1></section>",
+            similar_fn=lambda *a, **k: [],
+            chart_fn=lambda *a, **k: [],
+            suggest_fn=lambda *a, **k: [],
+            lookup_fn=lambda *a, **k: {},
+        )
+        fb = out["selector_fallbacks"]
+        self.assertTrue(fb)
+        self.assertTrue(all(f["field"] == "subtitle" and f["html"] for f in fb))
+        self.assertEqual({f["app_id"] for f in fb}, {"1", "2"})
+
+    def test_selector_fallback_empty_when_subtitle_found(self):
+        out = collect.collect_apple(
+            self.config, self.competitors,
+            subtitle_fn=lambda cid, **_k: f"Sub {cid}",
+            subtitle_fallback_fn=lambda cid, **_k: "<section>should not be used</section>",
+            similar_fn=lambda *a, **k: [],
+            chart_fn=lambda *a, **k: [],
+            suggest_fn=lambda *a, **k: [],
+            lookup_fn=lambda *a, **k: {},
+        )
+        self.assertEqual(out["selector_fallbacks"], [])
+
     def test_failing_subtitle_marked_unavailable_and_never_blocks(self):
         def boom(cid, **_k):
             raise RuntimeError("browser down")

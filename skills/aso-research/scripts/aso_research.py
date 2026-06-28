@@ -139,6 +139,11 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--assemble", metavar="RUN_DIR",
         help="assemble the full 8-section report.md from artefacts + llm/*.json",
     )
+    p.add_argument(
+        "--heal", metavar="RUN_DIR",
+        help="apply agent-extracted subtitle overrides (llm/subtitle-overrides.json) "
+             "from the LLM selector fallback, then re-score + re-write the report",
+    )
     return p
 
 
@@ -385,6 +390,57 @@ def _print_preflight(status: dict) -> None:
         print(f"[preflight] {mark} {dep}: {st.get('detail', st.get('reason', ''))}", file=sys.stderr)
 
 
+def _apply_subtitle_overrides(run_dir: str, competitors: list) -> int:
+    """Apply agent-healed subtitles (``llm/subtitle-overrides.json``) in place.
+
+    The map is ``{app_id: subtitle}``, written by the agent after extracting
+    subtitles from ``llm-input/selector-fallback.json`` (LLM selector heal).
+    Only fills an empty subtitle. Returns the count applied.
+    """
+    overrides = _load_json(os.path.join(run_dir, "llm/subtitle-overrides.json")) or {}
+    if not overrides:
+        return 0
+    n = 0
+    for c in competitors:
+        sid = str(c.get("id") or "")
+        new = overrides.get(sid)
+        if new and not (c.get("subtitle") or "").strip():
+            c["subtitle"] = str(new)
+            n += 1
+    return n
+
+
+def _heal(run_dir: str) -> int:
+    """Apply agent-healed subtitles, re-score, and re-write the report.
+
+    The explicit apply path for the LLM selector heal: after the agent writes
+    ``llm/subtitle-overrides.json``, this merges them into ``competition.json``,
+    re-runs extract→score (with the persisted suggest terms so the +15 boost is
+    kept), and refreshes ``keywords.json`` + ``report.{md,html}``.
+    """
+    import collect  # local: collect imports the live collectors
+    competitors = _load_json(os.path.join(run_dir, "competition.json")) or []
+    config = _load_json(os.path.join(run_dir, "run-config.json")) or {}
+    suggest = _load_json(os.path.join(run_dir, "llm-input/suggest.json")) or []
+    applied = _apply_subtitle_overrides(run_dir, competitors)
+    if not applied:
+        print("[aso-research] heal: no subtitle overrides to apply", file=sys.stderr)
+        return 0
+    serialize.dump_json(competitors, os.path.join(run_dir, "competition.json"))
+    scored = collect.extract_and_score(competitors, config, suggest_terms=suggest)
+    serialize.dump_json(scored["keywords"], os.path.join(run_dir, "keywords.json"))
+    summary = _load_json(os.path.join(run_dir, "run-summary.json")) or {}
+    ms_entries = _load_json(os.path.join(run_dir, "ms-entries.json")) or []
+    brand_conflicts = _load_json(os.path.join(run_dir, "brand-conflicts.json")) or []
+    _write_report(
+        run_dir, config, competitors, scored["keywords"],
+        summary.get("source_status") or {}, datetime.datetime.now(),
+        ms_entries=ms_entries, brand_conflicts=brand_conflicts,
+    )
+    print(f"[aso-research] heal: applied {applied} subtitle(s), re-scored + re-wrote report", file=sys.stderr)
+    return 0
+
+
 def _latest_fresh_run_dir(output_root: str, app_slug: str, now_ts: float):
     """Most recent run dir for ``app_slug`` whose collect checkpoint is fresh.
 
@@ -423,6 +479,8 @@ def run(argv=None) -> int:
         return _run_gate(args.gate)
     if args.assemble:
         return _assemble(args.assemble)
+    if args.heal:
+        return _heal(args.heal)
 
     raw = _merge_file_and_flags(args)
     try:
@@ -487,6 +545,7 @@ def run(argv=None) -> int:
         competitors = deep["competitors"]
         suggest = deep["suggest_terms"]
         src_status = deep["source_status"]
+        selector_fallbacks = deep.get("selector_fallbacks", [])
         for src, entry in src_status.items():
             if not collect._status_is_ok(entry):
                 reason = entry.get("reason", "unavailable") if isinstance(entry, dict) else entry
@@ -571,6 +630,18 @@ def run(argv=None) -> int:
         # untouched on a skip (so a warm re-run keeps them byte-identical).
         serialize.dump_json(competitors, os.path.join(run_dir, "competition.json"))
         serialize.dump_json(ms_entries, os.path.join(run_dir, "ms-entries.json"))
+        # LLM-selector heal queue: header HTML for apps whose subtitle selectors
+        # missed, for the agent to extract (self-heals on Apple markup drift).
+        os.makedirs(os.path.join(run_dir, "llm-input"), exist_ok=True)
+        serialize.dump_json(selector_fallbacks, os.path.join(run_dir, "llm-input/selector-fallback.json"))
+        # persist the suggest set so --heal can re-score with the +15 boost intact
+        serialize.dump_json(suggest, os.path.join(run_dir, "llm-input/suggest.json"))
+        if selector_fallbacks:
+            print(
+                f"[aso-research] selector-heal: {len(selector_fallbacks)} subtitle(s) missed "
+                f"→ llm-input/selector-fallback.json (agent can extract; see SKILL.md)",
+                file=sys.stderr,
+            )
         return {
             "competitors": competitors,
             "suggest_terms": suggest,
@@ -591,6 +662,9 @@ def run(argv=None) -> int:
 
     # --- Stage: score (deterministic extract -> score over the corpus) ---
     def _score():
+        # Apply agent-healed subtitles (LLM selector fallback) before scoring, so
+        # a markup-drift miss recovered by the agent flows into the slot model.
+        _apply_subtitle_overrides(run_dir, competitors)
         scored = collect.extract_and_score(competitors, config, suggest_terms=suggest_terms)
         serialize.dump_json(scored["keywords"], os.path.join(run_dir, "keywords.json"))
         return {"keywords": scored["keywords"]}

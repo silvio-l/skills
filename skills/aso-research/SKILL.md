@@ -131,6 +131,24 @@ python3 "$S" --gate   <run-dir>      # token-gated s1-input.json
 python3 "$S" --assemble <run-dir>    # full 8-section report.md
 ```
 
+### Optional: LLM selector heal (self-heals Apple markup drift)
+
+The Apple subtitle scraper is the one remaining DOM-dependent collector. When
+its deterministic selectors miss, collect writes the captured header HTML to
+`llm-input/selector-fallback.json` (`[{app_id, field:"subtitle", html}]`). If
+that file is non-empty, **you (the agent) extract the missing field from the
+raw HTML — a Haiku micro-task — and write `llm/subtitle-overrides.json`
+(`{app_id: subtitle}`), then run `--heal`** to fold the recovered subtitles into
+the slot model, re-score, and refresh the report:
+
+```bash
+# … agent reads llm-input/selector-fallback.json, extracts subtitles → llm/subtitle-overrides.json …
+python3 "$S" --heal <run-dir>        # apply overrides → re-score → re-write report
+```
+
+This keeps the pipeline working when Apple shifts its markup, without a
+brittle redeploy — deterministic first, LLM only on a miss.
+
 The exact JSON schemas, the gate limits, the H2 thresholds
 (Opportunity ≥ 20, Competition ≤ 70), and the Modus A/B handling are in
 [pipeline.md](pipeline.md) → "LLM interpretation phase".

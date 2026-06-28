@@ -89,6 +89,7 @@ def collect_apple(
     fresh: bool = False,
     # injectable collectors (tests pass fakes; defaults hit the live modules)
     subtitle_fn: Optional[Callable] = None,
+    subtitle_fallback_fn: Optional[Callable] = None,
     similar_fn: Optional[Callable] = None,
     chart_fn: Optional[Callable] = None,
     suggest_fn: Optional[Callable] = None,
@@ -112,7 +113,13 @@ def collect_apple(
     run continues.
     """
     source_status: Dict[str, Dict] = {}
+    # The selector-heal fallback hits the same real browser fetch as the subtitle
+    # scraper, so auto-enable it only when the subtitle collector is NOT injected
+    # (i.e. live runs) — tests that fake subtitle_fn stay fully offline.
+    _subtitle_injected = subtitle_fn is not None
     subtitle_fn = subtitle_fn or apple_browser.collect_subtitle
+    if subtitle_fallback_fn is None and not _subtitle_injected:
+        subtitle_fallback_fn = apple_browser.collect_subtitle_fallback
     similar_fn = similar_fn or apple_browser.collect_similar
     chart_fn = chart_fn or apple_rss.collect
     suggest_fn = suggest_fn or search_suggest.collect
@@ -131,6 +138,7 @@ def collect_apple(
     strongest = list(enriched[:subtitle_top_n])
     subtitle_count = 0
     subtitle_err = None
+    selector_fallbacks: List[Dict] = []  # LLM-heal queue for missed subtitles
     for comp in strongest:
         cid = comp.get("id")
         if not cid:
@@ -143,6 +151,13 @@ def collect_apple(
             subtitle_count += 1
         elif err is not None and subtitle_err is None:
             subtitle_err = err
+        if not sub and subtitle_fallback_fn is not None:
+            # selector missed → queue the captured header HTML for LLM extraction
+            html, _ferr = _safe(
+                subtitle_fallback_fn, cid, country=country, cache_dir=cache_dir, fresh=fresh
+            )
+            if html:
+                selector_fallbacks.append({"app_id": str(cid), "field": "subtitle", "html": html})
     if subtitle_count == 0 and strongest:
         reason = _exc_reason(subtitle_err) if subtitle_err else "empty: no subtitles obtained"
         source_status["apple_subtitle"] = _unavailable_status(reason)
@@ -249,6 +264,7 @@ def collect_apple(
         "suggest_terms": suggest,
         "chart_ids": chart_ids,
         "source_status": source_status,
+        "selector_fallbacks": selector_fallbacks,
     }
 
 

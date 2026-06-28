@@ -197,7 +197,24 @@ def _scrape_page(page, app_id: str) -> Dict:
             continue
         seen.add(cid)
         similar.append(cid)
-    return {"subtitle": subtitle, "similar_app_ids": similar[:15]}
+
+    result = {"subtitle": subtitle, "similar_app_ids": similar[:15]}
+    # LLM-selector fallback: if every deterministic subtitle selector missed,
+    # capture a bounded snippet of the title's container so the agent can
+    # extract the subtitle from the raw HTML (self-heals when Apple shifts its
+    # markup). Bounded to ~4 KB and only on a miss → cheap, no PII.
+    if not subtitle:
+        try:
+            h1 = page.query_selector("h1")
+            html = h1.evaluate(
+                "e => { const s = e.closest('section,header,main') || e.parentElement;"
+                " return s ? s.outerHTML.slice(0, 4000) : ''; }"
+            ) if h1 else ""
+            if html:
+                result["subtitle_html"] = html
+        except Exception:
+            pass
+    return result
 
 
 def fetch_apple_app(
@@ -297,6 +314,28 @@ def collect_subtitle(
     do_fetch = fetch_fn or fetch_apple_app
     try:
         return do_fetch(app_id, country=country, cache_dir=cache_dir, fresh=fresh).get("subtitle", "")
+    except Exception:
+        return ""
+
+
+def collect_subtitle_fallback(
+    app_id: str,
+    *,
+    country: str = "de",
+    cache_dir: str = CACHE.DEFAULT_CACHE_DIR,
+    fresh: bool = False,
+    fetch_fn: Optional[Callable[..., Dict]] = None,
+) -> str:
+    """Return the captured header HTML snippet when subtitle selectors missed.
+
+    Empty string when the subtitle was found (no fallback needed) or no snippet
+    was captured. Reads the same cache-backed fetch as :func:`collect_subtitle`,
+    so it adds no extra page load.
+    """
+    do_fetch = fetch_fn or fetch_apple_app
+    try:
+        res = do_fetch(app_id, country=country, cache_dir=cache_dir, fresh=fresh)
+        return res.get("subtitle_html", "") if not res.get("subtitle") else ""
     except Exception:
         return ""
 
