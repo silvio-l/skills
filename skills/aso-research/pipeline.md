@@ -112,9 +112,13 @@ Play's TF-IDF position weighting follows Play's model, not Apple's.
     Description is a strong ranking factor and the Long Description is *fully*
     indexed, so both outweigh Apple's weakly-indexed description. Documented
     under the slice-04 ``decisions:`` block.
-- **Relevance (0–100):** cosine TF-IDF similarity to the seed
-  description, scaled to 100, **+15** if the term appears in Apple **or** Play
-  Search-Suggest autocomplete; clamped to [0, 100].
+- **Relevance (0–100):** a blend of two max-normalised signals — **0.4 ×**
+  seed-cosine (TF-IDF closeness to the seed concept; a phrase scores from the
+  mean of its component-token seed weights) **+ 0.6 ×** corpus centrality
+  (``tf_weighted × idf`` in the competitor corpus, so the niche's real
+  vocabulary ranks above the seed's own filler words). **+15** if the term
+  appears in Apple **or** Play Search-Suggest autocomplete; clamped to [0, 100].
+  Weight: ``score.SEED_RELEVANCE_WEIGHT``.
 - **Opportunity:** ``round(Relevance × (100 − Competition) / 100)``,
   **+10 niche bonus** if `Competition < 20 AND Relevance > 50` (strict).
 - **Split:** `primary-candidate` (Relevance ≥ 50) vs `long-tail-candidate`.

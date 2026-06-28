@@ -102,6 +102,11 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--cache-dir", default=CACHE.DEFAULT_CACHE_DIR, help=f"HTTP cache dir (default: {CACHE.DEFAULT_CACHE_DIR})")
     p.add_argument("--fresh", action="store_true", help="ignore cache, re-pull live")
     p.add_argument(
+        "--new-run", action="store_true",
+        help="force a brand-new timestamped run dir instead of reusing the "
+             "latest fresh one for this app (use for a clean --compare-last diff)",
+    )
+    p.add_argument(
         "--compare-last",
         action="store_true",
         help="after the run, diff against the most recent prior run of the "
@@ -333,6 +338,29 @@ def _build_run_summary(
     }
 
 
+def _latest_fresh_run_dir(output_root: str, app_slug: str, now_ts: float):
+    """Most recent run dir for ``app_slug`` whose collect checkpoint is fresh.
+
+    Run-ids are ``YYYYMMDD-HHMMSS-<slug>`` so they sort chronologically; a
+    fresh ``stages/collect.json`` means the data is still valid, so re-running
+    ``--input`` should land in this same dir rather than minting a duplicate.
+    Returns the absolute path or ``None``.
+    """
+    if not os.path.isdir(output_root):
+        return None
+    suffix = "-" + app_slug
+    matches = []
+    for name in os.listdir(output_root):
+        if not name.endswith(suffix):
+            continue
+        cp = os.path.join(output_root, name, "stages", "collect.json")
+        if os.path.isfile(cp) and CACHE.is_fresh(cp, stages.DEFAULT_COLLECT_TTL, now_ts):
+            matches.append(name)
+    if not matches:
+        return None
+    return os.path.join(output_root, max(matches))
+
+
 def run(argv=None) -> int:
     args = _build_arg_parser().parse_args(argv)
 
@@ -352,7 +380,22 @@ def run(argv=None) -> int:
     now = datetime.datetime.now()
     run_id_str = run_id.generate_run_id(now, config["app_name"])
     output_root = config["output_dir"] or os.path.join(os.getcwd(), ".aso-research")
-    run_dir = os.path.join(output_root, run_id_str)
+
+    # Idempotent run dir: re-using `--input` for the same app within the collect
+    # freshness window REUSES the latest fresh run dir instead of minting a new
+    # timestamp — so the collect→gate→assemble dance (and any accidental re-run)
+    # all land in ONE folder, not a pile of near-duplicate timestamped dirs.
+    # `--fresh` or `--new-run` force a brand-new dir (the latter for a clean diff).
+    app_slug = run_id.slugify(config["app_name"])
+    reuse = None
+    if not args.fresh and not args.new_run:
+        reuse = _latest_fresh_run_dir(output_root, app_slug, now.timestamp())
+    if reuse:
+        run_dir = reuse
+        run_id_str = os.path.basename(reuse)
+        print(f"[aso-research] reusing fresh run dir for '{app_slug}' (idempotent)", file=sys.stderr)
+    else:
+        run_dir = os.path.join(output_root, run_id_str)
     os.makedirs(run_dir, exist_ok=True)
 
     print(f"[aso-research] run-id: {run_id_str}", file=sys.stderr)

@@ -624,6 +624,12 @@ def collect_ms(
                         rating_count = enriched.get("rating_count")
                         if rating_count:
                             entry["rating_count"] = rating_count
+                        category = enriched.get("category")
+                        if category and not entry.get("category"):
+                            entry["category"] = schema.map_category(str(category))
+                        last_updated = enriched.get("last_updated")
+                        if last_updated and not entry.get("last_updated"):
+                            entry["last_updated"] = last_updated
                         reviews = enriched.get("reviews_sample")
                         if reviews:
                             entry["reviews_sample"] = list(reviews)[:3]

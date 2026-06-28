@@ -1164,11 +1164,29 @@ def build_report_html(
         )
         parts.append(f'<ul class="facts">{items}</ul>')
     if ms_entries and _entry_is_ok(source_status.get("ms")):
-        ms_titles = ", ".join(_html_esc(e.get("title", "")) for e in ms_entries[:8])
+        parts.append("<h3>Microsoft Store · Windows-Desktop (qualitativ)</h3>")
         parts.append(
-            f'<p class="section__intro" style="margin-top:14px"><strong>Microsoft Store '
-            f'(qualitativ, Best-Effort):</strong> {len(ms_entries)} App(s) beobachtet — '
-            f'{ms_titles}. Rein qualitativer Kontext; fließt NICHT ins Scoring ein.</p>'
+            f'<p class="section__intro">{len(ms_entries)} App(s) auf apps.microsoft.com '
+            f'(StoreEdge-API: Bewertungen, Beschreibung, Kategorie). Kontext für die '
+            f'Positionierung — fließt NICHT ins Keyword-Scoring ein (kein MS-Slot-Modell).</p>'
+        )
+        ms_sorted = sorted(ms_entries, key=lambda e: -(e.get("rating_count") or 0))
+        ms_rows = []
+        for e in ms_sorted[:12]:
+            ra = e.get("rating_avg")
+            ra_str = f"{float(ra):.1f}" if isinstance(ra, (int, float)) and ra else "—"
+            ms_rows.append(
+                "<tr>"
+                f'<td class="table__name">{_html_esc(e.get("title", ""))}</td>'
+                f'<td class="sub">{_html_esc(str(e.get("category", "") or "—"))}</td>'
+                f'<td class="num">{ra_str}</td>'
+                f'<td class="num">{e.get("rating_count", 0) or 0}</td>'
+                "</tr>"
+            )
+        parts.append(
+            '<table class="table"><thead><tr>'
+            '<th>Titel</th><th>Kategorie</th><th>Bewertung</th><th>#&nbsp;Bew.</th>'
+            f'</tr></thead><tbody>{"".join(ms_rows)}</tbody></table>'
         )
     parts.append("</section>")
 
@@ -1179,8 +1197,8 @@ def build_report_html(
         '<strong>Wettbewerbs-/Relevanz-Signal</strong> — ein Proxy, '
         '<strong>kein</strong> echtes Suchvolumen. Wettbewerb = positionsgewichteter '
         'Slot-Anteil (Apple Titel&times;5 · Untertitel&times;3 · Beschreibung&times;1; '
-        'Play Titel&times;5 · Kurz&times;4 · Lang&times;2); Relevanz = max-normalisierte '
-        'TF-IDF-Nähe zum Seed-Konzept (+15 Search-Suggest-Bonus); '
+        'Play Titel&times;5 · Kurz&times;4 · Lang&times;2); Relevanz = Blend aus '
+        'Seed-Nähe (40&nbsp;%) und Wettbewerber-Korpus-Zentralität (60&nbsp;%) (+15 Search-Suggest-Bonus); '
         'Chance = Relevanz &times; (100 − Wettbewerb) (+10 Nischen-Bonus). '
         'Balken-Farbe: grün = günstig, rot = ungünstig (Wettbewerb invers).</p>'
     )
@@ -1354,9 +1372,10 @@ def build_report_html(
     _section("Begriffe", "Glossar")
     glossary_terms = [
         ("Relevanz",
-         "Thematische Nähe eines Keywords zum Produktkonzept — max-normalisierte "
-         "TF-IDF-Ähnlichkeit zur Seed-Beschreibung (der relevanteste Begriff erreicht "
-         "~100). Je höher, desto passender zum Produkt."),
+         "Wie sehr ein Keyword zur Nische gehört. Blend aus (40 %) Nähe zum "
+         "Seed-Konzept und (60 %) Zentralität im Wettbewerber-Korpus — also wie "
+         "stark die echten Markt-Apps den Begriff nutzen. So stehen oben die "
+         "Markt-Keywords, nicht die eigenen Beschreibungs-Füllwörter."),
         ("Chance (Opportunity)",
          "Kombinierter Kennwert aus Relevanz und Wettbewerb. Je relevanter ein "
          "Keyword und je weniger umkämpft, desto höher die Chance. Der wichtigste "

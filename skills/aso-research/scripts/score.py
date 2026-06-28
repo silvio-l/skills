@@ -12,16 +12,20 @@ Formulas (all shares are 0..1, scores rounded to int 0..100):
       where title_share = title_hits / n_docs, etc. 0 when n_docs == 0.
 
     Relevance (0..100)
-        = cosine TF-IDF similarity of the term to the seed description,
-          **max-normalised** across the run (cosine / max_cosine × 100) so
-          the most-relevant term reaches ~100 and the fixed thresholds
-          (split ≥ 50, niche > 50) stay comparable; +15 if the term appears
-          in Apple/Play Search-Suggest autocomplete; clamped to [0, 100].
-          A single-term cosine reduces to the term's normalised TF-IDF
-          weight in the seed profile. A **phrase**'s cosine is the mean of
-          its component tokens' seed weights (the exact phrase string never
-          occurs verbatim in the tokenised seed, so a naive lookup scored
-          every phrase 0 — the bug this aggregation fixes).
+        = a blend of two max-normalised signals (each / its run-max so the
+          top term reaches ~1.0 and the fixed thresholds stay comparable):
+            * **seed cosine** (weight ``SEED_RELEVANCE_WEIGHT`` = 0.4) — TF-IDF
+              closeness to the seed concept; a phrase scores from the mean of
+              its component tokens' seed weights (the verbatim phrase never
+              occurs in the tokenised seed, so a naive lookup scored every
+              phrase 0 — the bug that aggregation fixes);
+            * **corpus centrality** (weight 0.6) — the term's position-weighted
+              TF-IDF mass in the *competitor corpus* (``tf_weighted × idf``):
+              high for vocabulary the niche's apps actually use, low for the
+              seed description's own filler. This anchors the table in the real
+              market, not the seed's prose.
+          ``+15`` if the term appears in Apple/Play Search-Suggest autocomplete;
+          clamped to [0, 100].
 
     Opportunity
         = round( Relevance * (100 - Competition) / 100 )
@@ -53,6 +57,12 @@ from typing import Dict, Iterable, List, Mapping, Sequence
 # PRD constants — exact.
 SUGGEST_BOOST = 15
 NICHE_BONUS = 10
+# Relevance is a blend of (a) closeness to the seed concept and (b) the term's
+# centrality in the *competitor corpus* (the actual market vocabulary), so the
+# top of the table is the niche's real keywords — not the seed description's own
+# filler words ("eingefügt", "werkzeug"), which the seed-only cosine over-rewards.
+# Weight leans toward the corpus: a keyword the market uses is the better ASO bet.
+SEED_RELEVANCE_WEIGHT = 0.4   # → 0.6 corpus-centrality weight
 NICHE_COMPETITION_MAX = 20  # strict: Competition < 20
 NICHE_RELEVANCE_MIN = 50   # strict: Relevance > 50
 PRIMARY_RELEVANCE_MIN = 50  # split threshold: Relevance >= 50
@@ -259,17 +269,27 @@ def score_keywords(
         idf[c["term"]] = math.log((n_docs + 1) / (1 + df)) if n_docs > 0 else 0.0
     seed_profile = _seed_tfidf_profile(seed_description, vocab, idf)
 
-    # Compute all raw cosine similarities first to enable max-normalisation
-    # (per PRD §P1: Relevance = cosine / max_cosine × 100, so the most
-    # relevant term reaches ~100 and fixed thresholds become comparable).
-    raw_cos = {}
+    # Two relevance signals, each max-normalised across the run so the most
+    # relevant term in each reaches ~1.0 and the fixed thresholds stay
+    # comparable:
+    #   * seed cosine     — closeness to the seed concept;
+    #   * corpus centrality — the term's position-weighted TF-IDF mass in the
+    #     competitor corpus (``tf_weighted × idf``): high for words the niche's
+    #     apps actually use, low for the seed description's own filler.
+    raw_cos: Dict[str, float] = {}
+    corpus_raw: Dict[str, float] = {}
     max_cos = 0.0
+    max_corpus = 0.0
     for c in extracted:
         term = c["term"]
         raw = _cosine_relevance(seed_profile, term, is_phrase=bool(c.get("is_phrase")))
         raw_cos[term] = raw
         if raw > max_cos:
             max_cos = raw
+        cr = float(c.get("tf_weighted", 0)) * idf.get(term, 0.0)
+        corpus_raw[term] = cr
+        if cr > max_corpus:
+            max_corpus = cr
 
     scored: List[Dict] = []
     for c in extracted:
@@ -279,11 +299,10 @@ def score_keywords(
         title_hits = hits.get("title", int(c.get("title_hits", 0)))
 
         competition = competition_score_weighted(hits, weights, n_docs)
-        raw = raw_cos[term]
-        if max_cos > 0.0:
-            relevance = int(round(raw / max_cos * 100.0))
-        else:
-            relevance = 0
+        seed_norm = (raw_cos[term] / max_cos) if max_cos > 0.0 else 0.0
+        corpus_norm = (corpus_raw[term] / max_corpus) if max_corpus > 0.0 else 0.0
+        blended = SEED_RELEVANCE_WEIGHT * seed_norm + (1.0 - SEED_RELEVANCE_WEIGHT) * corpus_norm
+        relevance = int(round(100.0 * blended))
         if term in suggest:
             relevance += SUGGEST_BOOST
         relevance = max(0, min(100, relevance))

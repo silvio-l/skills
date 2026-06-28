@@ -56,11 +56,27 @@ keep it minimal; push per-stage detail into phase docs.
 
 ## Quick start
 
+> **Output discipline (read first — this is where runs go wrong):**
+> - **Run from the target app's project root** (`cd` into the repo). Output
+>   defaults to **`./.aso-research/<run-id>/` inside that project** — versionable,
+>   visible, findable. **Do NOT point `--output-dir` at a temp/scratch dir and
+>   do NOT keep the seed in temp** — put the seed in the project (e.g.
+>   `./.aso-research/seed.yaml`) so the user can see inputs and results.
+> - **One run = one folder.** Capture the run-dir the first `--input` prints and
+>   reuse *that exact path* for `--gate`/`--assemble`. Re-running `--input` for
+>   the same app reuses the latest fresh run dir automatically (idempotent — no
+>   duplicate timestamped folders); pass `--new-run` only for a deliberate fresh
+>   `--compare-last` diff.
+> - **Let the user follow along.** Don't silently redirect output to an unseen
+>   temp file. Stream progress to the terminal (or `tee` it into the run dir):
+>   `uv run "$S" --input ./.aso-research/seed.yaml 2>&1 | tee ./.aso-research/last-run.log`.
+
 ```bash
 S=~/.claude/skills/aso-research/scripts/aso_research.py
+cd /path/to/the/app/project          # output lands in ./.aso-research/ here
 
-# Structured input (YAML or JSON).
-uv run "$S" --input seed.yaml
+# Structured input (YAML or JSON), kept in the project (not temp).
+uv run "$S" --input ./.aso-research/seed.yaml
 
 # Or build the input from flags.
 uv run "$S" --app-name "Habit Hero" \
