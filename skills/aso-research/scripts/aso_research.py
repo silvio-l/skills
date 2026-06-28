@@ -667,6 +667,11 @@ def run(argv=None) -> int:
         _apply_subtitle_overrides(run_dir, competitors)
         scored = collect.extract_and_score(competitors, config, suggest_terms=suggest_terms)
         serialize.dump_json(scored["keywords"], os.path.join(run_dir, "keywords.json"))
+        import clusters
+        serialize.dump_json(
+            clusters.build_strategy(scored["keywords"]),
+            os.path.join(run_dir, "keyword-strategy.json"),
+        )
         return {"keywords": scored["keywords"]}
 
     score_out, score_status = runner.stage("score", _score, ttl=stages.DEFAULT_COMPUTE_TTL)

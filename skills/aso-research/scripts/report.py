@@ -29,6 +29,8 @@ from __future__ import annotations
 import datetime
 from typing import Dict, List, Optional
 
+import clusters
+
 _GENERATED_LABEL = "Generated"
 _KEYWORD_REPORT_LIMIT = 30  # top-N keywords shown in the report table
 
@@ -264,12 +266,12 @@ def build_report(
             "below as a placeholder read._"
         )
         lines.append("")
-        clusters: Dict[str, List[str]] = {}
+        cat_clusters: Dict[str, List[str]] = {}
         for c in competitors:
             cat = str(c.get("category", "other"))
-            clusters.setdefault(cat, []).append(c.get("title", ""))
-        for cat in sorted(clusters):
-            titles = ", ".join(_md_escape(t) for t in clusters[cat][:6])
+            cat_clusters.setdefault(cat, []).append(c.get("title", ""))
+        for cat in sorted(cat_clusters):
+            titles = ", ".join(_md_escape(t) for t in cat_clusters[cat][:6])
             lines.append(f"- **{cat}:** {titles}")
     # Microsoft Store qualitative signal (slice 05) — best-effort, qualitative
     # only. Surfaced when the MS source ran and returned entries; S1 reads it
@@ -1173,13 +1175,13 @@ def build_report_html(
             '(S1 Nischen- &amp; Positionierungs-Analyst, Sonnet). Deterministische '
             'Kategorie-Clusterung als Platzhalter:</p>'
         )
-        clusters: Dict[str, List[str]] = {}
+        cat_clusters: Dict[str, List[str]] = {}
         for c in competitors:
             ccat = str(c.get("category", "other"))
-            clusters.setdefault(ccat, []).append(c.get("title", ""))
+            cat_clusters.setdefault(ccat, []).append(c.get("title", ""))
         items = "".join(
-            f'<li><b>{_html_esc(ccat)}:</b> {", ".join(_html_esc(t) for t in clusters[ccat][:6])}</li>'
-            for ccat in sorted(clusters)
+            f'<li><b>{_html_esc(ccat)}:</b> {", ".join(_html_esc(t) for t in cat_clusters[ccat][:6])}</li>'
+            for ccat in sorted(cat_clusters)
         )
         parts.append(f'<ul class="facts">{items}</ul>')
     if ms_entries and _entry_is_ok(source_status.get("ms")):
@@ -1260,6 +1262,42 @@ def build_report_html(
         )
         parts.append("</div>")
     parts.append("</section>")
+
+    # --- Keyword-Strategie (themes + recommended target set) ---
+    if keywords:
+        strategy = clusters.build_strategy(keywords)
+        if strategy["clusters"]:
+            _section("Strategie", "Keyword-Strategie")
+            parts.append(
+                '<p class="section__intro">Themen-Cluster aus den bewerteten Keywords und '
+                'ein datenbasiertes Ziel-Keyword-Set pro Slot — die Verdichtung der Tabelle '
+                'in konkrete Empfehlungen. Der Listing-Stratege macht daraus menschliche Texte.</p>'
+            )
+            parts.append('<div class="buckets">')
+            for c in strategy["clusters"]:
+                terms = ", ".join(_html_esc(t) for t in c["terms"][:8])
+                parts.append(
+                    f'<div class="bucket bucket--niche">'
+                    f'<p class="bucket__title">{_html_esc(c["label"])} '
+                    f'<span class="sub">· Σ Chance {c["opportunity"]} · {c["size"]} Keywords</span></p>'
+                    f'<p class="bucket__terms">{terms}</p></div>'
+                )
+            parts.append("</div>")
+            ts = strategy["target_set"]
+            def _slot_line(name, terms, sep, limit):
+                joined = sep.join(terms)
+                return (
+                    f'<div class="slot"><span class="slot__name">{name}</span>'
+                    f'<p class="slot__rec"><code>{_html_esc(joined) or "—"}</code>'
+                    f'<span class="count">{len(joined)}/{limit} Zeichen</span></p></div>'
+                )
+            parts.append("<h3>Empfohlenes Ziel-Keyword-Set (Apple-Slots)</h3>")
+            parts.append('<div class="listing">')
+            parts.append(_slot_line("Titel", ts["title"], " ", clusters.TITLE_MAX))
+            parts.append(_slot_line("Untertitel", ts["subtitle"], " ", clusters.SUBTITLE_MAX))
+            parts.append(_slot_line("Keyword-Feld", ts["keyword_field"], ",", clusters.KEYWORD_FIELD_MAX))
+            parts.append("</div>")
+            parts.append("</section>")
 
     # --- Chancen ---
     _section("Chancen", "Hebel & Quick Wins")
