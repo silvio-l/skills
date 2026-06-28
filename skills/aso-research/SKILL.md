@@ -82,6 +82,11 @@ uv run "$S" --app-name "Habit Hero" \
             --description "A gamified habit tracker" \
             --seed-keyword habit --seed-keyword tracker \
             --country de --language de
+
+# Multi-market in one go: runs the full pipeline per country and writes a
+# cross-market keyword comparison (which terms win in which market = where to
+# localise) to <output>/<app>-markets/market-comparison.html.
+uv run "$S" --input ./.aso-research/seed.yaml --countries de,us
 ```
 
 The dispatcher prints the absolute path of the written run directory on

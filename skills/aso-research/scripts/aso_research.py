@@ -119,6 +119,11 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--max-queries", type=int, default=3, help="cap on iTunes queries (default: 3)")
     p.add_argument(
+        "--countries", default=None,
+        help="comma-separated markets to research in one go (e.g. 'de,us'); runs the "
+             "full pipeline per country and writes a cross-market keyword comparison",
+    )
+    p.add_argument(
         "--brand-glossary", metavar="PATH",
         dest="brand_glossary",
         default=None,
@@ -441,6 +446,73 @@ def _heal(run_dir: str) -> int:
     return 0
 
 
+def _latest_run_dir_in(folder: str):
+    """Most recent run dir (``YYYYMMDD-HHMMSS-<slug>``) inside ``folder``, or None."""
+    if not os.path.isdir(folder):
+        return None
+    runs = [n for n in os.listdir(folder)
+            if os.path.isdir(os.path.join(folder, n)) and n[:8].isdigit()]
+    return os.path.join(folder, max(runs)) if runs else None
+
+
+def _run_markets(args) -> int:
+    """Multi-country mode: run the full pipeline per market, then compare.
+
+    Each country gets its own complete run (its own collect/score/report) under
+    ``<output>/<app>-markets/<country>/``; the parent then reads each market's
+    ``keywords.json`` and writes a cross-market comparison.
+    """
+    import subprocess
+    import shutil
+    import markets as MARKETS
+
+    countries = [c.strip().lower() for c in args.countries.split(",") if c.strip()]
+    if not countries:
+        print("error: --countries was empty", file=sys.stderr)
+        return 2
+    raw = _merge_file_and_flags(args)
+    try:
+        config = input_config.parse_input(raw)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    output_root = config["output_dir"] or os.path.join(os.getcwd(), ".aso-research")
+    markets_root = os.path.join(output_root, run_id.slugify(config["app_name"]) + "-markets")
+    os.makedirs(markets_root, exist_ok=True)
+    # base seed for the per-country sub-runs (country/output_dir set per call)
+    seed = {k: raw[k] for k in input_config.CANONICAL_KEYS
+            if k in raw and k not in ("country", "output_dir", "app_type_source")}
+    seed_path = os.path.join(markets_root, "_seed.json")
+    serialize.dump_json(seed, seed_path)
+
+    launcher = ["uv", "run"] if shutil.which("uv") else [sys.executable]
+    per_market = []
+    for c in countries:
+        cdir = os.path.join(markets_root, c)
+        print(f"[aso-research] market '{c}': running full pipeline → {cdir}", file=sys.stderr)
+        cmd = launcher + [os.path.abspath(__file__), "--input", seed_path,
+                          "--country", c, "--output-dir", cdir, "--new-run"]
+        subprocess.run(cmd, cwd=os.getcwd())  # stream progress; never raises on non-zero
+        rd = _latest_run_dir_in(cdir)
+        kw = (_load_json(os.path.join(rd, "keywords.json")) if rd else None) or []
+        per_market.append({"country": c, "keywords": kw, "run_dir": rd})
+        print(f"[aso-research] market '{c}': {len(kw)} keyword(s)", file=sys.stderr)
+
+    comparison = MARKETS.compare_markets(per_market)
+    serialize.dump_json(comparison, os.path.join(markets_root, "market-comparison.json"))
+    html = MARKETS.render_html(
+        comparison, app_name=config["app_name"],
+        generated=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    )
+    html_path = os.path.join(markets_root, "market-comparison.html")
+    with open(html_path, "w", encoding="utf-8") as fh:
+        fh.write(html)
+    print(f"[aso-research] cross-market comparison: {html_path}", file=sys.stderr)
+    print(os.path.abspath(markets_root))
+    return 0
+
+
 def _latest_fresh_run_dir(output_root: str, app_slug: str, now_ts: float):
     """Most recent run dir for ``app_slug`` whose collect checkpoint is fresh.
 
@@ -481,6 +553,8 @@ def run(argv=None) -> int:
         return _assemble(args.assemble)
     if args.heal:
         return _heal(args.heal)
+    if args.countries:
+        return _run_markets(args)
 
     raw = _merge_file_and_flags(args)
     try:
