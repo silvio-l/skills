@@ -92,6 +92,27 @@ traffic-light keyword signal meters; the deliverable to actually read).
 **Open `report.html` and verify it** before declaring the run done. The
 canonical design source is the PRD at `.scratch/aso-research/PRD.md`.
 
+## Source setup (one-time)
+
+Most sources need nothing. Two have a one-time setup:
+
+- **Google Play** — `google-play-scraper` (ESM, v10) is vendored automatically
+  into `~/.cache/aso-research/node` on first use via `npm install` (needs Node).
+- **Reddit** — Reddit **blocks anonymous `.json`** (HTTP 403), so the user
+  language signal needs free app-only OAuth credentials. Register a **"script"**
+  app at <https://www.reddit.com/prefs/apps> and put the id + secret in
+  **`~/.config/reddit/api.env`**:
+
+  ```
+  REDDIT_CLIENT_ID=xxxxxxxx
+  REDDIT_CLIENT_SECRET=xxxxxxxxxxxxxxxx
+  ```
+
+  Without them Reddit is honestly reported **unavailable** (with the reason) and
+  the pipeline continues. With them, Reddit thread titles + selftext become a
+  **user-language keyword signal** folded into the Search-Suggest relevance
+  boost (real demand, like store autocomplete).
+
 ## The LLM phase (agent-performed, Claude-native)
 
 This skill runs **inside** a Claude agent — that agent *is* the LLM, so

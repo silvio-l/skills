@@ -313,7 +313,9 @@ def extract_and_score(
         "android", "google", "play", "windows", "microsoft",
         config.get("app_name", ""),
     ]
-    suggest = list(suggest_terms or [])
+    # Drop app/package-name autocomplete noise (e.g. "emis.spracheingabe") so
+    # brand suggestions don't pollute the keyword candidates or the +15 boost.
+    suggest, _dropped_brand = extract.filter_brand_suggest(list(suggest_terms or []))
     seed_description = config.get("description") or ""
     app_type = config.get("app_type", "both")
 

@@ -543,7 +543,12 @@ def run(argv=None) -> int:
 
     # --- Stage: score (deterministic extract -> score over the corpus) ---
     def _score():
-        scored = collect.extract_and_score(competitors, config, suggest_terms=suggest_terms)
+        # Reddit threads are real user language → fold their distinctive terms
+        # into the Search-Suggest boost set (same "real demand" signal as store
+        # autocomplete). No-op when Reddit is unavailable (no creds → no threads).
+        import reddit as _reddit
+        user_terms = list(suggest_terms) + _reddit.user_language_terms(reddit_threads)
+        scored = collect.extract_and_score(competitors, config, suggest_terms=user_terms)
         serialize.dump_json(scored["keywords"], os.path.join(run_dir, "keywords.json"))
         return {"keywords": scored["keywords"]}
 

@@ -186,6 +186,26 @@ PLATFORM_GENERICS = {
 }
 
 
+# A reverse-domain / package-id-style token (``emis.spracheingabe``,
+# ``co.speechnotes``) in a Search-Suggest result is an app/brand name, not a
+# keyword — high-precision marker so we drop the worst autocomplete noise
+# without touching legitimate multi-word queries.
+_BRAND_SUGGEST_RE = re.compile(r"[a-z0-9]{2,}\.[a-z0-9]{2,}")
+
+
+def is_brand_like_suggest(term: str) -> bool:
+    """True when a Search-Suggest term looks like an app/package name, not a keyword."""
+    return bool(_BRAND_SUGGEST_RE.search((term or "").lower()))
+
+
+def filter_brand_suggest(suggest_terms):
+    """Split suggest terms into (clean, dropped-brand-like)."""
+    clean, dropped = [], []
+    for s in suggest_terms or []:
+        (dropped if is_brand_like_suggest(s) else clean).append(s)
+    return clean, dropped
+
+
 def _raw_tokens(text: str) -> List[str]:
     """Lowercased alphanumeric tokens with NO filtering (for n-gram builds)."""
     if not text:
