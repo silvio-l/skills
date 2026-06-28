@@ -92,26 +92,42 @@ traffic-light keyword signal meters; the deliverable to actually read).
 **Open `report.html` and verify it** before declaring the run done. The
 canonical design source is the PRD at `.scratch/aso-research/PRD.md`.
 
-## Source setup (one-time)
+## Preflight & source setup (automated — do this first, every time)
 
-Most sources need nothing. Two have a one-time setup:
+**Run preflight at the start of every `/aso-research` invocation** and prepare
+everything scriptable yourself; only ask the user for the one thing that needs
+a human (Reddit credentials). `--input` runs preflight automatically too, but
+running it first lets you drive the Reddit setup before the crawl.
 
-- **Google Play** — `google-play-scraper` (ESM, v10) is vendored automatically
-  into `~/.cache/aso-research/node` on first use via `npm install` (needs Node).
-- **Reddit** — Reddit **blocks anonymous `.json`** (HTTP 403), so the user
-  language signal needs free app-only OAuth credentials. Register a **"script"**
-  app at <https://www.reddit.com/prefs/apps> and put the id + secret in
-  **`~/.config/reddit/api.env`**:
+```bash
+S=~/.claude/skills/aso-research/scripts/aso_research.py
+uv run "$S" --preflight          # add --open to open the Reddit page if needed
+```
 
-  ```
-  REDDIT_CLIENT_ID=xxxxxxxx
-  REDDIT_CLIENT_SECRET=xxxxxxxxxxxxxxxx
-  ```
+Preflight ensures + reports each dependency:
+- **Chromium** (Playwright) — auto-installed if missing.
+- **google-play-scraper** — auto-vendored into `~/.cache/aso-research/node`
+  (`npm install`, needs Node).
+- **Reddit credentials** — Reddit **blocks anonymous `.json`** (HTTP 403), so the
+  user-language signal needs free app-only OAuth creds.
 
-  Without them Reddit is honestly reported **unavailable** (with the reason) and
-  the pipeline continues. With them, Reddit thread titles + selftext become a
-  **user-language keyword signal** folded into the Search-Suggest relevance
-  boost (real demand, like store autocomplete).
+**When preflight reports `✗ reddit`, drive the setup for the user (don't make
+them read docs):**
+1. Open the registration page for them: `uv run "$S" --preflight --open`
+   (or `open https://www.reddit.com/prefs/apps`).
+2. Tell them concisely: *"create an app → type **script** → name it anything →
+   redirect uri `http://localhost` → Create app"*, then ask them to paste the
+   **client id** (under the app name) and the **secret**.
+3. Write it for them — never make them edit a file by hand:
+   ```bash
+   uv run "$S" --setup-reddit --reddit-client-id <ID> --reddit-client-secret <SECRET>
+   ```
+   (writes `~/.config/reddit/api.env`, mode 0600). Re-run `--preflight` to confirm `✓ reddit`.
+
+Without Reddit creds everything else runs normally and Reddit is honestly
+reported **unavailable** (with the reason). With them, Reddit thread titles +
+selftext become a **user-language keyword signal** folded into the
+Search-Suggest relevance boost (real demand, like store autocomplete).
 
 ## The LLM phase (agent-performed, Claude-native)
 

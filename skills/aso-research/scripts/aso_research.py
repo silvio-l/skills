@@ -124,6 +124,23 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         default=None,
         help="path to a brand glossar (overrides convention discovery)",
     )
+    # --- preflight / source setup ---
+    p.add_argument(
+        "--preflight", action="store_true",
+        help="check + prepare every source dependency (chromium, google-play-"
+             "scraper, Reddit creds) and exit",
+    )
+    p.add_argument(
+        "--open", action="store_true",
+        help="with --preflight: open the Reddit app-registration page if creds are missing",
+    )
+    p.add_argument(
+        "--setup-reddit", action="store_true",
+        help="write Reddit OAuth creds to ~/.config/reddit/api.env and exit "
+             "(use with --reddit-client-id / --reddit-client-secret)",
+    )
+    p.add_argument("--reddit-client-id", default=None)
+    p.add_argument("--reddit-client-secret", default=None)
     # --- slice 03 LLM-phase stages ---
     p.add_argument(
         "--gate", metavar="RUN_DIR",
@@ -345,6 +362,64 @@ def _build_run_summary(
     }
 
 
+def _preflight(open_browser: bool = False, ensure: bool = True) -> dict:
+    """Check (and, where scriptable, prepare) every source dependency.
+
+    Run at the start of every pipeline (and via ``--preflight``): ensures the
+    Chromium browser and the google-play-scraper package are installed, and
+    reports whether Reddit credentials exist. The only step that needs the user
+    is the Reddit app registration — ``open_browser`` opens that page for them.
+    Returns a status dict ``{dep: {"ok": bool, "detail": str, ...}}``.
+    """
+    import shutil
+    import subprocess
+
+    status: dict = {}
+    status["node"] = {
+        "ok": bool(shutil.which("node")),
+        "detail": shutil.which("node") or "node not found — Google Play needs Node.js",
+    }
+    if ensure:
+        try:
+            import apple_browser
+            ok, reason = apple_browser._ensure_chromium()
+            status["chromium"] = {"ok": ok, "detail": reason or "ready"}
+        except Exception as exc:
+            status["chromium"] = {"ok": False, "detail": f"{type(exc).__name__}: {exc}"}
+        try:
+            import play
+            gp = play._ensure_gps()
+            status["google_play"] = {"ok": gp, "detail": "ready" if gp else "npm install failed"}
+        except Exception as exc:
+            status["google_play"] = {"ok": False, "detail": f"{type(exc).__name__}: {exc}"}
+    import reddit
+    rc = reddit.credentials_status()
+    status["reddit"] = rc
+    if not rc.get("ok") and open_browser:
+        try:
+            subprocess.run(["open", rc["register_url"]], check=False, timeout=10)
+            status["reddit"]["opened_browser"] = True
+        except Exception:
+            pass
+    return status
+
+
+def _print_preflight(status: dict) -> None:
+    """Human-readable preflight summary to stderr."""
+    for dep, st in status.items():
+        mark = "✓" if st.get("ok") else "✗"
+        print(f"[preflight] {mark} {dep}: {st.get('detail', st.get('reason', ''))}", file=sys.stderr)
+    rd = status.get("reddit", {})
+    if not rd.get("ok"):
+        print(
+            f"[preflight] → Reddit needs free creds: register a 'script' app at "
+            f"{rd.get('register_url')} and run:\n"
+            f"           aso_research.py --setup-reddit --reddit-client-id <ID> "
+            f"--reddit-client-secret <SECRET>",
+            file=sys.stderr,
+        )
+
+
 def _latest_fresh_run_dir(output_root: str, app_slug: str, now_ts: float):
     """Most recent run dir for ``app_slug`` whose collect checkpoint is fresh.
 
@@ -370,6 +445,23 @@ def _latest_fresh_run_dir(output_root: str, app_slug: str, now_ts: float):
 
 def run(argv=None) -> int:
     args = _build_arg_parser().parse_args(argv)
+
+    # --- preflight / source setup (no collection) ---
+    if args.setup_reddit:
+        import reddit
+        try:
+            path = reddit.save_credentials(args.reddit_client_id, args.reddit_client_secret)
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        print(f"[aso-research] wrote Reddit credentials to {path}", file=sys.stderr)
+        print(path)
+        return 0
+    if args.preflight:
+        status = _preflight(open_browser=args.open)
+        _print_preflight(status)
+        print(json.dumps(status, ensure_ascii=False))
+        return 0  # preflight is informational; missing Reddit creds is not a failure
 
     # --- slice 03 LLM-phase stages (no collection) ---
     if args.gate:
@@ -410,6 +502,11 @@ def run(argv=None) -> int:
     print(f"[aso-research] cache-dir: {args.cache_dir}", file=sys.stderr)
     if args.fresh:
         print("[aso-research] --fresh: bypassing cache + stage checkpoints", file=sys.stderr)
+
+    # Preflight: ensure scriptable deps (chromium, google-play-scraper) up front
+    # so failures surface here, not mid-crawl; report Reddit-creds status with an
+    # actionable hint. Never blocks — collectors still degrade per-source.
+    _print_preflight(_preflight(open_browser=False))
 
     # Stages are idempotent (slice 06): each skips if its checkpoint is fresh,
     # so a crash at stage N resumes at N (US9). --fresh bypasses every check.

@@ -69,6 +69,57 @@ def _load_credentials() -> Optional[tuple]:
     return None
 
 
+REDDIT_APPS_URL = "https://www.reddit.com/prefs/apps"
+
+
+def credentials_status() -> Dict:
+    """Report whether Reddit credentials are configured (for preflight).
+
+    ``{"ok": bool, "source": "env"|"file"|None, "path": <creds file>,
+       "register_url": ..., "reason": <when not ok>}``.
+    """
+    creds = _load_credentials()
+    if creds:
+        src = "env" if os.environ.get("REDDIT_CLIENT_ID") else "file"
+        return {"ok": True, "source": src, "path": _CREDS_ENV}
+    return {
+        "ok": False,
+        "source": None,
+        "path": _CREDS_ENV,
+        "register_url": REDDIT_APPS_URL,
+        "reason": "no REDDIT_CLIENT_ID/REDDIT_CLIENT_SECRET (anonymous Reddit is 403-blocked)",
+    }
+
+
+def save_credentials(client_id: str, client_secret: str, *, path: str = None) -> str:
+    """Write Reddit credentials to the creds file (0600). Returns the path.
+
+    Used by the preflight setup helper so the user only pastes the two values
+    once; the skill writes the file for them.
+    """
+    target = path or _CREDS_ENV
+    cid = (client_id or "").strip()
+    secret = (client_secret or "").strip()
+    if not cid or not secret:
+        raise ValueError("both client_id and client_secret are required")
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    body = (
+        "# Reddit application-only OAuth credentials for aso-research\n"
+        "# Registered as a 'script' app at https://www.reddit.com/prefs/apps\n"
+        f"REDDIT_CLIENT_ID={cid}\n"
+        f"REDDIT_CLIENT_SECRET={secret}\n"
+    )
+    with open(target, "w", encoding="utf-8") as fh:
+        fh.write(body)
+    try:
+        os.chmod(target, 0o600)
+    except Exception:
+        pass
+    # invalidate any cached token so the next call re-auths with the new creds
+    _token_cache.clear()
+    return target
+
+
 def _get_token(now_ts: float) -> str:
     """Fetch (and process-cache) an application-only bearer token."""
     cached = _token_cache.get("token")
