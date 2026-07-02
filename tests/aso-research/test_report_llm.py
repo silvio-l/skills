@@ -255,6 +255,65 @@ class LlmDrivenSectionTests(unittest.TestCase):
         body = report.build_report(_config(), _competitors(), _keywords(), now=NOW, s1_output=_s1())
         self.assertIn("Apple's native Reminders integration", body)
 
+    def test_opportunities_renders_validation_candidates_and_asa_note(self):
+        kws = _keywords() + [
+            {"term": "checklist", "competition": 35, "relevance": 55, "opportunity": 30,
+             "split": "primary-candidate", "is_gap": False, "suggest": False},
+        ]
+        body = report.build_report(_config(), _competitors(), kws, now=NOW)
+        self.assertIn("Validation candidates", body)
+        self.assertIn("checklist", body)
+        self.assertIn("Apple Search Ads Basic", body)
+
+    def test_no_asa_note_without_validation_candidates(self):
+        """Habit/tracker/routine all clear the Quick-Win bar (opp >= 40) — no validation bucket."""
+        body = report.build_report(_config(), _competitors(), _keywords(), now=NOW)
+        self.assertIn("Validation candidates", body)  # label always renders
+        self.assertNotIn("Apple Search Ads Basic", body)  # note only when non-empty
+
+
+class FeaturingNominationTests(unittest.TestCase):
+    def test_apple_listing_section_includes_featuring_reminder(self):
+        body = report.build_report(_config(), _competitors(), _keywords(), now=NOW)
+        self.assertIn("Featuring Nomination", body)
+        self.assertIn("New Content / App Enhancements / App Launch", body)
+        self.assertIn("3 weeks", body)
+
+
+class ScreenshotCopyTests(unittest.TestCase):
+    def _s2_with_screenshots(self):
+        s2 = _s2()
+        s2["screenshot_copy"] = [
+            {"headline": "Build habits that stick", "subtext": "Track any routine in seconds"},
+            {"headline": "Streaks that motivate", "subtext": "See your progress every day"},
+            {"headline": "Gamified, not gimmicky", "subtext": "Rewards for real consistency"},
+        ]
+        return s2
+
+    def test_renders_screenshot_copy_when_present(self):
+        body = report.build_report(_config(), _competitors(), _keywords(), now=NOW,
+                                   s2_output=self._s2_with_screenshots(), h2_output=_h2_ok())
+        self.assertIn("Screenshot copy", body)
+        self.assertIn("Build habits that stick", body)
+        self.assertIn("Streaks that motivate", body)
+
+    def test_pending_note_when_s2_present_without_screenshot_copy(self):
+        body = report.build_report(_config(), _competitors(), _keywords(), now=NOW,
+                                   s2_output=_s2(), h2_output=_h2_ok())
+        self.assertIn("Screenshot copy pending", body)
+
+    def test_no_screenshot_section_when_s2_entirely_absent(self):
+        """No s2_output at all -> the listing-pending message already covers it; no duplicate note."""
+        body = report.build_report(_config(), _competitors(), _keywords(), now=NOW)
+        self.assertNotIn("Screenshot copy pending", body)
+
+
+class HeuristicScaleClarificationTests(unittest.TestCase):
+    def test_methodology_clarifies_proxy_scale_vs_paid_tool_heuristics(self):
+        body = report.build_report(_config(), _competitors(), _keywords(), now=NOW)
+        self.assertIn("Not the same scale as paid-tool heuristics", body)
+        self.assertIn("Popularity > 40", body)
+
 
 if __name__ == "__main__":
     unittest.main()

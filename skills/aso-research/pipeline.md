@@ -157,6 +157,52 @@ The exact boundary decisions live in named pure functions
 thresholds are unit-tested directly. The report labels these
 **"Competition/Relevance signal"** — never search volume.
 
+## Beyond-keywords guidance (deterministic, static — report §5/§7)
+
+Two additions surfaced from a 2026 field-research pass on real-world ASO
+practice, both deterministic (no LLM, no fabricated per-app data) and Apple-
+scoped (Apple has both a paid keyword-validation product and an official free
+featuring path; there is no Play/MS equivalent researched so far):
+
+- **Validation candidates (`report._opportunity_buckets` → `"validation"`,
+  §5 Opportunities).** Primary-candidate keywords with
+  `_VALIDATION_OPP_MIN (20) <= Opportunity < _VALIDATION_OPP_MAX (40)` — they
+  clear the same reliability floor H2 uses to accept a keyword (Opportunity
+  ≥ 20) but sit under the Quick-Win bar, so the Competition/Relevance proxy
+  cannot confidently call them. The report recommends a small **Apple Search
+  Ads Basic** test (CPT model, no auction skill needed; commonly started
+  around $0.50 CPT, so a 20–30 EUR/USD budget buys a validation read) before
+  committing organic content/creative effort — turning a proxy signal into a
+  real install-conversion signal cheaply. This is a *recommendation*, not a
+  claim about real search volume; the skill still never fabricates a number
+  for what that test would return.
+- **Apple Featuring Nomination reminder (§7 Listing Recommendation, Apple
+  block, static text).** App Store Connect → Featuring → Nominations
+  (categories: New Content / App Enhancements / App Launch) is a free
+  discovery lever independent of keyword ASO, evaluated against 7 Apple
+  criteria (UX, UI design, Innovation, Uniqueness, Accessibility,
+  Localisation, Product-Page quality) with a recommended **≥3-week** lead
+  time. Rendered unconditionally in the Apple listing section — generic
+  process guidance, not app-specific data, so it needs no source/score
+  dependency.
+- **Screenshot copy (§7 Listing Recommendation, Apple block, LLM-driven,
+  optional).** S2 may additionally emit `screenshot_copy` — 3 benefit-driven
+  headline/subtext pairs telling a screenshot-set story — because Apple's
+  ranking system OCR-reads on-screenshot text (2026). See the S2 schema
+  above. Deterministic fallback: a one-line pending note when absent, never
+  an error (the same never-block-on-missing-LLM-output posture as every
+  other subagent-driven section).
+- **External-heuristic scale clarification (§8 Methodology, static text).**
+  Field practice sometimes cites a rule of thumb like "target Popularity > 40
+  / Competition < 60" — that scale comes from **paid** ASO panels (AppTweak,
+  Sensor Tower, Apple's own App Store Connect Search terms tab) with real
+  search-volume data behind it. This skill's Competition/Relevance/
+  Opportunity numbers are a **different, unrelated 0–100 proxy scale** — do
+  not compare the two directly. The report states this explicitly so a user
+  who has seen that heuristic elsewhere does not misapply it to this proxy's
+  numbers; use the Quick-Win / Niche-Lever / Validation-Candidate buckets
+  instead, they are this proxy's own calibrated thresholds.
+
 ## Bot-detection & rate-limit policy (politeness rule-set)
 
 - Official APIs (iTunes Search/Lookup ~20/min, Apple RSS) are the default.
@@ -265,8 +311,24 @@ Apple's limits out of the box (Title 30 / Subtitle 30 / hidden Keyword Field
                            "alternatives": [{"text": "…", "char_count": N}, …]},
   {"slot": "subtitle",     "recommended": {…}, "alternatives": […, …]},
   {"slot": "keyword_field","recommended": {…}, "alternatives": […, …]}
+],
+"screenshot_copy": [
+  {"headline": "…", "subtext": "…"},
+  {"headline": "…", "subtext": "…"},
+  {"headline": "…", "subtext": "…"}
 ]}
 ```
+
+**`screenshot_copy`** (optional, Apple-only, backward-compatible — absent in
+older `s2-listing.json` files, the report renders a deterministic pending
+note instead of erroring). Apple's ranking system reads on-screenshot text
+via OCR (2026), so screenshot headlines are a real ASO lever, not pure
+creative. Exactly **3** entries, each a short bold `headline` (the benefit
+claim) + a supporting `subtext` (one clause), telling a **3-screen story**
+across the set — e.g. "Save time shopping." → "Earn rewards." → "Unlock
+gifts." — grounded in the same score table (Opportunity-ranked themes), not
+generic marketing copy. Same human-readable requirement as Title/Subtitle:
+benefit-driven language a real person would read, never a keyword chain.
 
 Slice 04 adds a **second** listing for the Play slot model
 (`llm/s2-listing-play.json`), optimised for Play's own ranking model (Title 30

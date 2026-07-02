@@ -43,6 +43,16 @@ _NICHE_LEVER_COMP_MAX = 20
 _NICHE_LEVER_REL_MIN = 40
 _OPPORTUNITY_BUCKET_LIMIT = 8
 
+# Validation-candidate bucket: primary-candidate keywords that clear the H2
+# reliability floor (Opportunity >= 20, the same threshold H2 rejects below)
+# but sit under the Quick-Win bar — the proxy cannot confidently call these.
+# A small paid Apple Search Ads Basic keyword-validation test (CPT model, no
+# auction skill needed) turns the proxy into a real conversion signal before
+# organic content/creative effort is committed. See "Opportunities" §5.
+_VALIDATION_OPP_MIN = 20
+_VALIDATION_OPP_MAX = _QUICK_WIN_OPP_MIN
+_VALIDATION_BUCKET_LIMIT = 6
+
 
 def _row(cells: List[str]) -> str:
     return "| " + " | ".join(cells) + " |"
@@ -62,10 +72,11 @@ def _md_escape(text) -> str:
 
 
 def _opportunity_buckets(keywords: List[Dict]) -> Dict[str, List[Dict]]:
-    """Derive quick-win / niche-lever / coverage-gap buckets deterministically."""
+    """Derive quick-win / niche-lever / coverage-gap / validation buckets deterministically."""
     quick_win: List[Dict] = []
     niche_lever: List[Dict] = []
     coverage_gap: List[Dict] = []
+    validation: List[Dict] = []
     for k in keywords:
         opp = int(k.get("opportunity", 0))
         comp = int(k.get("competition", 0))
@@ -76,11 +87,43 @@ def _opportunity_buckets(keywords: List[Dict]) -> Dict[str, List[Dict]]:
             niche_lever.append(k)
         if k.get("is_gap"):
             coverage_gap.append(k)
+        if (
+            k.get("split") == "primary-candidate"
+            and _VALIDATION_OPP_MIN <= opp < _VALIDATION_OPP_MAX
+        ):
+            validation.append(k)
     return {
         "quick_win": quick_win[:_OPPORTUNITY_BUCKET_LIMIT],
         "niche_lever": niche_lever[:_OPPORTUNITY_BUCKET_LIMIT],
         "coverage_gap": coverage_gap[:_OPPORTUNITY_BUCKET_LIMIT],
+        "validation": validation[:_VALIDATION_BUCKET_LIMIT],
     }
+
+
+def _screenshot_copy_lines(s2_output: Optional[Dict]) -> List[str]:
+    """Render the optional Apple screenshot-copy suggestions (3 headline/subtext pairs).
+
+    Apple's ranking system OCR-reads on-screenshot text (2026) — a real ASO
+    lever, not pure creative. Backward-compatible: older ``s2-listing.json``
+    files without this key render a deterministic pending note, never an
+    error.
+    """
+    if not s2_output:
+        return []
+    copy = s2_output.get("screenshot_copy")
+    if not copy:
+        return [
+            "_Screenshot copy pending — Apple's ranking system OCR-reads "
+            "on-screenshot text (2026), so a benefit-driven 3-screen headline "
+            "story is a real ASO lever. Ask the S2 Listing Strategist to also "
+            "emit `screenshot_copy` (see pipeline.md)._"
+        ]
+    lines = ["**Screenshot copy** (3-screen story, benefit-driven):"]
+    for i, screen in enumerate(copy[:3], start=1):
+        headline = _md_escape(screen.get("headline", ""))
+        subtext = _md_escape(screen.get("subtext", ""))
+        lines.append(f"{i}. **{headline}** — {subtext}")
+    return lines
 
 
 def _listing_slot_lines(s2_output: Optional[Dict], h2_output: Optional[Dict], *, store_label: str = "Apple") -> List[str]:
@@ -387,6 +430,22 @@ def build_report(
         "- **Coverage gaps** (competitors own in Title, seed lacks): "
         + (", ".join(_md_escape(k["term"]) for k in buckets["coverage_gap"]) or "—")
     )
+    lines.append(
+        f"- **Validation candidates** (Opportunity {_VALIDATION_OPP_MIN}–"
+        f"{_VALIDATION_OPP_MAX - 1}, primary-candidate — the proxy clears the "
+        f"reliability floor but is below the Quick-Win bar, so it cannot "
+        f"confidently call these): "
+        + (", ".join(_md_escape(k["term"]) for k in buckets["validation"]) or "—")
+    )
+    if buckets["validation"]:
+        lines.append(
+            "- Consider a small **Apple Search Ads Basic** test before investing "
+            "organic content/creative effort on the validation candidates above: "
+            "it is a CPT model (no auction expertise needed), commonly started "
+            "around $0.50 CPT — even a small 20–30 EUR/USD budget buys a few "
+            "dozen taps, enough to turn this proxy read into a real "
+            "install-conversion signal."
+        )
     if s1_output and s1_output.get("missing_themes"):
         missing = "; ".join(_md_escape(t) for t in s1_output["missing_themes"][:8])
         lines.append(f"- **Missing themes (S1):** {missing}")
@@ -430,6 +489,19 @@ def build_report(
     )
     lines.append("")
     lines.extend(_listing_slot_lines(s2_output, h2_output, store_label="Apple"))
+    lines.append("")
+    lines.extend(_screenshot_copy_lines(s2_output))
+    lines.append("")
+    lines.append(
+        "**Beyond keywords — Apple Featuring Nomination:** independent of ASO, "
+        "App Store Connect → Featuring → Nominations is a free discovery lever "
+        "(categories: New Content / App Enhancements / App Launch). Apple "
+        "evaluates against 7 criteria — UX, UI design, Innovation, Uniqueness, "
+        "Accessibility, Localisation, Product-Page quality — and recommends "
+        "submitting **at least 3 weeks** ahead of the desired feature window. "
+        "Worth nominating at real milestones (initial launch, a platform launch, "
+        "a major feature release), not just once."
+    )
     lines.append("")
 
     if has_play:
@@ -521,6 +593,16 @@ def build_report(
     lines.append(
         "- Keyword counts come from the collected competitor corpus, not from a "
         "proprietary search-volume panel."
+    )
+    lines.append(
+        "- **Not the same scale as paid-tool heuristics.** Field advice like "
+        "\"target Popularity > 40 / Competition < 60\" refers to **paid** ASO "
+        "panels (AppTweak, Sensor Tower, App Store Connect's own Search terms "
+        "tab) with real search-volume data behind it. This report's "
+        "Competition/Relevance/Opportunity are a **different, unrelated 0–100 "
+        "proxy** — do not compare the two numbers directly. Use the Quick-Win / "
+        "Niche-Lever / Validation-Candidate buckets in §5 instead; those are "
+        "this proxy's own calibrated thresholds."
     )
     lines.append("")
     lines.append("### Source Health")
@@ -777,6 +859,38 @@ def _html_brand_conflict_row(c):
     )
 
 
+def _html_screenshot_copy(s2_output):
+    """Render the optional Apple screenshot-copy suggestions as visual cards.
+
+    Apple's ranking system OCR-reads on-screenshot text (2026). Backward-
+    compatible: absent/empty ``screenshot_copy`` renders a pending note.
+    """
+    if not s2_output:
+        return ""
+    copy = s2_output.get("screenshot_copy")
+    if not copy:
+        return (
+            '<p class="pending">Screenshot-Copy ausstehend — Apple liest '
+            'Screenshot-Text per OCR fürs Ranking (2026), ein Benefit-'
+            'getriebener 3-Screen-Storyline ist also ein echter ASO-Hebel. '
+            'S2 Listing-Strategen bitten, auch <code>screenshot_copy</code> '
+            'zu liefern.</p>'
+        )
+    cards = []
+    for i, screen in enumerate(copy[:3], start=1):
+        headline = _html_esc(screen.get("headline", ""))
+        subtext = _html_esc(screen.get("subtext", ""))
+        cards.append(
+            f'<div class="screenshot-card"><span class="screenshot-card__num">'
+            f'Screen {i}</span><p class="screenshot-card__headline">{headline}</p>'
+            f'<p class="screenshot-card__subtext">{subtext}</p></div>'
+        )
+    return (
+        '<h3>Screenshot-Copy · 3-Screen-Story</h3>'
+        f'<div class="screenshots">{"".join(cards)}</div>'
+    )
+
+
 def _html_listing_slots(s2_output, h2_output, *, store_label="Apple"):
     """Render S2 listing proposals (1 recommended + 2 alternatives per slot)."""
     if not s2_output or not s2_output.get("slots"):
@@ -953,6 +1067,14 @@ code{font-family:var(--mono);font-size:.82rem;background:var(--field);border:1px
 .slot__alt{display:block;font-size:.82rem;color:var(--mute);margin:5px 0 0 16px}
 .crosscheck{font-size:.78rem;margin-top:12px;padding:9px 13px;background:var(--good-tint);border:1px solid #BBE6CE;border-radius:10px;color:#13694A}
 .pending{color:var(--mute);font-size:.85rem}
+.action{font-size:.82rem;margin-top:12px;padding:11px 15px;background:var(--indigo-tint);border:1px solid #D5D5F4;border-radius:10px;color:var(--indigo-ink);line-height:1.6}
+.action__label{display:block;font-size:.66rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--indigo-ink);margin-bottom:4px;opacity:.85}
+.action strong{color:var(--indigo-ink)}
+.screenshots{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-top:12px}
+.screenshot-card{background:var(--field);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.screenshot-card__num{font-size:.66rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--indigo-ink)}
+.screenshot-card__headline{font-size:.94rem;font-weight:680;margin:4px 0 3px;letter-spacing:-.01em}
+.screenshot-card__subtext{font-size:.8rem;color:var(--mute);margin:0}
 
 /* --- methodology + honesty --- */
 .honesty{border:1px solid var(--indigo-tint);background:var(--indigo-tint);border-radius:12px;padding:16px 20px;margin-top:14px}
@@ -1344,7 +1466,20 @@ def build_report_html(
     parts.append(_html_bucket_card(
         "Abdeckungslücken · Wettbewerber führen im Titel",
         buckets["coverage_gap"], "gap"))
+    parts.append(_html_bucket_card(
+        f"Validierungs-Kandidaten · Chance {_VALIDATION_OPP_MIN}–{_VALIDATION_OPP_MAX - 1}, primär",
+        buckets["validation"], "niche"))
     parts.append("</div>")
+    if buckets["validation"]:
+        parts.append(
+            '<div class="action"><span class="action__label">Nächster Schritt</span>'
+            '<strong>Apple Search Ads Basic:</strong> für die Validierungs-'
+            'Kandidaten lohnt ein kleiner CPT-Test vor organischem '
+            'Content-/Creative-Aufwand — kein Auktions-Know-how nötig, üblicher '
+            'Start ~0,50 $ CPT; schon 20–30 EUR/USD kaufen ein paar Dutzend Taps '
+            'und liefern ein echtes Conversion-Signal statt des reinen '
+            'Proxys.</div>'
+        )
     if s1_output and s1_output.get("missing_themes"):
         missing = "; ".join(_html_esc(t) for t in s1_output["missing_themes"][:8])
         parts.append(f'<p class="lead"><strong>Fehlende Themen (S1):</strong> {missing}</p>')
@@ -1383,6 +1518,18 @@ def build_report_html(
         '(Titel 30 / Untertitel 30 / Keyword-Feld 100), validiert durch den H2-Cross-Check.</p>'
     )
     parts.append(_html_listing_slots(s2_output, h2_output, store_label="Apple"))
+    parts.append(_html_screenshot_copy(s2_output))
+    parts.append(
+        '<div class="action"><span class="action__label">Nächster Schritt</span>'
+        '<strong>Apple Featuring Nomination</strong> — unabhängig von ASO ist '
+        'App Store Connect → Featuring → Nominations ein kostenloser '
+        'Sichtbarkeits-Hebel (Kategorien: New Content / App Enhancements / App '
+        'Launch). Apple bewertet nach 7 Kriterien — UX, UI-Design, Innovation, '
+        'Uniqueness, Accessibility, Lokalisierung, Product-Page-Qualität — und '
+        'empfiehlt mindestens 3 Wochen Vorlauf vor dem gewünschten '
+        'Feature-Zeitraum. Lohnt sich zu echten Meilensteinen (Erstlaunch, '
+        'Plattform-Launch, großes Feature-Release), nicht nur einmalig.</div>'
+    )
     parts.append("</div>")
 
     if has_play:
@@ -1460,6 +1607,13 @@ def build_report_html(
         '(ein +15-Relevanz-Bonus).</li>'
         '<li>Keyword-Zahlen stammen aus dem gesammelten Wettbewerber-Korpus, nicht aus einem '
         'proprietären Suchvolumen-Panel.</li>'
+        '<li><strong>Andere Skala als Paid-Tool-Faustregeln.</strong> Feld-Ratschläge wie '
+        '„Popularität &gt; 40 / Wettbewerb &lt; 60" beziehen sich auf <strong>kostenpflichtige</strong> '
+        'ASO-Panels (AppTweak, Sensor Tower, App Store Connects eigener Suchbegriffe-Tab) mit '
+        'echten Suchvolumen-Daten dahinter. Wettbewerb/Relevanz/Chance in diesem Report sind ein '
+        '<strong>anderer, unabhängiger 0–100-Proxy</strong> — nicht direkt vergleichbar. Für '
+        'Entscheidungen die Schnelle-Gewinne-/Nischen-Hebel-/Validierungs-Kandidaten-Buckets '
+        'oben nutzen, nicht diese fremde Faustregel.</li>'
         '<li><strong>LLM-Phase (Claude-nativ, keine kostenpflichtigen API-Keys):</strong> das '
         'deterministische Grundgerüst bereitet eine token-budget-begrenzte, kondensierte '
         'Repräsentation vor (~70k-Cap); H1 (Haiku), S1 (Sonnet), S2 (Sonnet), H2 (Haiku) '
@@ -1512,6 +1666,15 @@ def build_report_html(
          "Die vom Nutzer vorgegebenen Startbegriffe, mit denen die Recherche "
          "beginnt. Ausgehend davon werden Wettbewerber gefunden und der "
          "Keyword-Korpus aufgebaut."),
+        ("Validierungs-Kandidat",
+         "Ein Primärkandidat, dessen Chance-Wert zwar die H2-Zuverlässigkeits-"
+         "Schwelle erreicht, aber unter der Quick-Win-Grenze liegt — der Proxy "
+         "kann hier keine sichere Aussage treffen. Ein kleiner Apple-Search-Ads-"
+         "Basic-Test liefert vor organischem Aufwand ein echtes Signal."),
+        ("Apple Search Ads Basic",
+         "Apples CPT-basiertes (Cost-per-Tap) Werbemodell ohne Auktions-Know-how "
+         "— geeignet für einen kleinen, gezielten Keyword-Validierungstest, "
+         "nicht als Wachstumshebel bei sehr kleinem Budget."),
     ]
     parts.append('<dl class="glossary">')
     for term, definition in glossary_terms:
