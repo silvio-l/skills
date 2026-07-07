@@ -188,6 +188,31 @@ colored HTML report with a one-click "copy an AI-agent fix prompt" button per
 finding (or all of them at once) alongside the Markdown report and a prioritized
 fix-plan.
 
+### `mail-deliverability-audit`
+
+**The Problem.** A mail domain that "looks configured" — an MX record and maybe an
+SPF string copy-pasted from a forum post years ago — still lands in spam, because
+deliverability is a checklist of interacting, easy-to-get-subtly-wrong pieces: one
+SPF record too many (permerror), a `+all` that lets anyone spoof the domain, DKIM
+enabled but never checked, DMARC missing the `rua=` that would show spoofing
+attempts, a TLS certificate that silently doesn't match the hostname a client
+actually connects to. Since Gmail and Yahoo started enforcing SPF+DKIM+DMARC for
+real in 2024, "it sends without erroring" is no longer evidence it's healthy.
+
+**The Fix.** A read-only DNS/SMTP/TLS auditor (`dig` + Python's stdlib `smtplib`/
+`ssl`, no paid APIs) that checks MX, SPF (RFC 7208 syntax + the ≤10-lookup limit,
+counted recursively through `include:` chains), DKIM, DMARC (RFC 7489), reverse-DNS
+(forward-confirmed PTR), STARTTLS/submission-TLS certificate-hostname matching,
+a Spamhaus ZEN blocklist check, and the state-of-the-art bonus trio MTA-STS/
+TLS-RPT/BIMI — against a single scored report with copy-paste DNS fix snippets for
+every gap. Network checks degrade to `n_a` (not a false `fail`) when a local
+network blocks outbound port 25, and the TLS checks never send `AUTH`, so a run
+cannot trip a provider's brute-force lockout. When the resolved MX matches Netcup's
+shared-webhosting pattern, an extra section diffs the live SPF/DKIM records
+against Netcup's fixed known-good values and flags the classic Netcup footgun —
+pointing a mail client at the customer domain instead of the canonical
+`mx<hex>.netcup.net` wildcard-cert hostname — automatically via a TLS handshake.
+
 ## Credit
 
 These skills exist because [Matt Pocock](https://github.com/mattpocock) made his own [`mattpocock/skills`](https://github.com/mattpocock/skills) public and showed what a working skill ecosystem looks like. The structural choices here — directory layout, frontmatter conventions, the `npx skills@latest add` install path, the failure-mode/fix narrative pattern in this README — are his. If you find any of this useful, point upstream first.
