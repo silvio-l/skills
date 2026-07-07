@@ -213,6 +213,12 @@ against Netcup's fixed known-good values and flags the classic Netcup footgun �
 pointing a mail client at the customer domain instead of the canonical
 `mx<hex>.netcup.net` wildcard-cert hostname — automatically via a TLS handshake.
 
+### `motion-and-ui-design`
+
+**The Problem.** AI-driven design tools (Claude Design and others) move fast — the UI, model lineup, and available templates shift every few weeks — but the durable workflow underneath (design-system-first, then prototype/slides/document/wireframe/animation) barely changes at all. Without that captured somewhere, every session re-derives the same lessons from scratch: skip the design system and every artifact looks generic, describe an animation vaguely and it comes back subtly wrong, port a web layout straight into an app shell and it feels foreign even though it's technically on-brand.
+
+**The Fix.** A design hub that captures the durable workflow, not the volatile UI. `studio-workflow.md` walks the five studio artifact types (prototype, slides, document, wireframe, animation) with the design-system-first discipline threaded through all of them; `motion-graphics.md` distills four practical motion-graphics methods (template copy, start/end screenshots, transcript-driven, animate-any-UI) plus the precision lesson that makes vague animation prompts land right, with an agent-buildable variant for when the target is a code artifact instead of a studio export; `modern-design.md` filters current web-design trend noise for what's actually evidenced to hold up in production (bento grids, token-based design systems, restrained glassmorphism) versus what looks good in a showcase and breaks on real devices (heavy blur, unscoped kinetic typography), plus a concrete web→app adaptation table. A routing table sends anything already owned by another skill — Flutter tokens, Figma discipline, data viz, image generation, deployment — to that skill instead of duplicating it.
+
 ## Credit
 
 These skills exist because [Matt Pocock](https://github.com/mattpocock) made his own [`mattpocock/skills`](https://github.com/mattpocock/skills) public and showed what a working skill ecosystem looks like. The structural choices here — directory layout, frontmatter conventions, the `npx skills@latest add` install path, the failure-mode/fix narrative pattern in this README — are his. If you find any of this useful, point upstream first.
