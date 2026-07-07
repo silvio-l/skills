@@ -1,6 +1,6 @@
 ---
 name: motion-and-ui-design
-description: "AI web/app design playbook: anti-generic execution loop (direction-first, code patterns, self-verify), Claude Design studio workflow, motion graphics. Use for 'Claude Design', 'Motion Graphics erstellen', 'coole Website/App designen'."
+description: "AI web/app design playbook: anti-generic execution loop, code patterns, generated illustrations/icons via fal.ai, Claude Design studio workflow, motion graphics. Use for 'Claude Design', 'Motion Graphics erstellen', 'coole Website/App designen'."
 ---
 
 # Motion & UI Design — AI Design Execution Playbook
@@ -13,7 +13,7 @@ This is the core capability, run it every time something visual gets built, stud
 
 1. **Commit to a direction before generating anything.** Not "clean and modern" — a named aesthetic direction with a reason it fits the subject. → [cool-craft.md](cool-craft.md)'s direction library and Gate 0.
 2. **Lay tokens before components.** Colors, type, spacing, radius — declared once, referenced everywhere. → the token starter in [patterns.md](patterns.md).
-3. **Build** — in the studio (→ [studio-workflow.md](studio-workflow.md)) or directly as a code artifact (→ [motion-graphics.md](motion-graphics.md), [patterns.md](patterns.md)).
+3. **Build** — in the studio (→ [studio-workflow.md](studio-workflow.md)) or directly as a code artifact (→ [motion-graphics.md](motion-graphics.md), [patterns.md](patterns.md)). If the direction calls for real illustration, iconography, or imagery beyond what code can draw, generate it directly via the `fal.ai` MCP tools rather than deferring — → [assets.md](assets.md).
 4. **Run the visual self-verify loop.** Render or screenshot what got built, critique it against the generic-tells table and litmus checks, iterate. Skipping this step is why AI output defaults to the median — an agent that never looks at what it produced can't tell a purple-gradient default from a deliberate choice. → [cool-craft.md](cool-craft.md).
 5. **Escalate for depth, not as a substitute for the loop.** Once this loop has produced something coherent, compose with `impeccable` or `frontend-design` for a brief that genuinely needs deeper taste work.
 
@@ -46,18 +46,18 @@ Full recipes, iteration tools, and export paths → [studio-workflow.md](studio-
 
 ## Routing table
 
-This skill owns the anti-generic execution loop and code patterns directly — no need to defer for those. Compose with these for deeper or platform-specific work:
+This skill owns the anti-generic execution loop, code patterns, and asset generation directly — no need to defer for those. Compose with these for deeper or platform-specific work:
 
 | Task | Skill |
 |---|---|
 | Anti-generic direction, litmus checks, self-verify loop | [cool-craft.md](cool-craft.md) (this skill) |
 | Copy-paste code starters (tokens, bento, motion, microinteractions) | [patterns.md](patterns.md) (this skill) |
+| Illustrations, icons, symbols, hero imagery — generated directly via the fal.ai MCP | [assets.md](assets.md) (this skill) |
 | Durable modern web-design principles + web→app adaptation | [modern-design.md](modern-design.md) (this skill) |
 | Deeper taste work for a demanding brief / full design system | `frontend-design`, `design-taste-frontend`, `impeccable` |
 | Flutter design language + tokens | `flutter-design-language` → `figma-to-flutter` |
 | Figma file structure / discipline | `figma-project-discipline`, `figma-*` |
 | Charts / animated data visualization | `dataviz` |
-| Real image assets | `openai-image`, fal.ai (`~/.config/fal/.env`) |
 | Deploying the finished site | `netcup-deploy` |
 | End-to-end premium web build | `~/.claude/infrastructure/premium-web-loop.md` |
 
