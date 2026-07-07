@@ -2,6 +2,8 @@
 
 Trend roundups are noisy — most "2026 design trends" listicles repeat whatever shipped on an Awwwards showcase without checking whether it survives real production constraints (screen readers, low-end Android, actual load times). This doc filters for what's evidenced to hold up versus what looks impressive in a portfolio and falls apart in production, plus how any of it translates to app interfaces. It exists to keep the "design system first" principle from `SKILL.md` and the anti-slop discipline already applied elsewhere in this setup (`humanize-text`, `flutter-design-language`) consistent here too: durable, evidenced principles over trend-chasing, and "different ≠ wrong" — a deliberate deviation for a real reason is not a defect.
 
+This doc covers *principles* — what's evidenced to work. For *execution* — the generic-tells checklist, the direction-first gate, and the self-verify loop that turns these principles into an actual build — see [cool-craft.md](cool-craft.md).
+
 ## What holds up (proven in production)
 
 - **Bento grids as the default layout.** Modular, asymmetric card-based arrangement (named for Japanese bento boxes) — not a decorative choice but a genuine improvement in scroll depth and content scannability over rigid 12-column grids. Adopted broadly enough (Apple, Google, Microsoft, Spotify) that it's now closer to a baseline pattern than a trend.

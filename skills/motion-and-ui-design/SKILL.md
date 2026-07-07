@@ -1,22 +1,32 @@
 ---
 name: motion-and-ui-design
-description: "Hub for AI-driven web/app UI and motion-graphics design: Claude Design studio workflow, agent-buildable techniques, modern-design principles. Use for 'Claude Design', 'Motion Graphics erstellen', 'App-Prototyp designen', 'Design mit KI'."
+description: "AI web/app design playbook: anti-generic execution loop (direction-first, code patterns, self-verify), Claude Design studio workflow, motion graphics. Use for 'Claude Design', 'Motion Graphics erstellen', 'coole Website/App designen'."
 ---
 
-# Motion & UI Design — AI Design Hub
+# Motion & UI Design — AI Design Execution Playbook
 
-You are the **router and coach** for AI-driven design work — both the interactive Claude Design studio (`claude.ai/design`) and design Claude Code builds directly as code artifacts. This hub distills the workflow and techniques; it does not duplicate the deeper design skills that already exist in this setup.
+You are both the **coach** for the interactive Claude Design studio (`claude.ai/design`) and the **executor** when design gets built directly as code. Knowing the workflow is not the same as being able to produce something that doesn't look like every other AI-generated site — this skill exists to close that gap, not just describe the studio.
+
+## How to actually design something cool — the loop
+
+This is the core capability, run it every time something visual gets built, studio or direct:
+
+1. **Commit to a direction before generating anything.** Not "clean and modern" — a named aesthetic direction with a reason it fits the subject. → [cool-craft.md](cool-craft.md)'s direction library and Gate 0.
+2. **Lay tokens before components.** Colors, type, spacing, radius — declared once, referenced everywhere. → the token starter in [patterns.md](patterns.md).
+3. **Build** — in the studio (→ [studio-workflow.md](studio-workflow.md)) or directly as a code artifact (→ [motion-graphics.md](motion-graphics.md), [patterns.md](patterns.md)).
+4. **Run the visual self-verify loop.** Render or screenshot what got built, critique it against the generic-tells table and litmus checks, iterate. Skipping this step is why AI output defaults to the median — an agent that never looks at what it produced can't tell a purple-gradient default from a deliberate choice. → [cool-craft.md](cool-craft.md).
+5. **Escalate for depth, not as a substitute for the loop.** Once this loop has produced something coherent, compose with `impeccable` or `frontend-design` for a brief that genuinely needs deeper taste work.
 
 ## Core principle: design system first
 
 Before building any single artifact — prototype, slide deck, landing page, animation — establish one saved brand source: colors, fonts, logo, tokens. This is the single biggest lever against generic AI-slop output; every artifact generated afterward inherits it and looks like it came from one real company instead of a pile of disconnected AI tools. Skipping this step is the most common mistake. It takes minutes and pays for the rest of the session.
 
-This mirrors the token-first discipline already enforced by `flutter-design-language` and `figma-project-discipline` — same principle, applied to the Claude Design studio.
+This mirrors the token-first discipline already enforced by `flutter-design-language` and `figma-project-discipline` — same principle, applied here to both the Claude Design studio and direct code builds.
 
 ## Two modes of operation
 
 1. **Drive the studio.** Claude Code cannot remote-control `claude.ai/design` — it is a separate interactive product. What you *can* do: coach the user through the workflow and hand them ready-to-paste prompts. → [studio-workflow.md](studio-workflow.md), [prompts.md](prompts.md).
-2. **Build directly.** For UI mockups and motion graphics that fit a self-contained HTML/CSS/JS artifact, build it yourself with the `Artifact` tool instead of sending the user to the studio — faster, and stays in the same session. → [motion-graphics.md](motion-graphics.md) for the agent-buildable variant. For animated data visualization specifically, use the `dataviz` skill instead.
+2. **Build directly.** For UI mockups and motion graphics that fit a self-contained HTML/CSS/JS artifact, build it yourself with the `Artifact` tool instead of sending the user to the studio — faster, and stays in the same session, and lets you actually run the self-verify loop above. → [motion-graphics.md](motion-graphics.md) and [patterns.md](patterns.md). For animated data visualization specifically, use the `dataviz` skill instead.
 
 ## Model choice for design work
 
@@ -36,15 +46,17 @@ Full recipes, iteration tools, and export paths → [studio-workflow.md](studio-
 
 ## Routing table
 
-Don't duplicate work these skills already own — route to them:
+This skill owns the anti-generic execution loop and code patterns directly — no need to defer for those. Compose with these for deeper or platform-specific work:
 
 | Task | Skill |
 |---|---|
-| Design direction / anti-slop for a new web UI | `frontend-design`, `design-taste-frontend`, `impeccable` |
+| Anti-generic direction, litmus checks, self-verify loop | [cool-craft.md](cool-craft.md) (this skill) |
+| Copy-paste code starters (tokens, bento, motion, microinteractions) | [patterns.md](patterns.md) (this skill) |
+| Durable modern web-design principles + web→app adaptation | [modern-design.md](modern-design.md) (this skill) |
+| Deeper taste work for a demanding brief / full design system | `frontend-design`, `design-taste-frontend`, `impeccable` |
 | Flutter design language + tokens | `flutter-design-language` → `figma-to-flutter` |
 | Figma file structure / discipline | `figma-project-discipline`, `figma-*` |
 | Charts / animated data visualization | `dataviz` |
-| Durable modern web-design principles + web→app adaptation | [modern-design.md](modern-design.md) (this skill) |
 | Real image assets | `openai-image`, fal.ai (`~/.config/fal/.env`) |
 | Deploying the finished site | `netcup-deploy` |
 | End-to-end premium web build | `~/.claude/infrastructure/premium-web-loop.md` |
