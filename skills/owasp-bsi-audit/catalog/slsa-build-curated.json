@@ -1,0 +1,25 @@
+{
+  "standard": "slsa",
+  "version": "1.2",
+  "source_url": "https://raw.githubusercontent.com/slsa-framework/slsa/releases/v1.2/spec/build-requirements.md",
+  "scope_note": "Kuratierte Teilmenge des SLSA-Build-Tracks: nur die zwei Producer-seitigen, solo-dev-tauglichen Prüfpunkte (gehostete CI statt manueller Build, Build-Provenienz). Source-Track (Level 4 verlangt Zwei-Personen-Review) und Build-L3-Isolationsgarantien der CI-Plattform selbst sind ausgeklammert.",
+  "groups": [
+    {
+      "group_id": "slsa-build",
+      "practice_group": "BUILD",
+      "title": "Build-Integrität",
+      "requirements": [
+        {
+          "req_id": "SLSA-BUILD-1",
+          "title": "Build auf gehosteter CI-Plattform statt manuell",
+          "description": "Build Level 1 verlangt die Wahl eines geeigneten Build-Prozesses; Build Level 2 verlangt zusätzlich, dass dieser auf einer gehosteten Plattform läuft (z.B. GitHub Actions), nicht auf einem einzelnen Arbeitsplatzrechner."
+        },
+        {
+          "req_id": "SLSA-BUILD-2",
+          "title": "Build-Provenienz wird erzeugt und verteilt",
+          "description": "Der Build-Prozess MUSS eine Provenienz erzeugen, die das Artefakt eindeutig via kryptographischem Hash identifiziert und beschreibt, wie es gebaut wurde (Build Level 1); ab Level 2 MUSS diese Provenienz durch die Build-Plattform signiert (authentisch) sein. Die Provenienz MUSS an Konsumierende verteilt werden."
+        }
+      ]
+    }
+  ]
+}

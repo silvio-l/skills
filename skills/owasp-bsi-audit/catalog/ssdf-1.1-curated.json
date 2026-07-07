@@ -1,0 +1,49 @@
+{
+  "standard": "ssdf",
+  "version": "1.1",
+  "source_url": "https://raw.githubusercontent.com/CycloneDX/official-3rd-party-standards/main/standards/NIST/SSDF/nist_secure-software-development-framework_1.1.cdx.json",
+  "scope_note": "Kuratierte Teilmenge von 65 SSDF-Praktiken (siehe SSDF_SELECTED_IDS in build_catalog.py): nur Praktiken, die (a) nicht bereits über BSI CON.8/CON.10 oder das full-quality-scan-Skill abgedeckt sind, (b) code-/config-technisch prüfbar sind und (c) auch für Einzelentwickler ohne formale Organisationsprozesse sinnvoll sind.",
+  "groups": [
+    {
+      "group_id": "ssdf-pw.6",
+      "practice_group": "PW.6",
+      "title": "Compiler-/Build-Tool-Sicherheit",
+      "requirements": [
+        {
+          "req_id": "PW.6.1",
+          "description": "Use compiler, interpreter, and build tools that offer features to improve executable security."
+        },
+        {
+          "req_id": "PW.6.2",
+          "description": "Determine which compiler, interpreter, and build tool features should be used and how each should be configured, then implement and use the approved configurations."
+        }
+      ]
+    },
+    {
+      "group_id": "ssdf-pw.9",
+      "practice_group": "PW.9",
+      "title": "Sichere Standardkonfiguration",
+      "requirements": [
+        {
+          "req_id": "PW.9.1",
+          "description": "Define a secure baseline by determining how to configure each setting that has an effect on security or a security-related setting so that the default settings are secure and do not weaken the security functions provided by the platform, network infrastructure, or services."
+        },
+        {
+          "req_id": "PW.9.2",
+          "description": "Implement the default settings (or groups of default settings, if applicable), and document each setting for software administrators."
+        }
+      ]
+    },
+    {
+      "group_id": "ssdf-rv.1",
+      "practice_group": "RV.1",
+      "title": "Schwachstellen-Offenlegung",
+      "requirements": [
+        {
+          "req_id": "RV.1.3",
+          "description": "Have a policy that addresses vulnerability disclosure and remediation, and implement the roles, responsibilities, and processes needed to support that policy."
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "owasp-bsi-audit/finding.schema.json",
+  "title": "Finding",
+  "description": "Ein einzelnes Prüfergebnis eines Kontroll-Gruppen-Subagenten. Eine Datei audit/findings/<group-id>.json enthält ein Array dieser Objekte.",
+  "type": "object",
+  "required": ["id", "standard", "title", "status", "severity", "evidence", "remediation"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Kontroll-ID aus dem jeweiligen Katalog, z.B. 'V2.1.1' (ASVS), 'MASVS-STORAGE-1' (MASVS), 'CON.10.A3' (BSI), 'PW.6.1' (SSDF), 'SLSA-BUILD-1' (SLSA)."
+    },
+    "standard": {
+      "type": "string",
+      "enum": ["asvs", "masvs", "bsi", "ssdf", "slsa"]
+    },
+    "title": {
+      "type": "string",
+      "description": "Kurztitel der Kontrolle/Anforderung aus dem Katalog."
+    },
+    "level": {
+      "type": "string",
+      "description": "Anforderungsebene: 'Basis'|'Standard' (BSI) oder 'L1'|'L2'|'L3' (ASVS). Entfällt bei MASVS, SSDF, SLSA.",
+      "enum": ["Basis", "Standard", "L1", "L2", "L3"]
+    },
+    "status": {
+      "type": "string",
+      "description": "Soll-Ist-Ergebnis. BSI-Vokabular: ja|teilweise|nein|entbehrlich (BSI-Standard 200-2 Umsetzungsstatus). OWASP/MASVS/SSDF/SLSA-Vokabular: pass|fail|partial|n_a.",
+      "enum": ["ja", "teilweise", "nein", "entbehrlich", "pass", "fail", "partial", "n_a", "manual"]
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["critical", "high", "medium", "low", "info"]
+    },
+    "begruendung": {
+      "type": "string",
+      "description": "Pflichtfeld bei status=entbehrlich (immer) und bei status=nein|teilweise auf Standard-Ebene (200-2-Begründungspflicht). Erklärt, warum eine Anforderung entbehrlich ist oder warum sie (noch) nicht/teilweise erfüllt ist."
+    },
+    "evidence": {
+      "type": "array",
+      "description": "Konkrete Belege: Dateipfad+Zeile, Config-Key, Kommandozeilen-Ausgabe o.ä. Leer nur bei status=manual/entbehrlich ohne Code-Bezug.",
+      "items": {
+        "type": "object",
+        "required": ["source", "detail"],
+        "properties": {
+          "source": {"type": "string", "description": "z.B. 'src/api/login.php:42' oder 'php.ini:expose_php'"},
+          "detail": {"type": "string", "description": "Was dort beobachtet wurde."}
+        }
+      }
+    },
+    "remediation": {
+      "type": "string",
+      "description": "Konkrete, umsetzbare Handlungsempfehlung. Bei status=ja kurz 'bereits erfüllt' o.ä."
+    },
+    "out_of_scope_reason": {
+      "type": "string",
+      "description": "Gesetzt, wenn die Anforderung reine Hosting-/Infrastruktur-Ebene betrifft und daher nicht vom Team kontrollierbar ist (z.B. physische Sicherheit des Rechenzentrums)."
+    },
+    "target_object": {
+      "type": "string",
+      "description": "Zielobjekt-Referenz aus der Strukturanalyse (audit/methodik.json), auf das sich dieser Finding bezieht, z.B. 'Backend-API' oder 'MySQL-Datenbank'."
+    },
+    "verantwortlich": {
+      "type": "string",
+      "description": "Optional: wer die Maßnahme umsetzen sollte."
+    },
+    "umzusetzen_bis": {
+      "type": "string",
+      "description": "Optional: Zieldatum/Frist für die Maßnahmenumsetzung."
+    }
+  }
+}

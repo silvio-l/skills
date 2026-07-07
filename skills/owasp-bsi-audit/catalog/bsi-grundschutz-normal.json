@@ -1,0 +1,534 @@
+{
+  "standard": "bsi",
+  "edition": "2023",
+  "source_url": "https://www.bsi.bund.de/SharedDocs/Downloads/DE/BSI/Grundschutz/IT-GS-Kompendium/XML_Kompendium_2023.xml?__blob=publicationFile",
+  "schutzbedarf": "normal (Basis + Standard-Anforderungen); Anforderungen bei erhöhtem Schutzbedarf ausgeschlossen",
+  "scope_note": "Nur code-/config-technisch kontrollierbare Bausteine. Reine Hosting-/Infrastruktur-Anforderungen innerhalb dieser Bausteine sind über check_type=manual markiert, nicht entfernt.",
+  "bausteine": [
+    {
+      "baustein_id": "CON.8",
+      "title": "Software-Entwicklung",
+      "description": "Prozess und Praktiken der Eigenentwicklung von Software: Vorgehensmodell, sichere Entwicklungsumgebung, Versionsverwaltung, Software-Tests, Umgang mit externen Komponenten/Bibliotheken.",
+      "requirements": [
+        {
+          "req_id": "CON.8.A2",
+          "title": "Auswahl eines Vorgehensmodells",
+          "level": "Basis",
+          "check_type": "process",
+          "description": "Ein geeignetes Vorgehensmodell zur Software-Entwicklung MUSS festgelegt werden. Anhand des gewählten Vorgehensmodells MUSS ein Ablaufplan für die Software-Entwicklung erstellt werden. Die Sicherheitsanforderungen der Auftraggebenden an die Vorgehensweise MÜSSEN im Vorgehensmodell integriert werden. Das ausgewählte Vorgehensmodell, einschließlich der festgelegten Sicherheitsanforderungen, MUSS eingehalten werden. Das Personal SOLLTE in der Methodik des gewählten Vorgehensmodells geschult sein."
+        },
+        {
+          "req_id": "CON.8.A3",
+          "title": "Auswahl einer Entwicklungsumgebung",
+          "level": "Basis",
+          "check_type": "process",
+          "description": "Eine Liste der erforderlichen und optionalen Auswahlkriterien für eine Entwicklungsumgebung MUSS von Fachverantwortlichen für die Software-Entwicklung erstellt werden. Die Entwicklungsumgebung MUSS anhand der vorgegebenen Kriterien ausgewählt werden."
+        },
+        {
+          "req_id": "CON.8.A5",
+          "title": "Sicheres Systemdesign",
+          "level": "Basis",
+          "check_type": "process",
+          "description": "Folgende Grundregeln des sicheren Systemdesigns MÜSSEN in der zu entwickelnden Software berücksichtigt werden: Grundsätzlich MÜSSEN alle Eingabedaten vor der Weiterverarbeitung geprüft und validiert werden. Bei Client-Server-Anwendungen MÜSSEN die Daten grundsätzlich auf dem Server validiert werden. Die Standardeinstellungen der Software MÜSSEN derart voreingestellt sein, dass ein sicherer Betrieb der Software ermöglicht wird. Bei Fehlern oder Ausfällen von Komponenten des Systems DÜRFEN NICHT schützenswerte Informationen preisgegeben werden. Die Software MUSS mit möglichst geringen Privilegien ausgeführt werden können. Schützenswerte Daten MÜSSEN entsprechend der Vorgaben des Kryptokonzepts verschlüsselt übertragen und gespeichert werden. Zur Benutzenden-Authentisierung und Authentifizierung MÜSSEN vertrauenswürdige Mechanismen verwendet werden, die den Sicherheitsanforderungen an die Anwendung entsprechen. Falls zur Authentifizierung Passwörter gespeichert werden, MÜSSEN diese mit einem sicheren Hashverfahren gespeichert werden. Sicherheitsrelevante Ereignisse MÜSSEN in der Art protokolliert werden, dass sie im Nachgang ausgewertet werden können. Informationen, die für den Produktivbetrieb nicht relevant sind (z. B. Kommentare mit Zugangsdaten für die Entwicklungsumgebung), SOLLTEN in ausgeliefertem Programmcode und ausgelieferten Konfigurationsdateien entfernt werden. Das Systemdesign MUSS dokumentiert werden. Es MUSS überprüft werden, ob alle Sicherheitsanforderungen an das Systemdesign erfüllt wurden."
+        },
+        {
+          "req_id": "CON.8.A6",
+          "title": "Verwendung von externen Bibliotheken aus vertrauenswürdigen Quellen",
+          "level": "Basis",
+          "check_type": "code",
+          "description": "Wird im Rahmen des Entwicklungs- und Implementierungsprozesses auf externe Bibliotheken zurückgegriffen, MÜSSEN diese aus vertrauenswürdigen Quellen bezogen werden. Bevor externe Bibliotheken verwendet werden, MUSS deren Integrität sichergestellt werden."
+        },
+        {
+          "req_id": "CON.8.A7",
+          "title": "Durchführung von entwicklungsbegleitenden Software-Tests",
+          "level": "Basis",
+          "check_type": "process",
+          "description": "Schon bevor die Software im Freigabeprozess getestet und freigegeben wird, MÜSSEN entwicklungsbegleitende Software-Tests durchgeführt und der Quellcode auf Fehler gesichtet werden. Hierbei SOLLTEN bereits die Fachverantwortlichen des Auftraggebenden oder der beauftragenden Fachabteilung beteiligt werden. Die entwicklungsbegleitenden Tests MÜSSEN die funktionalen und nichtfunktionalen Anforderungen der Software umfassen. Die Software-Tests MÜSSEN dabei auch Negativtests abdecken. Zusätzlich MÜSSEN auch alle kritischen Grenzwerte der Eingabe sowie der Datentypen überprüft werden. Testdaten SOLLTEN dafür sorgfältig ausgewählt und geschützt werden. Darüber hinaus SOLLTE eine automatische statische Code-Analyse durchgeführt werden. Die Software MUSS in einer Test- und Entwicklungsumgebung getestet werden, die getrennt von der Produktionsumgebung ist. Außerdem MUSS getestet werden, ob die Systemvoraussetzungen für die vorgesehene Software ausreichend dimensioniert sind."
+        },
+        {
+          "req_id": "CON.8.A8",
+          "title": "Bereitstellung von Patches, Updates und Änderungen",
+          "level": "Basis",
+          "check_type": "code",
+          "description": "Es MUSS sichergestellt sein, dass sicherheitskritische Patches und Updates für die entwickelte Software zeitnah durch die Entwickelnden bereitgestellt werden. Werden für verwendete externe Bibliotheken sicherheitskritische Updates bereitgestellt, dann MÜSSEN die Entwickelnden ihre Software hierauf anpassen und ihrerseits entsprechende Patches und Updates zur Verfügung stellen. Für die Installations-, Update- oder Patchdateien MÜSSEN vom Entwickelnden Checksummen oder digitale Signaturen bereitgestellt werden."
+        },
+        {
+          "req_id": "CON.8.A10",
+          "title": "Versionsverwaltung des Quellcodes",
+          "level": "Basis",
+          "check_type": "process",
+          "description": "Der Quellcode des Entwicklungsprojekts MUSS über eine geeignete Versionsverwaltung verwaltet werden. Die Institution MUSS den Zugriff auf die Versionsverwaltung regeln und festlegen, wann Änderungen am Quellcode durch die Entwickelnden als eigene Version in der Versionsverwaltung gespeichert werden sollen. Es MUSS sichergestellt sein, dass durch die Versionsverwaltung alle Änderungen am Quellcode nachvollzogen und rückgängig gemacht werden können. Die Versionsverwaltung MUSS in dem Datensicherungskonzept berücksichtigt werden. Die Versionsverwaltung DARF NICHT ohne Datensicherung erfolgen."
+        },
+        {
+          "req_id": "CON.8.A20",
+          "title": "Überprüfung von externen Komponenten",
+          "level": "Basis",
+          "check_type": "code",
+          "description": "Unbekannte externe Komponenten (bzw. Programm-Bibliotheken), deren Sicherheit nicht durch etablierte und anerkannte Peer-Reviews oder vergleichbares sichergestellt werden kann, MÜSSEN auf Schwachstellen überprüft werden. Alle externen Komponenten MÜSSEN auf potentielle Konflikte überprüft werden. Die Integrität von externen Komponenten MUSS durch Prüfsummen oder kryptographische Zertifikate überprüft werden. Darüber hinaus SOLLTEN keine veralteten Versionen von externen Komponenten in aktuellen Entwicklungsprojekten verwendet werden."
+        },
+        {
+          "req_id": "CON.8.A1",
+          "title": "Definition von Rollen und Zuständigkeiten",
+          "level": "Standard",
+          "check_type": "process",
+          "description": "Für den Software-Entwicklungsprozess SOLLTE eine gesamtzuständige Person ein benannt werden. Außerdem SOLLTEN die Rollen und Zuständigkeiten für alle Aktivitäten im Rahmen der Software-Entwicklung festgelegt werden. Die Rollen SOLLTEN dabei fachlich die nachfolgenden Themen abdecken: Requirements-Engineering (Anforderungsmanagement) und Änderungsmanagement, Software-Entwurf und -Architektur, Informationssicherheit in der Software-Entwicklung, Software-Implementierung in dem für das Entwicklungsvorhaben relevanten Bereichen, sowie Software-Tests. Für jedes Entwicklungsvorhaben SOLLTE eine zuständige Person für die Informationssicherheit benannt werden."
+        },
+        {
+          "req_id": "CON.8.A11",
+          "title": "Erstellung einer Richtlinie für die Software-Entwicklung",
+          "level": "Standard",
+          "check_type": "process",
+          "description": "Es SOLLTE eine Richtlinie für die Software-Entwicklung erstellt und aktuell gehalten werden. Die Richtlinie SOLLTE neben Namenskonventionen auch Vorgaben zu Elementen beinhalten, die verwendet bzw. nicht verwendet werden dürfen. Die relevanten Anforderungen aus diesem Baustein SOLLTEN in die Richtlinie aufgenommen werden. Die Richtlinie SOLLTE für die Entwickelnden verbindlich sein."
+        },
+        {
+          "req_id": "CON.8.A12",
+          "title": "Ausführliche Dokumentation",
+          "level": "Standard",
+          "check_type": "process",
+          "description": "Es SOLLTEN ausreichende Projekt-, Funktions- und Schnittstellendokumentationen erstellt und aktuell gehalten werden. Die Betriebsdokumentation SOLLTE konkrete Sicherheitshinweise für die Installation und Konfiguration für Administration, sowie für die Benutzung des Produktes beinhalten. Die Software-Entwicklung SOLLTE so dokumentiert sein, dass Fachleute mithilfe der Dokumentation den Programm-Code nachvollziehen und weiterentwickeln können. Die Dokumentation SOLLTE dabei auch die Software-Architektur und Bedrohungsmodellierung umfassen. Die Aspekte zur Dokumentation SOLLTEN im Vorgehensmodell zur Software-Entwicklung berücksichtigt werden."
+        },
+        {
+          "req_id": "CON.8.A14",
+          "title": "Schulung des Entwicklungsteams zur Informationssicherheit",
+          "level": "Standard",
+          "check_type": "process",
+          "description": "Die Entwickelnden und die übrigen Mitglieder des Entwicklungsteams SOLLTEN zu generellen Informationssicherheitsaspekten und zu den jeweils speziell für sie relevanten Aspekten geschult sein: Anforderungsanalyse, Projektmanagement allgemein sowie speziell bei der Software-Entwicklung, Risikomanagement bzw. Bedrohungsmodellierung in der Software-Entwicklung, Qualitätsmanagement und Qualitätssicherung, Modelle und Methoden für die Software-Entwicklung, Software-Architektur, Software-Tests, Änderungsmanagement sowie Informationssicherheit, Sicherheitsvorgaben in der Institution und Sicherheitsaspekte in speziellen Bereichen."
+        },
+        {
+          "req_id": "CON.8.A16",
+          "title": "Geeignete Steuerung der Software-Entwicklung",
+          "level": "Standard",
+          "check_type": "process",
+          "description": "Bei einer Software-Entwicklung SOLLTE ein geeignetes Steuerungs- bzw. Projektmanagementmodell auf Basis des ausgewählten Vorgehensmodells verwendet werden. Das Steuerungs- bzw. Projektmanagementmodell SOLLTE in die Richtlinie zur Software Entwicklung integriert werden. Dabei SOLLTEN insbesondere die benötigten Qualifikationen beim Personal und die Abdeckung aller relevanten Phasen während des Lebenszyklus der Software berücksichtigt werden. Für das Vorgehensmodell SOLLTE ein geeignetes Risikomanagement festgelegt werden. Außerdem SOLLTEN geeignete Qualitätsziele für das Entwicklungsprojekt definiert werden."
+        },
+        {
+          "req_id": "CON.8.A21",
+          "title": "Bedrohungsmodellierung",
+          "level": "Standard",
+          "check_type": "code",
+          "description": "In der Entwurfsphase der Software-Entwicklung SOLLTE eine Bedrohungsmodellierung durchgeführt werden. Hierzu SOLLTEN auf Basis des Sicherheitsprofils, des Anforderungskatalogs und der geplanten Einsatzumgebung bzw. Einsatzszenarios potentielle Bedrohungen identifiziert werden. Die Bedrohungen SOLLTEN hinsichtlich ihrer Eintrittswahrscheinlichkeit und Auswirkung bewertet werden."
+        },
+        {
+          "req_id": "CON.8.A22",
+          "title": "Sicherer Software-Entwurf",
+          "level": "Standard",
+          "check_type": "code",
+          "description": "Der Software-Entwurf SOLLTE den Anforderungskatalog, das Sicherheitsprofil und die Ergebnisse der Bedrohungsmodellierung berücksichtigen. Im Rahmen des sicheren Software-Entwurfs SOLLTE eine sichere Software-Architektur entwickelt werden, auf deren Grundlage der Quellcode der Anwendung zu entwickeln ist. Hierbei SOLLTEN möglichst zukünftige Standards und Angriffstechniken berücksichtigt werden, damit die zu entwickelnde Software auch zukünftig leicht gewartet werden kann."
+        }
+      ]
+    },
+    {
+      "baustein_id": "CON.10",
+      "title": "Entwicklung von Webanwendungen",
+      "description": "Sicherheitsanforderungen an selbst entwickelte Webanwendungen: Authentisierung, Zugriffskontrolle, Session-Management, Eingabevalidierung, Schutz vor SQL-Injection und CSRF, sichere HTTP-Konfiguration.",
+      "requirements": [
+        {
+          "req_id": "CON.10.A1",
+          "title": "Authentisierung bei Webanwendungen",
+          "level": "Basis",
+          "check_type": "code",
+          "description": "Die Entwickelnden MÜSSEN sicherstellen, dass sich die Benutzenden gegenüber der Webanwendung sicher und angemessen authentisieren, bevor diese auf geschützte Funktionen oder Inhalte zugreifen können. Es MUSS eine angemessene Authentisierungsmethode ausgewählt werden. Der Auswahlprozess MUSS dokumentiert werden. Eine zentrale Authentisierungskomponente MUSS verwendet werden. Die zentrale Authentisierungskomponente SOLLTE mit etablierten Standardkomponenten (z. B. aus Frameworks oder Programmbibliotheken) umgesetzt werden. Falls eine Webanwendung Authentisierungsdaten auf einem Client speichert, MUSS explizit auf die Risiken der Funktion hingewiesen werden und zustimmen („Opt-In“). Die Webanwendung MUSS die Möglichkeit bieten, Grenzwerte für fehlgeschlagene Anmeldeversuche festzulegen. Die Webanwendung MUSS Benutzende sofort informieren, wenn deren Passwort zurückgesetzt wurde."
+        },
+        {
+          "req_id": "CON.10.A2",
+          "title": "Zugriffskontrolle bei Webanwendungen",
+          "level": "Basis",
+          "check_type": "code",
+          "description": "Die Entwickelnden MÜSSEN mittels einer Autorisierungskomponente sicherstellen, dass die Benutzenden ausschließlich solche Aktionen durchführen können, zu denen sie berechtigt sind. Jeder Zugriff auf geschützte Inhalte und Funktionen MUSS kontrolliert werden, bevor er ausgeführt wird. Die Autorisierungskomponente MUSS sämtliche Ressourcen und Inhalte berücksichtigen, die von der Webanwendung verwaltet werden. Ist die Zugriffskontrolle fehlerhaft, MÜSSEN Zugriffe abgelehnt werden. Es MUSS eine Zugriffskontrolle bei URL-Aufrufen und Objekt-Referenzen geben."
+        },
+        {
+          "req_id": "CON.10.A3",
+          "title": "Sicheres Session-Management",
+          "level": "Basis",
+          "check_type": "config",
+          "description": "Session-IDs MÜSSEN geeignet geschützt werden. Session-IDs MÜSSEN zufällig und mit ausreichender Entropie erzeugt werden. Falls das Framework der Webanwendung sichere Session-IDs generieren kann, MUSS diese Funktion des Frameworks verwendet werden. Sicherheitsrelevante Konfigurationsmöglichkeiten des Frameworks MÜSSEN berücksichtigt werden. Wenn Session-IDs übertragen und von den Clients gespeichert werden, MÜSSEN sie ausreichend geschützt übertragen werden. Eine Webanwendung MUSS die Möglichkeit bieten, eine bestehende Sitzung explizit zu beenden. Nachdem ein Konto angemeldet wurde, MUSS eine bereits bestehende Session-ID durch eine neue ersetzt werden. Sitzungen MÜSSEN eine maximale Gültigkeitsdauer besitzen (Timeout). Inaktive Sitzungen MÜSSEN automatisch nach einer bestimmten Zeit ungültig werden. Nachdem die Sitzung ungültig ist, MÜSSEN alle Sitzungsdaten ungültig und gelöscht sein."
+        },
+        {
+          "req_id": "CON.10.A4",
+          "title": "Kontrolliertes Einbinden von Inhalten bei Webanwendungen",
+          "level": "Basis",
+          "check_type": "code",
+          "description": "Es MUSS sichergestellt werden, dass eine Webanwendung ausschließlich vorgesehene Daten und Inhalte einbindet ausliefert. Die Ziele der Weiterleitungsfunktion einer Webanwendung MÜSSEN ausreichend eingeschränkt werden, sodass ausschließlich auf vertrauenswürdige Webseiten weitergeleitet wird. Falls die Vertrauensdomäne verlassen wird, MUSS ihn die Webanwendung darüber informieren."
+        },
+        {
+          "req_id": "CON.10.A5",
+          "title": "Upload-Funktionen",
+          "level": "Basis",
+          "check_type": "config",
+          "description": "Die Entwickelnden MÜSSEN sicherstellen, dass die Benutzenden Dateien nur im vorgegebenen Pfad speichern können. Die Entwickelnden MÜSSEN sicherstellen, dass die Benutzenden den Ablageort der Uploads nicht beeinflussen kann. Die Entwickelnden MÜSSEN Funktionen in die Webanwendung integrieren, mit denen die Uploads während des Betriebs der Webanwendung konfiguriert werden können."
+        },
+        {
+          "req_id": "CON.10.A6",
+          "title": "Schutz vor unerlaubter automatisierter Nutzung von Webanwendungen",
+          "level": "Basis",
+          "check_type": "code",
+          "description": "Die Entwickelnden MÜSSEN Sicherheitsmechanismen implementieren, die die Webanwendung vor automatisierten Zugriffen schützen. Bei der Implementierung der Sicherheitsmechanismen MUSS berücksichtigt werden, wie sich diese auf die Nutzungsmöglichkeiten der berechtigten Konten auswirken."
+        },
+        {
+          "req_id": "CON.10.A7",
+          "title": "Schutz vertraulicher Daten",
+          "level": "Basis",
+          "check_type": "code",
+          "description": "Die Entwickelnden MÜSSEN sicherstellen, dass vertrauliche Daten von den Clients zu den Servern nur mit der HTTP-Post-Methode übertragen werden. Entwickelnde MÜSSEN durch Direktiven in der Webanwendung gewährleisten, dass clientseitig keine schützenswerten Daten zwischengespeichert werden. Entwickelnde MÜSSEN sicherstellen, dass in Formularen keine vertraulichen Formulardaten im Klartext angezeigt werden. Die Webanwendung SOLLTE verhindern, dass vertrauliche Daten vom Webbrowser unerwartet gespeichert werden. Sämtliche Zugangsdaten der Webanwendung MÜSSEN serverseitig mithilfe von sicheren kryptografischen Algorithmen vor unbefugtem Zugriff geschützt werden (Salted Hash). Die Dateien mit den Quelltexten der Webanwendung MÜSSEN vor unerlaubten Abrufen geschützt werden."
+        },
+        {
+          "req_id": "CON.10.A8",
+          "title": "Umfassende Eingabevalidierung und Ausgabekodierung",
+          "level": "Basis",
+          "check_type": "code",
+          "description": "Die Entwickelnden MÜSSEN sämtliche an eine Webanwendung übergebenen Daten als potenziell gefährlich behandeln und geeignet filtern. Sämtliche Eingabedaten sowie Datenströme und Sekundärdaten, wie z. B. Session-IDs, MÜSSEN serverseitig validiert werden. Fehleingaben SOLLTEN möglichst nicht automatisch behandelt werden (Sanitizing). Lässt es sich jedoch nicht vermeiden, MUSS Sanitizing sicher umgesetzt werden. Ausgabedaten MÜSSEN so kodiert werden, dass schadhafter Code auf dem Zielsystem nicht interpretiert oder ausgeführt wird."
+        },
+        {
+          "req_id": "CON.10.A9",
+          "title": "Schutz vor SQL-Injection",
+          "level": "Basis",
+          "check_type": "code",
+          "description": "Falls Daten an ein Datenbankmanagementsystem (DBMS) weitergeleitet werden, MÜSSEN Stored Procedures bzw. Prepared SQL Statements eingesetzt werden. Falls Daten an ein DBMS weitergeleitet werden und weder Stored Procedures noch Prepared SQL Statements von der Einsatzumgebung unterstützt werden, MÜSSEN die SQL-Queries separat abgesichert werden."
+        },
+        {
+          "req_id": "CON.10.A10",
+          "title": "Restriktive Herausgabe sicherheitsrelevanter Informationen",
+          "level": "Basis",
+          "check_type": "code",
+          "description": "Die Entwickelnden MÜSSEN sicherstellen, dass Webseiten, Rückantworten und Fehlermeldungen von Webanwendungen keine Informationen enthalten, die Angreifenden Hinweise darauf geben, wie er Sicherheitsmechanismen umgehen kann."
+        },
+        {
+          "req_id": "CON.10.A11",
+          "title": "Softwarearchitektur einer Webanwendung",
+          "level": "Standard",
+          "check_type": "process",
+          "description": "Die Entwickelnden SOLLTEN die Softwarearchitektur der Webanwendung mit allen Bestandteilen und Abhängigkeiten dokumentieren. Die Dokumentation SOLLTE bereits während des Entwicklungsverlaufs aktualisiert und angepasst werden. Die Dokumentation SOLLTE so gestaltet sein, dass sie schon in der Entwicklungsphase benutzt werden kann und Entscheidungen nachvollziehbar sind. In der Dokumentation SOLLTEN alle für den Betrieb notwendigen Komponenten gekennzeichnet werden, die nicht Bestandteil der Webanwendung sind. In der Dokumentation SOLLTE beschrieben sein, welche Komponenten welche Sicherheitsmechanismen umsetzen, wie die Webanwendung in eine bestehende Infrastruktur integriert wird und welche kryptografischen Funktionen und Verfahren eingesetzt werden."
+        },
+        {
+          "req_id": "CON.10.A12",
+          "title": "Verifikation essenzieller Änderungen",
+          "level": "Standard",
+          "check_type": "code",
+          "description": "Falls wichtige Einstellungen mit der Anwendung geändert werden sollen, dann SOLLTEN die Entwickelnden sicherstellen, dass die Änderungen durch die Eingabe eines Passworts erneut verifiziert werden. Falls dies nicht möglich ist, dann SOLLTE die Webanwendung auf andere geeignete Weise sicherstellen, dass sich die Benutzenden authentisieren. Die Benutzenden SOLLTEN über Änderungen mithilfe von Kommunikationswegen außerhalb der Webanwendung informiert werden."
+        },
+        {
+          "req_id": "CON.10.A13",
+          "title": "Fehlerbehandlung",
+          "level": "Standard",
+          "check_type": "code",
+          "description": "Treten während der Laufzeit einer Webanwendung Fehler auf, SOLLTEN diese so behandelt werden, dass die Webanwendung weiter in einem konsistenten Zustand bleibt. Die Webanwendung SOLLTE Fehlermeldungen protokollieren. Falls eine veranlasste Aktion einen Fehler verursacht, SOLLTE die Webanwendung diese Aktion abbrechen. Die Webanwendung SOLLTE im Fehlerfall den Zugriff auf eine angeforderte Ressource oder Funktion verweigern. Zuvor reservierte Ressourcen SOLLTEN im Rahmen der Fehlerbehandlung wieder freigegeben werden. Der Fehler SOLLTE möglichst von der Webanwendung selbst behandelt werden."
+        },
+        {
+          "req_id": "CON.10.A14",
+          "title": "Sichere HTTP-Konfiguration bei Webanwendungen",
+          "level": "Standard",
+          "check_type": "config",
+          "description": "Zum Schutz vor Clickjacking, Cross-Site-Scripting und anderen Angriffen SOLLTEN geeignete HTTP-Response-Header gesetzt werden. Es SOLLTEN mindestens die folgenden HTTP-Header verwendet werden: Content-Security-Policy, Strict-Transport-Security, Content-Type, X-Content-Type-Options sowie Cache-Control. Die verwendeten HTTP-Header SOLLTEN auf die Webanwendung abgestimmt werden. Die verwendeten HTTP-Header SOLLTEN so restriktiv wie möglich sein. Cookies SOLLTEN grundsätzlich mit den Attributen secure , SameSite und httponly gesetzt werden."
+        },
+        {
+          "req_id": "CON.10.A15",
+          "title": "Verhinderung von Cross-Site-Request-Forgery",
+          "level": "Standard",
+          "check_type": "code",
+          "description": "Die Entwickelnden SOLLTEN die Webanwendung mit solchen Sicherheitsmechanismen ausstatten, die eine Unterscheidung zwischen beabsichtigten Seitenaufrufen und unbeabsichtigt weitergeleiteten Befehlen Dritter ermöglichen. Dabei SOLLTE mindestens geprüft werden, ob neben der Session-ID ein geheimes Token für den Zugriff auf geschützte Ressourcen und Funktionen benötigt wird."
+        },
+        {
+          "req_id": "CON.10.A16",
+          "title": "Mehr-Faktor-Authentisierung",
+          "level": "Standard",
+          "check_type": "code",
+          "description": "Es SOLLTE eine Mehr-Faktor-Authentisierung implementiert werden."
+        }
+      ]
+    },
+    {
+      "baustein_id": "APP.3.1",
+      "title": "Webanwendungen und Webservices",
+      "description": "Betrieb und Konfiguration von Webanwendungen/-services: Authentisierung, kontrolliertes Einbinden von Dateien/Inhalten, Absicherung von Schnittstellen.",
+      "requirements": [
+        {
+          "req_id": "APP.3.1.A1",
+          "title": "Authentisierung",
+          "level": "Basis",
+          "check_type": "config",
+          "description": "Der IT-Betrieb MUSS Webanwendungen und Webservices so konfigurieren, dass sich Clients gegenüber der Webanwendung oder dem Webservice authentisieren müssen, wenn diese auf geschützte Ressourcen zugreifen wollen. Dafür MUSS eine angemessene Authentisierungsmethode ausgewählt werden. Der Auswahlprozess SOLLTE dokumentiert werden. Der IT-Betrieb MUSS geeignete Grenzwerte für fehlgeschlagene Anmeldeversuche festlegen."
+        },
+        {
+          "req_id": "APP.3.1.A4",
+          "title": "Kontrolliertes Einbinden von Dateien und Inhalten",
+          "level": "Basis",
+          "check_type": "code",
+          "description": "Falls eine Webanwendung oder ein Webservice eine Upload-Funktion für Dateien anbietet, MUSS diese Funktion durch den IT-Betrieb so weit wie möglich eingeschränkt werden. Insbesondere MÜSSEN die erlaubte Dateigröße, erlaubte Dateitypen und erlaubte Speicherorte festgelegt werden. Es MUSS festgelegt werden, welche Clients die Funktion verwenden dürfen. Auch MÜSSEN Zugriffs- und Ausführungsrechte restriktiv gesetzt werden. Zudem MUSS sichergestellt werden, dass Clients Dateien nur im vorgegebenen erlaubten Speicherort speichern können."
+        },
+        {
+          "req_id": "APP.3.1.A7",
+          "title": "Schutz vor unerlaubter automatisierter Nutzung",
+          "level": "Basis",
+          "check_type": "config",
+          "description": "Der IT-Betrieb MUSS sicherstellen, dass Webanwendungen und Webservices vor unberechtigter automatisierter Nutzung geschützt werden. Dabei MUSS jedoch berücksichtigt werden, wie sich die Schutzmechanismen auf die Nutzungsmöglichkeiten berechtigter Clients auswirken. Wenn die Webanwendung RSS-Feeds oder andere Funktionen enthält, die explizit für die automatisierte Nutzung vorgesehen sind, MUSS dies ebenfalls bei der Konfiguration der Schutzmechanismen berücksichtigt werden."
+        },
+        {
+          "req_id": "APP.3.1.A14",
+          "title": "Schutz vertraulicher Daten",
+          "level": "Basis",
+          "check_type": "code",
+          "description": "Der IT-Betrieb MUSS sicherstellen, dass Zugangsdaten zur Webanwendung oder zum Webservice serverseitig mithilfe von sicheren kryptografischen Algorithmen vor unbefugtem Zugriff geschützt werden. Dazu MÜSSEN Salted Hash-Verfahren verwendet werden. Die Dateien mit den Quelltexten der Webanwendung oder des Webservices MÜSSEN vor unerlaubten Abrufen geschützt werden."
+        },
+        {
+          "req_id": "APP.3.1.A9",
+          "title": "Beschaffung von Webanwendungen und Webservices",
+          "level": "Standard",
+          "check_type": "config",
+          "description": "Zusätzlich zu den allgemeinen Aspekten der Beschaffung von Software SOLLTE die Institution mindestens folgendes bei der Beschaffung von Webanwendungen und Webservices berücksichtigen: sichere Eingabevalidierung und Ausgabekodierung, sicheres Session-Management, sichere kryptografische Verfahren, sichere Authentisierungsverfahren, sichere Verfahren zum serverseitigen Speichern von Zugangsdaten, geeignetes Berechtigungsmanagement, ausreichende Protokollierungsmöglichkeiten, regelmäßige Sicherheitsupdates durch den Entwickelnden der Software, Schutzmechanismen vor verbreiteten Angriffen auf Webanwendungen und Webservices sowie Zugriff auf den Quelltext der Webanwendung oder des Webservices."
+        },
+        {
+          "req_id": "APP.3.1.A11",
+          "title": "Sichere Anbindung von Hintergrundsystemen",
+          "level": "Standard",
+          "check_type": "code",
+          "description": "Der Zugriff auf Hintergrundsysteme, auf denen Funktionen und Daten ausgelagert werden, SOLLTE ausschließlich über definierte Schnittstellen und von definierten IT-Systemen aus möglich sein. Bei der Kommunikation über Netz- und Standortgrenzen hinweg SOLLTE der Datenverkehr authentisiert und verschlüsselt werden."
+        },
+        {
+          "req_id": "APP.3.1.A12",
+          "title": "Sichere Konfiguration",
+          "level": "Standard",
+          "check_type": "config",
+          "description": "Webanwendungen und Webservices SOLLTEN so konfiguriert sein, dass auf ihre Ressourcen und Funktionen ausschließlich über die vorgesehenen, abgesicherten Kommunikationspfade zugegriffen werden kann. Der Zugriff auf nicht benötigte Ressourcen und Funktionen SOLLTE deaktiviert werden. Falls dies nicht möglich ist, SOLLTE der Zugriff soweit wie möglich eingeschränkt werden. Folgendes SOLLTE bei der Konfiguration von Webanwendungen und Webservices umgesetzt werden: Deaktivieren nicht benötigter HTTP-Methoden, Konfigurieren der Zeichenkodierung, Vermeiden von sicherheitsrelevanten Informationen in Fehlermeldungen und Antworten, Speichern von Konfigurationsdateien außerhalb des Web-Root-Verzeichnisses sowie Festlegen von Grenzwerten für Zugriffsversuche."
+        },
+        {
+          "req_id": "APP.3.1.A21",
+          "title": "Sichere HTTP-Konfiguration bei Webanwendungen",
+          "level": "Standard",
+          "check_type": "config",
+          "description": "Zum Schutz vor Clickjacking, Cross-Site-Scripting und anderen Angriffen SOLLTE der IT-Betrieb geeignete HTTP-Response-Header setzen. Dazu SOLLTEN mindestens die folgenden HTTP-Header verwendet werden: Content-Security-Policy, Strict-Transport-Security, Content-Type, X-Content-Type-Options sowie Cache-Control. Die verwendeten HTTP-Header SOLLTEN so restriktiv wie möglich sein. Cookies SOLLTEN grundsätzlich mit den Attributen secure , SameSite und httponly gesetzt werden."
+        },
+        {
+          "req_id": "APP.3.1.A22",
+          "title": "Penetrationstest und Revision",
+          "level": "Standard",
+          "check_type": "code",
+          "description": "Webanwendungen und Webservices SOLLTEN regelmäßig auf Sicherheitsprobleme hin überprüft werden. Insbesondere SOLLTEN regelmäßig Revisionen durchgeführt werden. Die Ergebnisse SOLLTEN nachvollziehbar dokumentiert, ausreichend geschützt und vertraulich behandelt werden. Abweichungen SOLLTE nachgegangen werden. Die Ergebnisse SOLLTEN dem ISB vorgelegt werden."
+        }
+      ]
+    },
+    {
+      "baustein_id": "APP.3.2",
+      "title": "Webserver",
+      "description": "Absicherung des Webservers selbst, soweit per Anwendungs-/Config-Ebene kontrollierbar: sichere Konfiguration, Schutz der Webserver-Dateien, Protokollierung, Datei-Uploads/-Downloads.",
+      "requirements": [
+        {
+          "req_id": "APP.3.2.A1",
+          "title": "Sichere Konfiguration eines Webservers",
+          "level": "Basis",
+          "check_type": "config",
+          "description": "Nachdem der IT-Betrieb einen Webserver installiert hat, MUSS er eine sichere Grundkonfiguration vornehmen. Dazu MUSS er insbesondere den Webserver-Prozess einem Konto mit minimalen Rechten zuweisen. Der Webserver MUSS in einer gekapselten Umgebung ausgeführt werden, sofern dies vom Betriebssystem unterstützt wird. Ist dies nicht möglich, SOLLTE jeder Webserver auf einem eigenen physischen oder virtuellen Server ausgeführt werden. Dem Webserver-Dienst MÜSSEN alle nicht notwendige Schreibberechtigungen entzogen werden. Nicht benötigte Module und Funktionen des Webservers MÜSSEN deaktiviert werden."
+        },
+        {
+          "req_id": "APP.3.2.A2",
+          "title": "Schutz der Webserver-Dateien",
+          "level": "Basis",
+          "check_type": "config",
+          "description": "Der IT-Betrieb MUSS alle Dateien auf dem Webserver, insbesondere Skripte und Konfigurationsdateien, so schützen, dass sie nicht unbefugt gelesen und geändert werden können. Es MUSS sichergestellt werden, dass Webanwendungen nur auf einen definierten Verzeichnisbaum zugreifen können (WWW-Wurzelverzeichnis). Der Webserver MUSS so konfiguriert sein, dass er nur Dateien ausliefert, die sich innerhalb des WWW-Wurzelverzeichnisses befinden. Der IT-Betrieb MUSS alle nicht benötigten Funktionen, die Verzeichnisse auflisten, deaktivieren. Vertrauliche Daten MÜSSEN vor unberechtigtem Zugriff geschützt werden. Insbesondere MUSS der IT-Betrieb sicherstellen, dass vertrauliche Dateien nicht in öffentlichen Verzeichnissen des Webservers liegen. Der IT-Betrieb MUSS regelmäßig überprüfen, ob vertrauliche Dateien in öffentlichen Verzeichnissen gespeichert wurden."
+        },
+        {
+          "req_id": "APP.3.2.A3",
+          "title": "Absicherung von Datei-Uploads und -Downloads",
+          "level": "Basis",
+          "check_type": "code",
+          "description": "Alle mithilfe des Webservers veröffentlichten Dateien MÜSSEN vorher auf Schadprogramme geprüft werden. Es MUSS eine Maximalgröße für Datei-Uploads spezifiziert sein. Für Uploads MUSS genügend Speicherplatz reserviert werden."
+        },
+        {
+          "req_id": "APP.3.2.A4",
+          "title": "Protokollierung von Ereignissen",
+          "level": "Basis",
+          "check_type": "config",
+          "description": "Der Webserver MUSS mindestens folgende Ereignisse protokollieren: erfolgreiche Zugriffe auf Ressourcen, fehlgeschlagene Zugriffe auf Ressourcen aufgrund von mangelnder Berechtigung, nicht vorhandenen Ressourcen und Server-Fehlern sowie allgemeine Fehlermeldungen. Die Protokollierungsdaten SOLLTEN regelmäßig ausgewertet werden."
+        },
+        {
+          "req_id": "APP.3.2.A5",
+          "title": "Authentisierung",
+          "level": "Basis",
+          "check_type": "code",
+          "description": "Wenn sich Clients mit Hilfe von Passwörtern am Webserver authentisieren, MÜSSEN diese kryptografisch gesichert und vor unbefugtem Zugriff geschützt gespeichert werden."
+        },
+        {
+          "req_id": "APP.3.2.A11",
+          "title": "Verschlüsselung über TLS",
+          "level": "Basis",
+          "check_type": "config",
+          "description": "Der Webserver MUSS für alle Verbindungen durch nicht vertrauenswürdige Netze eine sichere Verschlüsselung über TLS anbieten (HTTPS). Falls es aus Kompatibilitätsgründen erforderlich ist, veraltete Verfahren zu verwenden, SOLLTEN diese auf so wenige Fälle wie möglich beschränkt werden. Wenn eine HTTPS-Verbindung genutzt wird, MÜSSEN alle Inhalte über HTTPS ausgeliefert werden. Sogenannter Mixed Content DARF NICHT verwendet werden."
+        },
+        {
+          "req_id": "APP.3.2.A8",
+          "title": "Planung des Einsatzes eines Webservers",
+          "level": "Standard",
+          "check_type": "process",
+          "description": "Es SOLLTE geplant und dokumentiert werden, für welchen Zweck der Webserver eingesetzt und welche Inhalte er bereitstellen soll. In der Dokumentation SOLLTEN auch die Informationen oder Dienstleistungen des Webangebots und die jeweiligen Zielgruppen beschrieben werden. Für den technischen Betrieb und die Webinhalte SOLLTEN geeignete Zuständige festgelegt werden."
+        },
+        {
+          "req_id": "APP.3.2.A9",
+          "title": "Festlegung einer Sicherheitsrichtlinie für den Webserver",
+          "level": "Standard",
+          "check_type": "process",
+          "description": "Es SOLLTE eine Sicherheitsrichtlinie erstellt werden, in der die erforderlichen Maßnahmen und Zuständigkeiten benannt sind. Weiterhin SOLLTE geregelt werden, wie Informationen zu aktuellen Sicherheitslücken besorgt werden. Auch SOLLTE geregelt werden, wie Sicherheitsmaßnahmen umgesetzt werden und wie vorgegangen werden soll, wenn Sicherheitsvorfälle eintreten."
+        },
+        {
+          "req_id": "APP.3.2.A10",
+          "title": "Auswahl eines geeigneten Webhosters",
+          "level": "Standard",
+          "check_type": "code",
+          "description": "Betreibt die Institution den Webserver nicht selbst, sondern nutzt Angebote externer Unternehmen im Rahmen von Webhosting, SOLLTE die Institution bei der Auswahl eines geeigneten Webhosters auf folgende Punkte achten: Es SOLLTE vertraglich geregelt werden, wie die Dienste zu erbringen sind. Dabei SOLLTEN Sicherheitsaspekte innerhalb des Vertrags schriftlich in einem Service Level Agreement (SLA) festgehalten werden. Die eingesetzten IT-Systeme SOLLTEN vom Webhoster regelmäßig kontrolliert und gewartet werden. Der Webhoster SOLLTE dazu verpflichtet werden, bei technischen Problemen oder einer Kompromittierung von Kundschaftssystemen zeitnah zu reagieren. Der Webhoster SOLLTE grundlegende technische und organisatorische Maßnahmen umsetzen, um seinen Informationsverbund zu schützen."
+        },
+        {
+          "req_id": "APP.3.2.A12",
+          "title": "Geeigneter Umgang mit Fehlern und Fehlermeldungen",
+          "level": "Standard",
+          "check_type": "config",
+          "description": "Aus den HTTP-Informationen und den angezeigten Fehlermeldungen SOLLTEN weder der Produktname noch die verwendete Version des Webservers ersichtlich sein. Fehlermeldungen SOLLTEN keine Details zu Systeminformationen oder Konfigurationen ausgeben. Der IT-Betrieb SOLLTE sicherstellen, dass der Webserver ausschließlich allgemeine Fehlermeldungen ausgibt, die Clients darauf hinweisen, dass ein Fehler aufgetreten ist. Die Fehlermeldung SOLLTE ein eindeutiges Merkmal enthalten, das es dem IT-Betrieb ermöglicht, den Fehler nachzuvollziehen. Bei unerwarteten Fehlern SOLLTE sichergestellt sein, dass der Webserver nicht in einem Zustand verbleibt, in dem er anfällig für Angriffe ist."
+        },
+        {
+          "req_id": "APP.3.2.A13",
+          "title": "Zugriffskontrolle für Webcrawler",
+          "level": "Standard",
+          "check_type": "code",
+          "description": "Der Zugriff von Webcrawlern SOLLTE nach dem Robots-Exclusion-Standard geregelt werden. Inhalte SOLLTEN mit einem Zugriffsschutz versehen werden, um sie vor Webcrawlern zu schützen, die sich nicht an diesen Standard halten."
+        },
+        {
+          "req_id": "APP.3.2.A14",
+          "title": "Integritätsprüfungen und Schutz vor Schadsoftware",
+          "level": "Standard",
+          "check_type": "config",
+          "description": "Der IT-Betrieb SOLLTE regelmäßig prüfen, ob die Konfigurationen des Webservers und die von ihm bereitgestellten Dateien noch integer sind und nicht durch Angriffe verändert wurden. Die zur Veröffentlichung vorgesehenen Dateien SOLLTEN regelmäßig auf Schadsoftware geprüft werden."
+        },
+        {
+          "req_id": "APP.3.2.A16",
+          "title": "Penetrationstest und Revision",
+          "level": "Standard",
+          "check_type": "code",
+          "description": "Webserver SOLLTEN regelmäßig auf Sicherheitsprobleme hin überprüft werden. Auch SOLLTEN regelmäßig Revisionen durchgeführt werden. Die Ergebnisse SOLLTEN nachvollziehbar dokumentiert, ausreichend geschützt und vertraulich behandelt werden. Abweichungen SOLLTE nachgegangen werden. Die Ergebnisse SOLLTEN dem ISB vorgelegt werden."
+        },
+        {
+          "req_id": "APP.3.2.A20",
+          "title": "Benennung von Anzusprechenden",
+          "level": "Standard",
+          "check_type": "process",
+          "description": "Bei umfangreichen Webangeboten SOLLTE die Institution zentrale Anzusprechende für die Webangebote bestimmen. Es SOLLTEN Prozesse, Vorgehensweisen und Zuständige für Probleme oder Sicherheitsvorfälle benannt werden. Die Institution SOLLTE eine Kontaktmöglichkeit auf ihrer Webseite veröffentlichen, über die Sicherheitsprobleme an die Institution gemeldet werden können. Für die Behandlung von externen Sicherheitsmeldungen SOLLTE die Institution Prozesse definieren."
+        }
+      ]
+    },
+    {
+      "baustein_id": "APP.4.3",
+      "title": "Relationale Datenbanksysteme",
+      "description": "Absicherung des Datenbankmanagementsystems (hier: MySQL/MariaDB): Sicherheitsrichtlinie, Basishärtung, kontrolliertes Anlegen neuer Datenbanken, Zugriffsrechte.",
+      "requirements": [
+        {
+          "req_id": "APP.4.3.A1",
+          "title": "Erstellung einer Sicherheitsrichtlinie für Datenbanksysteme",
+          "level": "Basis",
+          "check_type": "process",
+          "description": "Ausgehend von der allgemeinen Sicherheitsrichtlinie der Institution MUSS eine spezifische Sicherheitsrichtlinie für Datenbanksysteme erstellt werden. Darin MÜSSEN nachvollziehbar Anforderungen und Vorgaben beschrieben sein, wie Datenbanksysteme sicher betrieben werden sollen. Die Richtlinie MUSS allen im Bereich Datenbanksysteme zuständigen Mitarbeitenden bekannt sein. Sie MUSS grundlegend für ihre Arbeit sein. Wird die Richtlinie verändert oder wird von den Anforderungen abgewichen, MUSS dies mit dem oder der ISB abgestimmt und dokumentiert werden. Es MUSS regelmäßig überprüft werden, ob die Richtlinie noch korrekt umgesetzt ist. Die Ergebnisse MÜSSEN sinnvoll dokumentiert werden."
+        },
+        {
+          "req_id": "APP.4.3.A3",
+          "title": "Basishärtung des Datenbankmanagementsystems",
+          "level": "Basis",
+          "check_type": "process",
+          "description": "Das Datenbankmanagementsystem MUSS gehärtet werden. Hierfür MUSS eine Checkliste mit den durchzuführenden Schritten zusammengestellt und abgearbeitet werden. Passwörter DÜRFEN NICHT im Klartext gespeichert werden. Die Basishärtung MUSS regelmäßig überprüft und, falls erforderlich, angepasst werden."
+        },
+        {
+          "req_id": "APP.4.3.A4",
+          "title": "Geregeltes Anlegen neuer Datenbanken",
+          "level": "Basis",
+          "check_type": "code",
+          "description": "Neue Datenbanken MÜSSEN nach einem definierten Prozess angelegt werden. Wenn eine neue Datenbank angelegt wird, MÜSSEN Grundinformationen zur Datenbank nachvollziehbar dokumentiert werden."
+        },
+        {
+          "req_id": "APP.4.3.A9",
+          "title": "Datensicherung eines Datenbanksystems",
+          "level": "Basis",
+          "check_type": "process",
+          "description": "Es MÜSSEN regelmäßig Systemsicherungen des DBMS und der Daten durchgeführt werden. Auch bevor eine Datenbank neu erzeugt wird, MUSS das Datenbanksystem gesichert werden. Hierfür SOLLTEN die dafür zulässigen Dienstprogramme benutzt werden. Alle Transaktionen SOLLTEN so gesichert werden, dass sie jederzeit wiederherstellbar sind. Wenn die Datensicherung die verfügbaren Kapazitäten übersteigt, SOLLTE ein erweitertes Konzept erstellt werden, um die Datenbank zu sichern, z. B. eine inkrementelle Sicherung. Abhängig vom Schutzbedarf der Daten SOLLTEN die Wiederherstellungsparameter vorgegeben werden (siehe CON.3 Datensicherungskonzept) ."
+        },
+        {
+          "req_id": "APP.4.3.A12",
+          "title": "Einheitlicher Konfigurationsstandard von Datenbankmanagementsystemen",
+          "level": "Standard",
+          "check_type": "process",
+          "description": "Für alle eingesetzten Datenbankmanagementsysteme SOLLTE ein einheitlicher Konfigurationsstandard definiert werden. Alle Datenbankmanagementsysteme SOLLTEN nach diesem Standard konfiguriert und einheitlich betrieben werden. Falls es bei einer Installation notwendig ist, vom Konfigurationsstandard abzuweichen, SOLLTEN alle Schritte von dem oder der ISB freigegeben und nachvollziehbar dokumentiert werden. Der Konfigurationsstandard SOLLTE regelmäßig überprüft und, falls erforderlich, angepasst werden."
+        },
+        {
+          "req_id": "APP.4.3.A13",
+          "title": "Restriktive Handhabung von Datenbank-Links",
+          "level": "Standard",
+          "check_type": "process",
+          "description": "Es SOLLTE sichergestellt sein, dass nur Zuständige dazu berechtigt sind, Datenbank-Links (DB-Links) anzulegen. Werden solche Links angelegt, MÜSSEN so genannte Private DB-Links vor Public DB-Links bevorzugt angelegt werden. Alle von den Zuständigen angelegten DB-Links SOLLTEN dokumentiert und regelmäßig überprüft werden. Zudem SOLLTEN DB-Links mitberücksichtigt werden, wenn das Datenbanksystem gesichert wird (siehe APP.4.3.A9 Datensicherung eines Datenbanksystems )."
+        },
+        {
+          "req_id": "APP.4.3.A16",
+          "title": "Verschlüsselung der Datenbankanbindung",
+          "level": "Standard",
+          "check_type": "process",
+          "description": "Das Datenbankmanagementsystem SOLLTE so konfiguriert werden, dass Datenbankverbindungen immer verschlüsselt werden. Die dazu eingesetzten kryptografischen Verfahren und Protokolle SOLLTEN den internen Vorgaben der Institution entsprechen (siehe CON.1 Kryptokonzept )."
+        },
+        {
+          "req_id": "APP.4.3.A18",
+          "title": "Überwachung des Datenbankmanagementsystems",
+          "level": "Standard",
+          "check_type": "process",
+          "description": "Die für den sicheren Betrieb kritischen Parameter, Ereignisse und Betriebszustände des Datenbankmanagementsystems SOLLTEN definiert werden. Diese SOLLTEN mithilfe eines Monitoring-Systems überwacht werden. Für alle kritischen Parameter, Ereignisse und Betriebszustände SOLLTEN Schwellwerte festgelegt werden. Wenn diese Werte überschritten werden, MUSS geeignet reagiert werden. Hierbei SOLLTEN die zuständigen Mitarbeitenden alarmiert werden. Anwendungsspezifische Parameter, Ereignisse, Betriebszustände und deren Schwellwerte SOLLTEN mit den Zuständigen für die Fachanwendungen abgestimmt werden."
+        },
+        {
+          "req_id": "APP.4.3.A20",
+          "title": "Regelmäßige Audits",
+          "level": "Standard",
+          "check_type": "process",
+          "description": "Bei allen Komponenten des Datenbanksystems SOLLTE regelmäßig überprüft werden, ob alle festgelegten Sicherheitsmaßnahmen umgesetzt und diese korrekt konfiguriert sind. Dabei SOLLTE geprüft werden, ob der dokumentierte Stand dem Ist-Zustand entspricht und ob die Konfiguration des Datenbankmanagementsystems der dokumentierten Standardkonfiguration entspricht. Zudem SOLLTE geprüft werden, ob alle Datenbank-Skripte benötigt werden. Auch SOLLTE geprüft werden, ob sie dem Qualitätsstandard der Institution genügen. Zusätzlich SOLLTEN die Protokolldateien des Datenbanksystems und des Betriebssystems nach Auffälligkeiten untersucht werden (siehe DER.1 Detektion von sicherheitsrelevanten Ereignissen ). Die Auditergebnisse SOLLTEN nachvollziehbar dokumentiert sein. Sie SOLLTEN mit dem Soll-Zustand abgeglichen werden. Abweichungen SOLLTE nachgegangen werden."
+        }
+      ]
+    },
+    {
+      "baustein_id": "APP.1.4",
+      "title": "Mobile Anwendungen (Apps)",
+      "description": "Sicherheitsanforderungen an selbst entwickelte mobile Apps (Flutter/React Native): Minimierung und Kontrolle von App-Berechtigungen, sichere Speicherung lokaler App-Daten, Verhinderung von Datenabfluss, sichere Deinstallation.",
+      "requirements": [
+        {
+          "req_id": "APP.1.4.A1",
+          "title": "Anforderungsanalyse für die Nutzung von Apps",
+          "level": "Basis",
+          "check_type": "code",
+          "description": "In der Anforderungsanalyse MÜSSEN insbesondere Risiken betrachtet werden, die sich aus der mobilen Nutzung ergeben. Die Institution MUSS prüfen, ob ihre Kontroll- und Einflussmöglichkeiten auf die Betriebssystemumgebung mobiler Endgeräte ausreichend sind, um sie sicher nutzen zu können."
+        },
+        {
+          "req_id": "APP.1.4.A5",
+          "title": "Minimierung und Kontrolle von App-Berechtigungen",
+          "level": "Basis",
+          "check_type": "code",
+          "description": "Sicherheitsrelevante Berechtigungseinstellungen MÜSSEN so fixiert werden, dass sie nicht durch Personen oder Apps geändert werden können. Wo dies technisch nicht möglich ist, MÜSSEN die Berechtigungseinstellungen regelmäßig geprüft und erneut gesetzt werden. Bevor eine App in einer Institution eingeführt wird, MUSS sichergestellt werden, dass sie nur die minimal benötigten App-Berechtigungen für ihre Funktion erhält. Nicht unbedingt notwendige Berechtigungen MÜSSEN hinterfragt und gegebenenfalls unterbunden werden."
+        },
+        {
+          "req_id": "APP.1.4.A7",
+          "title": "Sichere Speicherung lokaler App-Daten",
+          "level": "Basis",
+          "check_type": "code",
+          "description": "Wenn Apps auf interne Dokumente der Institution zugreifen können, MUSS sichergestellt sein, dass die lokale Datenhaltung der App angemessen abgesichert ist. Insbesondere MÜSSEN Zugriffsschlüssel verschlüsselt abgelegt werden. Außerdem DÜRFEN vertrauliche Daten NICHT vom Betriebssystem an anderen Ablageorten zwischengespeichert werden."
+        },
+        {
+          "req_id": "APP.1.4.A8",
+          "title": "Verhinderung von Datenabfluss",
+          "level": "Basis",
+          "check_type": "config",
+          "description": "Um zu verhindern, dass Apps ungewollt vertrauliche Daten versenden oder aus den gesendeten Daten Profile über die Benutzenden erstellt werden, MUSS die App-Kommunikation geeignet eingeschränkt werden. Dazu SOLLTE die Kommunikation im Rahmen des Test- und Freigabeverfahrens analysiert werden. Weiterhin SOLLTE überprüft werden, ob eine App ungewollte Protokollierungs- oder Hilfsdateien schreibt, die möglicherweise vertrauliche Informationen enthalten."
+        },
+        {
+          "req_id": "APP.1.4.A3",
+          "title": "Verteilung schutzbedürftiger Apps",
+          "level": "Standard",
+          "check_type": "code",
+          "description": "Interne Apps der Institution und Apps, die schutzbedürftige Informationen verarbeiten, SOLLTEN über einen institutionseigenen App Store oder via MDM verteilt werden."
+        },
+        {
+          "req_id": "APP.1.4.A12",
+          "title": "Sichere Deinstallation von Apps",
+          "level": "Standard",
+          "check_type": "code",
+          "description": "Werden Apps deinstalliert, SOLLTEN auch Daten gelöscht werden, die auf externen Systemen, beispielsweise bei den App-Anbietenden, gespeichert wurden."
+        }
+      ]
+    }
+  ]
+}

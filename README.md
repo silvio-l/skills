@@ -156,6 +156,38 @@ finding IDs, severity enum, imperative recommendations, prioritised worklist) so
 downstream agent — e.g. `/ratchet-up` — can work the findings off without follow-up
 questions.
 
+### `owasp-bsi-audit`
+
+**The Problem.** "Audit this against OWASP and BSI IT-Grundschutz" is a task with
+no shape until someone decides which of the hundred-plus BSI Bausteine even apply,
+what "Schutzbedarf normal" means in practice, and how a solo developer's app
+compares to the enterprise-with-an-ops-department the standard assumes. Do it by
+hand and you either drown the agent's context in every requirement at once, or
+skip the parts of the methodology (Strukturanalyse, Schutzbedarfsfeststellung,
+Modellierung) that make a Grundschutz-Check traceable instead of a vibe-check.
+
+**The Fix.** An orchestrator that runs the actual BSI-Standard-200-2 process —
+structure analysis, protection-need assessment, Baustein/standard modeling
+confirmed with the user before dispatch, then the Grundschutz-Check itself — while
+keeping the main context free: one Sonnet subagent per confirmed control group
+(a BSI Baustein, an ASVS chapter, a MASVS category, ...) reads its own controls
+and the code, judges like a human auditor (not keyword matching), and writes its
+findings straight to disk with the mandatory BSI vocabulary (ja/teilweise/nein/
+entbehrlich, justified) or the OWASP one (pass/fail/partial/n_a). The catalogs
+themselves are machine-fetched from the official upstream sources (ASVS 5.0,
+MASVS 2.1, the BSI Kompendium XML, curated NIST SSDF and SLSA subsets) rather than
+hand-copied, and re-resolve to whatever the latest version is on each refresh. The
+BSI Baustein selection is deliberately narrow — most of the Kompendium's ~111
+Bausteine are organizational-governance or physical-infrastructure practices that
+don't translate to "check this in the code" for an individual developer; only the
+ones describing an actual software artifact survive. The rendered report makes
+the methodology itself visible (which Bausteine were applied and what they cover,
+what was explicitly out of scope, the full Soll-Ist comparison sorted Basis-before-
+Standard in natural requirement order) and ships as a self-contained, badge-
+colored HTML report with a one-click "copy an AI-agent fix prompt" button per
+finding (or all of them at once) alongside the Markdown report and a prioritized
+fix-plan.
+
 ## Credit
 
 These skills exist because [Matt Pocock](https://github.com/mattpocock) made his own [`mattpocock/skills`](https://github.com/mattpocock/skills) public and showed what a working skill ecosystem looks like. The structural choices here — directory layout, frontmatter conventions, the `npx skills@latest add` install path, the failure-mode/fix narrative pattern in this README — are his. If you find any of this useful, point upstream first.
