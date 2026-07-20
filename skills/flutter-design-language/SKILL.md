@@ -1,11 +1,11 @@
 ---
 name: flutter-design-language
-description: Phase-0 gate against AI design slop before the Figma→Flutter pipeline — enforces a deliberate design plan instead of a generic default. Use when starting a Flutter design, defining a theme from scratch, or a design 'sieht generisch / nach KI aus'.
+description: Phase-0 gate against AI design slop before writing Flutter theme code — enforces a deliberate design plan instead of a generic default. Use when starting a Flutter design, defining a theme from scratch, or a design 'sieht generisch / nach KI aus'.
 ---
 
 # Flutter Design Language (Anti-Slop Phase 0)
 
-Before a single variable is created in Figma or a `ThemeData` written in Flutter, this
+Before a `ThemeData` is written in Flutter, this
 **design language is decided deliberately**. Without this gate the pipeline produces
 neatly packaged slop: `#4F46E5`-indigo, default Roboto/Inter, a uniform 16px radius,
 centred Hero+CTA, timid palette.
@@ -47,7 +47,9 @@ passes this review do you proceed.
 - `design/tokens.json` — three-tier & **role-named** (see `REFERENCE.md`):
   *primitive* (raw values) → *semantic/`sys.*`* (role) → *component*. Light **and** Dark.
 
-Then → `figma-to-flutter`: tokens feed Figma Variables **and** the Flutter theme.
+Then implement the tokens directly: they feed `ColorScheme`/`TextTheme`/
+`ThemeExtension`s in the Flutter `ThemeData` — see `REFERENCE.md`'s Direct-to-Code
+Tokens section.
 
 ## Hard rules
 
@@ -64,5 +66,6 @@ Then → `figma-to-flutter`: tokens feed Figma Variables **and** the Flutter the
   animation *is* a slop signal.
 
 ## What this skill does NOT do
-- No frame→widget translation (that is `figma-to-flutter`).
+- No widget implementation itself — this skill produces the design-language plan and
+  tokens; building the actual screens/widgets from them is normal Flutter work.
 - No blind generation — the plan + critique happen **before** the first pixel.

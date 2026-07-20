@@ -67,9 +67,9 @@ Inability to capture is **never a BLOCKER** — it is a project-infrastructure g
 
 Compare the captured (or code-read) state against the strongest expectation available, in this order:
 
-1. **Declared visual expectations in the issue** — a `## Visual expectations` / `## Design reference` section, a referenced Figma node-id, or visual bullets in the acceptance criteria. This is the contract.
+1. **Declared visual expectations in the issue** — a `## Visual expectations` / `## Design reference` section, a referenced design-tool node-id/URL, or visual bullets in the acceptance criteria. This is the contract.
 2. **Peer components already in the codebase** — the sibling card/row/screen of the same kind (Step 0). Established precedent is a binding expectation: a new component must match the visual language its siblings already set.
-3. **Referenced design assets** in the feature dir — mockups, a Figma export, design tokens named in the issue.
+3. **Referenced design assets** in the feature dir — mockups, a design-tool export, design tokens named in the issue.
 4. **Project design language** — design tokens / spacing scale / typography in `CLAUDE.md` or a design-language doc; the `flutter-design-language` anti-slop principles if present.
 
 If the issue is a frontend change but declares **no** visual expectation, has **no** comparable sibling, and the project has no design language, limit yourself to objective defects (overflow, clipped text, invisible/contrast-broken elements, obviously broken layout) — everything else is a SUGGESTION.
@@ -79,7 +79,7 @@ If the issue is a frontend change but declares **no** visual expectation, has **
 The reviewer's rule holds: **style is never a blocker; an unmet declared criterion is.** Apply it to pixels:
 
 **BLOCKER** (visual)
-- A **declared** visual expectation (issue / Figma / design tokens) is not met — wrong spacing scale, wrong token colour, component state missing, layout differs from the referenced design.
+- A **declared** visual expectation (issue / design reference / design tokens) is not met — wrong spacing scale, wrong token colour, component state missing, layout differs from the referenced design.
 - A **divergence from an established sibling** of the same kind without a documented reason — the new card's headline style differs from its peers, breaking the codebase's own precedent.
 - An **objective rendering defect** regardless of any spec: overflow / clipped or truncated text, element off-screen or zero-size, unreadable contrast, a control that does not render.
 - A golden test fails on the changed surface.

@@ -21,7 +21,7 @@ This is the core capability, run it every time something visual gets built, stud
 
 Before building any single artifact — prototype, slide deck, landing page, animation — establish one saved brand source: colors, fonts, logo, tokens. This is the single biggest lever against generic AI-slop output; every artifact generated afterward inherits it and looks like it came from one real company instead of a pile of disconnected AI tools. Skipping this step is the most common mistake. It takes minutes and pays for the rest of the session.
 
-This mirrors the token-first discipline already enforced by `flutter-design-language` and `figma-project-discipline` — same principle, applied here to both the Claude Design studio and direct code builds.
+This mirrors the token-first discipline already enforced by `flutter-design-language` — same principle, applied here to both the Claude Design studio and direct code builds.
 
 ## Two modes of operation
 
@@ -55,8 +55,7 @@ This skill owns the anti-generic execution loop, code patterns, and asset genera
 | Illustrations, icons, symbols, hero imagery — generated directly via the fal.ai MCP | [assets.md](assets.md) (this skill) |
 | Durable modern web-design principles + web→app adaptation | [modern-design.md](modern-design.md) (this skill) |
 | Deeper taste work for a demanding brief / full design system | `frontend-design`, `design-taste-frontend`, `impeccable` |
-| Flutter design language + tokens | `flutter-design-language` → `figma-to-flutter` |
-| Figma file structure / discipline | `figma-project-discipline`, `figma-*` |
+| Flutter design language + tokens | `flutter-design-language` |
 | Charts / animated data visualization | `dataviz` |
 | Deploying the finished site | `netcup-deploy` |
 | End-to-end premium web build | `~/.claude/infrastructure/premium-web-loop.md` |
@@ -67,4 +66,4 @@ The Claude Design studio UI changes frequently — buttons and layout have shift
 
 ## Handoff to Claude Code
 
-When a studio artifact is ready, "Send to Claude Code" hands over a build prompt. Don't just prompt it blindly — use a real AI-engineering approach (`ratchet-up`, `to-roadmap`, or `figma-to-flutter` depending on the target stack) so the build stays controlled as the project grows.
+When a studio artifact is ready, "Send to Claude Code" hands over a build prompt. Don't just prompt it blindly — use a real AI-engineering approach (`ratchet-up` or `to-roadmap`, depending on the target stack) so the build stays controlled as the project grows.

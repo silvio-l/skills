@@ -35,4 +35,4 @@ The temptation with a web design is to ship it unchanged into a mobile app shell
 
 The two constants that should **not** change between web and app are the brand tokens and the underlying design-system source — colors, type family, logo. What should change is everything about how those tokens get expressed for a touch-first, single-hand, battery-constrained context. When targeting native platform conventions (Apple HIG / iOS 26 Liquid Glass, Material), adapt to the platform's own material and motion language rather than porting a web aesthetic verbatim.
 
-For Flutter work specifically, this adaptation is exactly what `flutter-design-language` enforces as a mandatory phase-0 gate before any token or `ThemeData` gets written, feeding into `figma-to-flutter` for the actual translation. For web-native work, `frontend-design` and `impeccable` own the equivalent judgment calls.
+For Flutter work specifically, this adaptation is exactly what `flutter-design-language` enforces as a mandatory phase-0 gate before any token or `ThemeData` gets written. For web-native work, `frontend-design` and `impeccable` own the equivalent judgment calls.

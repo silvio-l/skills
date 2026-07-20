@@ -2,7 +2,7 @@
 
 Knowing that "design system first" matters is not the same as being able to produce something that doesn't look like every other AI-generated site or app. This doc is the operational layer: the specific tells that give away generic AI output, a mandatory direction-first gate, a library of named aesthetic directions with concrete recipes, a checklist to critique against, and — the actual differentiator — a visual self-verify loop. Without that loop, an agent building a UI is working blind: it never sees what it produced, so it can't catch that the output is the same purple-gradient, four-card-grid median everyone else gets.
 
-This doc is deliberately self-contained — usable without any other skill installed — but composes with `impeccable` and `frontend-design` for deeper taste work, and aligns with (does not duplicate) the phase-0 gate in `flutter-design-language`, which owns the equivalent discipline for the Flutter/Figma pipeline specifically.
+This doc is deliberately self-contained — usable without any other skill installed — but composes with `impeccable` and `frontend-design` for deeper taste work, and aligns with (does not duplicate) the phase-0 gate in `flutter-design-language`, which owns the equivalent discipline for the Flutter pipeline specifically.
 
 ## The generic tells (what gives away AI-built design)
 

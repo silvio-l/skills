@@ -77,7 +77,7 @@ Load the file you need right now. SKILL.md is the always-on layer — keep it ti
    - `pubspec.yaml` → Flutter? Material/Cupertino, platform targets.
    - `README.md` → app description/purpose.
    - optional `<folder>/manifest.yaml` → screen→expectation mapping (screen
-     name, purpose, Figma node/mockup reference). Not required.
+     name, purpose, mockup reference). Not required.
 3. **Distil the briefing:** target audience · app purpose · platform · design
    system · declared tokens/expectations. Per field: value **or** `UNKNOWN`.
 4. **Feedback loop (mandatory):** show the briefing compactly, flag every

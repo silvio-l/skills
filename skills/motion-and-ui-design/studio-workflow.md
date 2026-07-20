@@ -9,7 +9,7 @@ A design system is the saved brand: logo, color accents and shade ramps, semanti
 Ways to seed it:
 - **Briefing questionnaire** — describe the company/product, audience, and problem it solves. The studio asks targeted follow-ups (design direction, e.g. "clean, analytical, data-forward"; copy language; what surfaces to cover — web app, marketing site, component depth).
 - **Upload reference assets** — an existing logo, fonts, or a reference branding image scraped from a design inspiration site. If you upload a reference that visually belongs to another brand, say so explicitly and ask for a fresh identity inspired by it rather than a copy — the studio will otherwise flag the ambiguity itself.
-- **Connect real code** — a GitHub repo, an uploaded codebase, or a Figma file. The studio extracts existing styles and tokens from it instead of guessing.
+- **Connect real code** — a GitHub repo or an uploaded codebase. The studio extracts existing styles and tokens from it instead of guessing.
 
 The result is fully editable afterward — per-component feedback, or reopen any piece (like the sample report mockup) in its own edit view.
 
@@ -58,5 +58,5 @@ See the handoff note in `SKILL.md` before sending anything to Claude Code — do
 
 - **Real image assets.** The studio can pull from an image-generation connector (MCP) if one is configured. Prefer this repo's own tooling — `openai-image` or fal.ai (`~/.config/fal/.env`) — over ad hoc third-party connectors, for the same reasons documented in the global stack-default rules (credential hygiene, avoiding another SaaS dependency).
 - **Canva.** Send-to-Canva is a one-click handoff for further polish; the two tools are complementary.
-- **Figma / GitHub import.** Either can seed a design system directly from real code or an existing Figma file, instead of starting from a text briefing.
+- **GitHub import.** Seed a design system directly from real code instead of starting from a text briefing.
 - **Hosting the finished site.** Once a landing page or prototype is ready to go live, use `netcup-deploy` for this setup's actual hosting target — not a third-party host you don't otherwise use.

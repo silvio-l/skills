@@ -61,56 +61,57 @@ Per W3C DTCG / Figma best practice (survives rebrands):
 - **component** — component-specific: `button.bg = sys.color.brand`.
 
 Never name by appearance (`color.purple`) — always by role (`sys.color.brand`).
-`design_tokens_builder` turns `sys.*` tokens natively into `ColorScheme`/`TextTheme`;
-Light/Dark via set suffixes. (Our MCP-native variant: Figma Variables two-tier —
-one *primitive* collection + one *semantic* collection aliased onto it.)
+Apply `sys.*` tokens directly to `ColorScheme`/`TextTheme` in code; Light/Dark via
+parallel token sets (`primitives_light.dart`/`primitives_dark.dart`, or a single file
+with light/dark variants per token).
 
-## Figma Side
+## Direct-to-Code Tokens (no external design file)
 
-- Two variable collections: **Primitive** (raw values) + **Semantic** (roles, aliased
-  to Primitive). This keeps a rebrand a one-place edit.
-- **Text Styles** for typographic roles (Display/Body/Utility) rather than ad-hoc
-  sizes — this makes the later `figma-to-flutter` typography mapping exact rather than
-  approximate.
-- Components with character: the signature element as a real component.
+Design tokens are defined **directly in code** — a Dart tokens/theme file — not in an
+external design tool synced afterward. The three-tier structure from the previous
+section (primitive → semantic/`sys.*` → component) stays the same; only the medium
+changes:
 
-## Building premium UI in Figma via `use_figma` (hard-won)
+- **Primitive tier:** raw values as `Color`/`double` constants in a single
+  `AppPrimitives`-style class/file.
+- **Semantic tier:** role-named constants/getters (`sys.color.brand`,
+  `sys.color.surface`, `sys.color.danger`) that alias into the primitives — feed these
+  straight into `ColorScheme.light()/dark().copyWith(...)` or `flex_seed_scheme`'s
+  `SeedColorScheme.fromSeeds`.
+- **Component tier:** component-specific values (`button.bg = sys.color.brand`) as
+  `ThemeExtension`s (`AppRadius`, `AppElevation`, brand accents) or widget-level
+  constants referencing the semantic tier.
+- Text roles (Display/Body/Utility) become `TextTheme` entries / `TextStyle` constants
+  instead of Figma Text Styles — map the font pairing from the Typography section above
+  straight into `google_fonts` or bundled asset fonts.
 
-These are *execution* learnings for when you actually build the design in Figma (the
-official `figma-use` skill covers the raw API; this is what we keep ourselves so it
-survives plugin updates).
+## Reference & Inspiration Gathering
 
-- **Container fills default to opaque white — the #1 trap.** Every `createFrame()` /
-  `createAutoLayout()` starts with a white fill. A layout-only container (row, column,
-  text block, spacer, icon-row wrapper) **must** get `fills = []`, or it paints a stray
-  white box and makes light/white text on coloured/photo backgrounds invisible. The bug
-  *compounds* (greeting column + header row + text block inside a coloured hero each add
-  one). Audit every container before finishing: real surface (card, nav, pill, badge,
-  avatar) → keep fill; pure layout → clear it. Verify with a **2× export against a
-  non-white background**, where stray boxes are obvious.
-- **Vector over stock photos.** Default to `figma.createNodeFromSvg(svg)` for icons,
-  illustrations, and the mascot — scalable, on-brand, no licensing/management. Hand-bake
-  the colour into the SVG string per context. (Stock photos read generic and the user
-  generally does **not** want them.) `figma.createImageAsync(url)` is **not supported**
-  in `use_figma`; if raster is genuinely needed, use the `upload_assets` MCP tool
-  (request upload URLs → `curl -F file=@…` POST the bytes; with `nodeId` it sets the
-  image as a fill on an existing node).
+Instead of building mockups in an external design tool first, collect reference and
+inspiration directly:
+
+- **Mobbin MCP** (`search_flows` / `search_screens` / `search_sections`) — real
+  shipped-app screens and flows to ground a signature decision or a layout pattern in
+  something that actually exists, not just training-data instinct.
+- **Targeted web search** for the subject's domain (materials, rituals, vocabulary) to
+  anchor the palette/type/signature decisions from Steps 1–2 above.
+- **Vector over stock photos** still applies without a design tool: hand-author or
+  source SVGs (icons, illustrations, a mascot) as project assets consumed via
+  `flutter_svg`, colouring them per-context in code rather than baking one export.
+  (Stock photos read generic and the user generally does **not** want them.)
 - **Personality via a mascot is the strongest "this is *my* app" signature.** Pattern
   from the HellerIO project (`hellerio/assets/images/Helo.svg`): a rounded blob character
   with kawaii eyes + a soft gradient + a small accessory, shipped as a clean **SVG** and
   later animated in **Rive** (idle / hint / wave states). Make the character harmonize
   with the product **name**. A clean flat-but-warm design without a distinctive
   centerpiece reads "safe/boring"; a mascot or a bold signature visual is what delivers
-  the wow.
-- **Tokens first, always.** Build Primitive + Semantic variable collections + Text Styles
-  before screens; bind fills/text with `setBoundVariableForPaint` (returns a **new**
-  paint — capture and reassign). Set `variable.scopes` explicitly.
-- **Review at 2×.** `get_screenshot` renders at 1× native (no upscale); use
-  `download_assets` with `defaultScale: 2` to actually judge padding, edges, and
-  alignment.
+  the wow — it now ships straight as an SVG asset + Flutter widget, no intermediate
+  design file.
 - **Spacing rhythm = premium.** 8pt grid, generous padding (20–24 screen, 14–16 cards),
   deliberately *varied* radii (not a uniform 16 everywhere), soft shadows for depth.
-  Flat single-colour blocks read cheap; depth + one bold signature read premium.
+  Flat single-colour blocks read cheap; depth + one bold signature read premium. Judge
+  this by running the app / taking a simulator or device screenshot, not by reviewing an
+  external mockup.
 
 ## Brief Template (Phase 0, Step 2)
 
