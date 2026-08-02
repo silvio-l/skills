@@ -1,6 +1,6 @@
 # Skills
 
-My personal Claude Code skills. A small, deliberately narrow set — everything that duplicated conventions, vocabulary, or process already covered by [`mattpocock/skills`](https://github.com/mattpocock/skills) (engineering process) or [`Code-with-Beto/skills`](https://github.com/Code-with-Beto/skills) (React Native/Expo scaffolding) has been retired in favour of installing those upstream repos directly. What is left here does not overlap with either.
+My personal Claude Code skills: a small, deliberately narrow set.
 
 ## Quickstart
 
@@ -8,7 +8,7 @@ My personal Claude Code skills. A small, deliberately narrow set — everything 
 npx skills@latest add silvio-l/skills
 ```
 
-Pick the skills you want and the agents you want to install to. The installer is the generic [`skills` CLI by Vercel Labs](https://github.com/vercel-labs/skills) — the same one Matt Pocock uses.
+Pick the skills you want and the agents you want to install to. The installer is the generic [`skills` CLI by Vercel Labs](https://github.com/vercel-labs/skills).
 
 ## Updating
 
@@ -20,7 +20,7 @@ npx skills@latest update -g                 # all global skills, no prompts
 npx skills@latest update -g apple-notes     # one specific skill
 ```
 
-The CLI tracks where each installed skill came from and pulls only what changed — across this repo, Matt's, and any others you have installed.
+The CLI tracks where each installed skill came from and pulls only what changed.
 
 ## The skills
 
@@ -61,10 +61,6 @@ Standard in natural requirement order) and ships as a self-contained, badge-
 colored HTML report with a one-click "copy an AI-agent fix prompt" button per
 finding (or all of them at once) alongside the Markdown report and a prioritized
 fix-plan.
-
-## Credit
-
-These skills exist because [Matt Pocock](https://github.com/mattpocock) made his own [`mattpocock/skills`](https://github.com/mattpocock/skills) public and showed what a working skill ecosystem looks like. The structural choices here — directory layout, frontmatter conventions, the `npx skills@latest add` install path, the failure-mode/fix narrative pattern in this README — are his. If you find any of this useful, point upstream first.
 
 ## License
 

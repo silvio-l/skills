@@ -30,7 +30,3 @@ Do not use these when you mean a skill:
 - ~~"Command"~~ — slash commands are one way to *invoke* a skill, not what the skill *is*. A skill exists even when no slash binding is configured.
 - ~~"Agent"~~ — agents *use* skills. The skill is the contract; the agent is the consumer.
 - ~~"Plugin"~~ — plugins are a Claude Code marketplace mechanism. A skill can be packaged inside a plugin, but a skill is not a plugin.
-
-## Relationship to Matt Pocock's `CONTEXT.md`
-
-Matt's `CONTEXT.md` documents the vocabulary of skill *design philosophy* — failure modes, fix patterns, "shared language" as a concept. This `CONTEXT.md` documents the vocabulary of skill *authoring mechanics* — file layout, frontmatter, discovery, roundtrip. The two are complementary, not overlapping.
