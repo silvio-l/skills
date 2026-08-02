@@ -18,7 +18,7 @@ edit here → commit on dev → push dev → merge dev into main (ff-only) → p
    - `git switch main && git merge --ff-only dev && git push origin main && git switch dev` — fast-forward `main` to match `dev` and publish it. `--ff-only` creates no merge commit; this ff-merge of `dev` into `main` is the only merge this repo ever does.
 5. **Then** refresh the global installation with **`update`**, not `add`:
    - `npx skills@latest update -g -y` — refresh all global skills (auto-detects the source repo per skill, pulls only what changed).
-   - `npx skills@latest update <skill-name> -g -y` — refresh a single skill, e.g. `update humanize-text -g -y`.
+   - `npx skills@latest update <skill-name> -g -y` — refresh a single skill, e.g. `update apple-notes -g -y`.
 
    Run this only **after step 4** (both branches pushed, `main` current) — otherwise `update` pulls a stale `main` and the edit silently does not land.
 
@@ -42,23 +42,7 @@ edit here → commit on dev → push dev → merge dev into main (ff-only) → p
 │   │   └── scripts/
 │   │       ├── apple-notes        ← dispatcher (AppleScript wrapper)
 │   │       └── _helper.py         ← HTML→text + base64 extraction
-│   ├── context-optimization-audit/
-│   │   ├── SKILL.md
-│   │   └── REFERENCE.md
-│   ├── domain-glossary/
-│   │   └── SKILL.md
-│   ├── full-quality-scan/
-│   │   ├── SKILL.md
-│   │   └── scripts/scan-all.sh
-│   └── ratchet-up/
-│       ├── SKILL.md
-│       ├── algorithm.md
-│       ├── formats.md
-│       ├── gates.md
-│       ├── planner.md
-│       ├── reviewer.md
-│       ├── worker.md
-│       └── scripts/check-evidence.sh
+│   └── owasp-bsi-audit/
 └── tests/                 ← NOT shipped by the skills CLI
     └── apple-notes/test_helper.py
 ```
@@ -91,8 +75,8 @@ For guidance on what makes a good skill (description shape, trigger phrases, sup
 
 - `name` — required. Lowercase, hyphens only. MUST match the directory name.
 - `description` — required. One paragraph, **≤ 250 characters. This is a hard cap — never exceed it.** The description *is* the auto-invoke router: it must carry the core trigger phrases ("Use when …") and nothing more. Push every detail (modes, flags, tool lists, examples) into the body. Don't overcorrect into terseness either — too short and the model can't tell when to load the skill; aim for ~200–250 chars with the essential triggers intact. Count characters before committing (`python3 -c 'print(len(open("…").read()))'` on the extracted value, or just eyeball against an existing in-cap skill).
-- `metadata.*` — optional. Used for extra hints (e.g. `metadata.argument-hint` in `ratchet-up`).
-- `disable-model-invocation: true` — optional. Makes the skill **user-invoked only** (a procedure) and removes its `description` from the model's auto-invoke context entirely, so it costs zero ambient tokens. Set it on skills you always trigger deliberately by slash command and would never want the model to auto-load — e.g. heavyweight, stateful, or argument-driven controllers (`ratchet-up`, `ship-to-appstore`, `ship-to-playstore`). **Do NOT set it** on skills whose value is auto-discovery via natural-language triggers (`humanize-text`, `motion-and-ui-design`, `openai-image`, `full-quality-scan`, `seo-audit`, `to-roadmap`) — disabling those defeats carve-out #1 in "Authoring language". The test: *would the model ever usefully load this without the user typing the slash command?* If no → disable.
+- `metadata.*` — optional. Used for extra hints.
+- `disable-model-invocation: true` — optional. Makes the skill **user-invoked only** (a procedure) and removes its `description` from the model's auto-invoke context entirely, so it costs zero ambient tokens. Set it on skills you always trigger deliberately by slash command and would never want the model to auto-load — e.g. heavyweight, stateful, or argument-driven controllers. **Do NOT set it** on skills whose value is auto-discovery via natural-language triggers — disabling those defeats carve-out #1 in "Authoring language". The test: *would the model ever usefully load this without the user typing the slash command?* If no → disable.
 
 Frontmatter is currently checked by hand. If the skill count grows, add a small lint script and a CI job.
 
@@ -101,19 +85,19 @@ Frontmatter is currently checked by hand. If the skill count grows, add a small 
 Every model-invoked skill pre-loads its `description` into the system prompt at startup ([Anthropic — Agent Skills](https://www.anthropic.com/engineering/equipping-agents-for-the-real-world-with-agent-skills)); a large always-on skill set is real context cost and degrades routing ("context rot"). Two ongoing practices keep the harness lean:
 
 1. **Invocation-type discipline** — classify every new skill as a *procedure* (user-invoked; prefer `disable-model-invocation: true`) or an *ability* (model-invoked; description stays in context). Default to procedure unless auto-discovery is the point. See the `disable-model-invocation` rule above.
-2. **Periodic blank-slate audit** — run `context-optimization-audit` **in a fresh session** (not at the tail of a long one — a polluted context mismeasures the baseline) to catch description leak, redundant globally-installed skill clusters, and stale instructions. Prefer project-scoped installs over global (`-g`) for skills only relevant to one project type.
+2. **Periodic blank-slate audit** — periodically review the loaded skill/agent/MCP surface **in a fresh session** (not at the tail of a long one — a polluted context mismeasures the baseline) to catch description leak, redundant globally-installed skill clusters, and stale instructions. Prefer project-scoped installs over global (`-g`) for skills only relevant to one project type.
 
 ## Authoring language (HARD RULE)
 
-**Skill documentation is written in English.** This is non-negotiable and applies to every new skill and every edit: `SKILL.md` (including the `description` prose), every supporting/phase/reference `.md` file, code comments inside scripts, and the skill's `README.md` block. The repo's baseline is English (this file, `README.md`, `ratchet-up`, `formats.md`); a German skill body is a defect to fix, not a style choice. Rationale: a skill must be readable by any agent or maintainer that picks it up, and mixed-language bodies fracture that.
+**Skill documentation is written in English.** This is non-negotiable and applies to every new skill and every edit: `SKILL.md` (including the `description` prose), every supporting/phase/reference `.md` file, code comments inside scripts, and the skill's `README.md` block. The repo's baseline is English (this file, `README.md`); a German skill body is a defect to fix, not a style choice. Rationale: a skill must be readable by any agent or maintainer that picks it up, and mixed-language bodies fracture that.
 
 The user prompts in German and the *running* agent still talks to the user in German (per the global `~/.claude/CLAUDE.md` language rule) — that is conversation, not skill source, and is unaffected by this rule.
 
 Three deliberate carve-outs stay non-English (everything else is English):
 
-1. **Trigger phrases in the `description`.** German trigger phrases may — and should — be kept alongside the English ones, because the `description` is the auto-invoke router and the user phrases requests in German (e.g. `'Screens prüfen'`, `'Motion Graphics erstellen'`, `'sieht generisch / nach KI aus'`). The descriptive prose around them is still English.
-2. **Functional language data.** Content that *is* the skill's payload rather than its documentation stays in its native language — e.g. `humanize-text`'s German slop lexica, `seo-audit`'s German brand anti-vocabulary. These are data, not prose.
-3. **Deliberate German artifact/output mandates.** Where German is the skill's stated intent for what it *produces*, the mandate stays (phrased in English). Example: `domain-glossary` mandates that the `CONTEXT.md` artifact is authored in German because the project domain is German — the instruction is English, the mandated artifact language is German on purpose.
+1. **Trigger phrases in the `description`.** German trigger phrases may — and should — be kept alongside the English ones, because the `description` is the auto-invoke router and the user phrases requests in German (e.g. `'Notiz anlegen'`, `'BSI-Audit durchführen'`). The descriptive prose around them is still English.
+2. **Functional language data.** Content that *is* the skill's payload rather than its documentation stays in its native language. These are data, not prose.
+3. **Deliberate German artifact/output mandates.** Where German is the skill's stated intent for what it *produces*, the mandate stays (phrased in English) — e.g. a skill that mandates a German-language output artifact because the target domain is German. The instruction is English, the mandated artifact language is German on purpose.
 
 When in doubt, ask: is this string *documentation* (→ English) or *payload/trigger/output* (→ may stay German)?
 
@@ -125,10 +109,7 @@ There is no CI and no global test runner. Verification is still the roundtrip: p
 
 - `skills/apple-notes/scripts/_helper.py` — regex-driven HTML stripping and base64 extraction. A missed edge case produces text the agent will happily use without noticing the loss. Tests live at `tests/apple-notes/test_helper.py`.
 
-Tests are deliberately **not** added for:
-
-- `skills/ratchet-up/scripts/check-evidence.sh` — a bug surfaces as a wrong exit code, which the orchestrator routes on immediately. Loud failure.
-- `skills/full-quality-scan/scripts/scan-all.sh` — wraps external tools (flutter, cppcheck, eslint, semgrep, osv-scanner). Tests would freeze their output formats and rot with every upstream update. The output is also loudly wrong if the parser breaks.
+Tests are deliberately **not** added for `owasp-bsi-audit`'s scripts (`build_catalog.py`, `render_report.py`) — they wrap upstream catalog sources (ASVS, MASVS, BSI Kompendium) and a report renderer; a bug surfaces as an obviously malformed report or a fetch failure, not silent plausible-but-wrong output.
 
 ### Conventions
 
@@ -155,4 +136,4 @@ Five canonical status strings (`needs-triage`, `needs-info`, `ready-for-agent`, 
 
 ### Domain docs
 
-Single-context. `CONTEXT.md` at the root documents the *skill-authoring* vocabulary (not an application domain). `docs/adr/` does not yet exist; created lazily by `/grill-with-docs`. See [`docs/agents/domain.md`](./docs/agents/domain.md).
+Single-context. `CONTEXT.md` at the root documents the *skill-authoring* vocabulary (not an application domain). `docs/adr/` holds ADRs created by `/grill-with-docs`. See [`docs/agents/domain.md`](./docs/agents/domain.md).

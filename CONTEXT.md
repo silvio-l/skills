@@ -15,13 +15,12 @@ Canonical terms used in this repo. Use them consistently; do not invent synonyms
 ## Authoring terms
 
 - **Deep skill** vs. **shallow skill** — A deep skill encapsulates a non-obvious procedure behind a stable trigger phrase and a stable behaviour contract. A shallow skill is a one-line shortcut for a thing the agent could already do. Prefer deep.
-- **Supporting file** — Any file inside a skill directory other than `SKILL.md`. Common examples: `REFERENCE.md` (lookup data), `scripts/` (helper shell), additional `.md` per phase (e.g. `ratchet-up/algorithm.md`). Bundled as-is by the CLI.
-- **Phase document** — A supporting `.md` that captures one phase of a multi-phase skill (e.g. `ratchet-up/planner.md`, `worker.md`, `reviewer.md`). Used when a skill orchestrates subagents that need their own self-contained instructions.
+- **Supporting file** — Any file inside a skill directory other than `SKILL.md`. Common examples: `REFERENCE.md` (lookup data), `scripts/` (helper shell), additional `.md` per phase (e.g. `owasp-bsi-audit/BSI-METHODIK.md`). Bundled as-is by the CLI.
+- **Phase document** — A supporting `.md` that captures one phase of a multi-phase skill (e.g. `owasp-bsi-audit/ORCHESTRATION.md`, `REPORTING.md`). Used when a skill orchestrates subagents that need their own self-contained instructions.
 
 ## Workflow terms
 
 - **Edit-here-push-roundtrip** — The maintenance loop. See `CLAUDE.md` for the canonical sequence.
-- **Prerequisite skill** — A skill from another repo (typically `mattpocock/skills`) whose output formats one of my skills consumes. Listed explicitly in `README.md` so external installers know to install the upstream first.
 
 ## Anti-vocabulary
 
