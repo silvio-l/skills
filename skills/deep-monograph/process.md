@@ -1,4 +1,4 @@
-# The Fifteen-Phase Pipeline
+# The Sixteen-Phase Pipeline
 
 Work these phases in this logical order. Each phase links to the file that details how to execute it — this file is the backbone, not a duplicate of that detail.
 
@@ -24,7 +24,7 @@ Research broadly first for orientation, then specifically for depth, in cycles �
 
 ## Phase 6 — Structure the evidence
 
-Assign important claims to their supporting sources. Separate facts, manufacturer claims, experience values, interpretations, and recommendations into distinct statement types. See `research-and-sources.md` §Evidence matrix and §Statement types.
+Assign important claims to their supporting sources. Separate verified findings, manufacturer claims, experience values, plausible inferences, and editorial recommendations into distinct statement types. See `research-and-sources.md` §Evidence matrix and §Statement types.
 
 ## Phase 7 — Build the mental overall model
 
@@ -33,6 +33,8 @@ Build a technically contradiction-free overall model of the topic. Check explici
 ## Phase 8 — Design the dramaturgy and outline
 
 Develop a chapter structure that fits this specific topic, with a recognizable throughline — not a generic template applied unchanged to every subject. See `didactics-and-writing.md` §Adaptive outline and §Chapter architecture.
+
+**In agentic workspace mode**, this phase ends with a second hard gate: present the outline and wait for explicit user approval before Phase 9 begins — a wrong structural cut here wastes the entire draft. See `clarification.md` §Step 4 for how this gate relates to the initial confirm-and-wait gate. Single-response mode has no equivalent pause; finalize the outline internally and continue straight to Phase 9.
 
 ## Phase 9 — Write
 
@@ -46,18 +48,22 @@ Check numbers, units, quotes, currency, contradictions, and source attribution. 
 
 Check technical correctness, completeness, prerequisites, dependencies, and failure cases. See `quality-and-output.md` §Technical review.
 
-## Phase 12 — Didactic review
+## Phase 12 — Critical counter-check
+
+Actively hunt for weaknesses instead of confirming the work: hidden assumptions, counterexamples, overlooked disadvantages, one-sided source selection, marketing language passed off as fact, overgeneralizations, false certainty, and correlation presented as causation. See `quality-and-output.md` §Critical counter-check.
+
+## Phase 13 — Didactic review
 
 Check, separately for an interested beginner and an advanced home user, whether the reader can actually build a coherent overall picture from what was written. See `quality-and-output.md` §Didactic review, and the per-chapter comprehension check in `didactics-and-writing.md` §Explanatory contract.
 
-## Phase 13 — Practice review
+## Phase 14 — Practice review
 
 Check transferability to realistic private conditions — budget, time, maintenance, safety. See `quality-and-output.md` §Practice review.
 
-## Phase 14 — Final editing
+## Phase 15 — Final editing
 
 Improve dramaturgy, transitions, comprehensibility, precision, and language flow. Remove repetition and filler. Run at most three full revision cycles, each fixing concrete deficiencies — don't repeat a full pass with no expected new yield. See `quality-and-output.md` §Final editing.
 
-## Phase 15 — Produce the final artifact
+## Phase 16 — Produce the final artifact
 
 Assemble the complete work plus whatever additional materials the chosen mode calls for. See `quality-and-output.md` §Output format for the single-response vs. workspace-mode deliverable shapes.

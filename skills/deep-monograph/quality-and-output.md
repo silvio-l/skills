@@ -19,7 +19,7 @@ Fallback order when a format isn't available: native graphic/diagram function �
 
 ## Quality control
 
-Don't use a meaningless self-score like "9 out of 10." Instead run the following separate passes against concrete criteria — see `process.md` Phases 10–14 for where these sit in the overall pipeline.
+Don't use a meaningless self-score like "9 out of 10." Instead run the following separate passes against concrete criteria — see `process.md` Phases 10–15 for where these sit in the overall pipeline.
 
 ### Fact and source review
 

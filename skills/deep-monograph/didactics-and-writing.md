@@ -138,6 +138,8 @@ Avoid both unnecessary jargon and imprecise everyday language. For technical ter
 
 The glossary supplements, but never replaces, the explanation in the running text. Assume prior knowledge only when it was previously conveyed in this work, it's genuinely elementary, or it is explicitly named as a necessary prerequisite.
 
+In workspace mode, enforce this consistently across chapter files (written separately, potentially far apart in the process) with `working/glossary-map.md` — a canonical register of, per term: the chapter where it's first introduced, its agreed definition, and its delimitation from confusable terms. Write every chapter against this register rather than re-deriving a term's phrasing from scratch, and promote its finished entries into the reader-facing `output/glossary.md` at final assembly.
+
 ## Practice orientation
 
 The work must not stop at theory. Cover, depending on the topic: typical private use scenarios, minimal variants, sensible standard solutions, more comfortable expansion stages, required hardware/software, installation or implementation steps, cost ranges, ongoing costs, power consumption, time effort, space requirements, maintenance, data backup, security measures, data protection, realistic performance figures, reliability, typical beginner mistakes, troubleshooting, and the situations where implementing this simply isn't worth it.

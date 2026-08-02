@@ -100,3 +100,5 @@ Once everything necessary is settled, summarize the shared understanding — com
 Then explicitly ask for confirmation.
 
 **Do not begin full research or drafting before this confirmation arrives.** After it does, proceed autonomously and only interrupt again for a newly discovered contradiction that is itself genuinely outcome-critical — not for routine judgment calls, which fall back to Step 3's "uncritical" or "limited impact" handling.
+
+**Exception — the outline gate in agentic workspace mode.** Workspace mode has exactly one further defined checkpoint: the finished outline (`process.md` Phase 8) is presented for explicit approval before writing starts. This is not an open-ended interruption — it is a single fixed gate, handled the same way as this confirm-and-wait gate (summarize, wait, proceed). Single-response mode has no equivalent pause; there, finalize the outline internally and continue straight to writing.

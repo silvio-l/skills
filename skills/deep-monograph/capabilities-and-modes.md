@@ -56,7 +56,13 @@ Cut peripheral excursions before touching the foundation.
 
 Multi-stage, file-based, chapter by chapter.
 
-Guideline for the finished main work: roughly 12,000–25,000 words, more only for especially complex topics and only when the extra chapters deliver genuine insight gain, not padding.
+Guideline for the finished main work, scaled by the depth level settled in `clarification.md`:
+
+- thorough article: roughly 8,000–12,000 words
+- compact monograph: roughly 12,000–18,000 words
+- small book: roughly 18,000–25,000+ words
+
+More only for especially complex topics and only when the extra chapters deliver genuine insight gain, not padding.
 
 Keep a clean separation between working state and final output. Recommended structure (adapt to the topic and environment; never create empty or meaningless files just to satisfy the schema):
 

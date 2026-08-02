@@ -57,7 +57,7 @@ Maintain, for all essential factual claims, an evidence matrix with at least the
 | Field | Meaning |
 |---|---|
 | Claim | the concrete statement being checked |
-| Statement type | fact, measured value, manufacturer claim, experience, interpretation, or recommendation |
+| Statement type | verified finding, manufacturer claim, experience value, plausible inference, editorial recommendation, or open question — see §Statement types |
 | Source | the supporting source |
 | Source class | primary source, official documentation, independent secondary source, or experience report |
 | Publication date | temporal placement |
@@ -98,6 +98,10 @@ Don't end research just because a fixed source count was hit. Research counts as
 Combine this with a hard technical safety limit to prevent endless loops. Guideline: normally three thorough research cycles (broad orientation → technical depth → targeted gap-closing and contradiction resolution — see `process.md` Phase 5); further cycles only for genuinely central gaps; never more full cycles than the time/cost/runtime budget can responsibly support.
 
 If a technical limit is reached before saturation, document explicitly: remaining knowledge gaps, weakly supported claims, unresolved contradictions, and sensible starting points for future research. Never fake complete clarification.
+
+## Partial research failure
+
+A single failed lookup is not a license to invent. When a specific research step for a central claim returns nothing useful — no results, only marketing copy, or mutually contradictory noise — try one alternative angle or query formulation. If that also fails to produce a fitting source, classify the claim as an **open question**, note the attempted angles in the evidence matrix (or, in workspace mode, in `working/open-questions.md`), and move on. Never let one dead-end search quietly turn into a plausible-sounding but unsourced statement.
 
 ## Currency and timeliness
 
