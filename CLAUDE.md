@@ -42,6 +42,14 @@ edit here → commit on dev → push dev → merge dev into main (ff-only) → p
 │   │   └── scripts/
 │   │       ├── apple-notes        ← dispatcher (AppleScript wrapper)
 │   │       └── _helper.py         ← HTML→text + base64 extraction
+│   ├── deep-monograph/
+│   │   ├── SKILL.md
+│   │   ├── clarification.md
+│   │   ├── capabilities-and-modes.md
+│   │   ├── process.md
+│   │   ├── research-and-sources.md
+│   │   ├── didactics-and-writing.md
+│   │   └── quality-and-output.md
 │   └── owasp-bsi-audit/
 └── tests/                 ← NOT shipped by the skills CLI
     └── apple-notes/test_helper.py
@@ -95,7 +103,7 @@ Three deliberate carve-outs stay non-English (everything else is English):
 
 1. **Trigger phrases in the `description`.** German trigger phrases may — and should — be kept alongside the English ones, because the `description` is the auto-invoke router and the user phrases requests in German (e.g. `'Notiz anlegen'`, `'BSI-Audit durchführen'`). The descriptive prose around them is still English.
 2. **Functional language data.** Content that *is* the skill's payload rather than its documentation stays in its native language. These are data, not prose.
-3. **Deliberate German artifact/output mandates.** Where German is the skill's stated intent for what it *produces*, the mandate stays (phrased in English) — e.g. a skill that mandates a German-language output artifact because the target domain is German. The instruction is English, the mandated artifact language is German on purpose.
+3. **Deliberate German artifact/output mandates.** Where German is the skill's stated intent for what it *produces*, the mandate stays (phrased in English). Example: `deep-monograph` mandates that the produced monograph defaults to German because the process it implements was authored for a German-speaking home-user audience — the instruction is English, the mandated artifact language is German on purpose (overridable if the user explicitly asks for another language).
 
 When in doubt, ask: is this string *documentation* (→ English) or *payload/trigger/output* (→ may stay German)?
 

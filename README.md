@@ -24,6 +24,12 @@ The CLI tracks where each installed skill came from and pulls only what changed.
 
 ## The skills
 
+### `deep-monograph`
+
+**The Problem.** "Write me a deep article about X" either produces a shallow listicle dressed up in headers, or a wall of text that drowns the reader in disconnected facts — no coherent mental model, no traceable evidence, no idea which claims are verified fact versus manufacturer marketing versus the model's own guess, and no confirmation the assignment was even understood correctly before the agent started typing.
+
+**The Fix.** A clarify → research → write → verify pipeline for book-chapter-depth explanatory work, aimed at private/home-user readers. A hard confirm-and-wait gate extracts everything determinable from context first and asks only genuinely outcome-critical questions before a word gets written. Research runs in cycles against a source hierarchy (laws/standards → primary sources → official docs → independent tests → practice reports → forums, last) with every material claim typed — verified finding, manufacturer claim, experience value, plausible inference, editorial recommendation, or open question — and cross-checked, never faked. Writing follows an explanatory contract (purpose → whole → components → interplay → mechanism → limits → practice, never detail-first) with mandatory per-chapter comprehension checks, then passes six separate quality gates (fact/source, technical, adversarial counter-check, didactic, practice, copy-edit) against explicit acceptance criteria instead of a vague self-score. Auto-selects single-response output (~4k–25k words depending on requested depth) versus an agentic workspace mode with its own checkpoint/resumption files for longer multi-session runs, and is honest throughout about which capabilities (web research, video transcripts, file access) are actually available rather than pretending.
+
 ### `apple-notes`
 
 **The Problem.** Non-technical collaborators write bug reports, ideas, and feedback wherever it is comfortable — for me, that is Apple Notes. The agent cannot reach into Notes; the human cannot reach into the issue tracker. The result is a swamp of half-captured intent that never makes it into a session.
