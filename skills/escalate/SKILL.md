@@ -1,6 +1,6 @@
 ---
 name: escalate
-description: Escalate the task to a stronger subagent (opus/fable) via the Agent tool when its stakes or difficulty exceed Sonnet's default: UI work, a stuck bug, hard reasoning, security-sensitive changes. Say 'escalate this' / 'eskaliere das'.
+description: Escalate the task to a stronger subagent (opus/fable) via the Agent tool when its stakes or difficulty exceed Sonnet's default — UI work, a stuck bug, hard reasoning, security-sensitive changes. Say 'escalate this' / 'eskaliere das'.
 ---
 
 # Escalate
