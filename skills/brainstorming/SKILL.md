@@ -6,11 +6,7 @@ disable-model-invocation: true
 
 # Brainstorming
 
-Run this as a radically divergent idea machine, not a helpful assistant reaching for the nearest reasonable answer. The obvious answers are raw material to invert, collide, and mutate — never the deliverable. Every draw in this session comes from the dispatcher below, which pulls from `deck.json` using real OS entropy: the *process* runs the same seven steps and three gates every time, but the *content* is genuinely random, not a model's idea of randomness (which tends to reach for the same handful of "creative" tropes — fungal networks, ant colonies, quantum whatever — session after session).
-
-```
-D=~/.claude/skills/brainstorming/scripts/draw
-```
+Run this as a radically divergent idea machine, not a helpful assistant reaching for the nearest reasonable answer. The obvious answers are raw material to invert, collide, and mutate — never the deliverable. Every draw in this session comes from `~/.claude/skills/brainstorming/scripts/draw`, which pulls from `deck.json` using real OS entropy: the *process* runs the same seven steps and three gates every time, but the *content* is genuinely random, not a model's idea of randomness (which tends to reach for the same handful of "creative" tropes — fungal networks, ant colonies, quantum whatever — session after session). Each draw is its own shell call — pass the full path every time, never a variable set in an earlier call.
 
 Two kinds of moments in this session: **gates**, where a human judgment call is asked for, one question at a time, with lettered options where choices exist; and everything else, which is agent legwork — generated, not asked about. Collisions, inversions, mutations never become questions.
 
@@ -28,13 +24,13 @@ Privately list the ten most obvious answers to the framing question. These ten e
 
 ## Step 2 — Lenses
 
-Draw: `$D --category lenses --count 12`. For each lens, port its underlying mechanism onto the framing question — not its vocabulary. "Ecology" should yield a concept built on carrying capacity or succession, not a concept that merely uses the word "ecosystem."
+Draw: `~/.claude/skills/brainstorming/scripts/draw --category lenses --count 12`. For each lens, port its underlying mechanism onto the framing question — not its vocabulary. "Ecology" should yield a concept built on carrying capacity or succession, not a concept that merely uses the word "ecosystem."
 
 **Done when:** all 12 lenses have produced one mechanism-based concept each.
 
 ## Step 3 — Collisions
 
-Draw: `$D --category collision_units --collide --count 10`. Each triple looks absurd at first — find the hidden functional principle that makes it a real concept for the framing question before writing the idea down.
+Draw: `~/.claude/skills/brainstorming/scripts/draw --category collision_units --collide --count 10`. Each triple looks absurd at first — find the hidden functional principle that makes it a real concept for the framing question before writing the idea down.
 
 **Done when:** all 10 triples have produced at least one concept each, and each concept states the functional principle it found.
 
@@ -46,7 +42,7 @@ Work through the full Inversions catalog and the full Contradictions catalog in 
 
 ## Step 5 — Radicality ladder
 
-Generate at least one concept for every one of the five tiers in `TECHNIQUES.md` → Radicality Tiers, continuing until Steps 2–5 combined reach at least 40 distinct raw concepts — the 40 is already close to met by Steps 2–4 alone, so this step only counts as done once the tier sweep itself has actually run. Tag each raw concept with the lens, collision triple, inversion, contradiction, or tier it descends from — this tag is what makes Step 7's surprise test checkable later, so it is not optional bookkeeping.
+Generate at least one concept for every one of the five tiers in `TECHNIQUES.md` → Radicality Tiers. Steps 2–4 already clear the 40-concept floor on their own, so this step is done only once all five tiers have actually fired — not by re-counting what Steps 2–4 already produced. Tag each raw concept with the lens, collision triple, inversion, contradiction, or tier it descends from — this tag is what makes Step 7's surprise test checkable later, so it is not optional bookkeeping.
 
 **Done when:** every one of the five tiers has produced at least one concept, and Steps 2–5 combined hold at least 40 distinct tagged raw concepts, no two restating the same core mechanism under different words.
 
