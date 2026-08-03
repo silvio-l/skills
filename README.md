@@ -24,6 +24,12 @@ The CLI tracks where each installed skill came from and pulls only what changed.
 
 ## The skills
 
+### `brainstorming`
+
+**The Problem.** Asking a model to "brainstorm" produces either a listicle of the ten answers anyone would give, or a wall of "wild" ideas that keep circling the same handful of tropes — fungal networks, ant colonies, swarms — because a model's idea of randomness is itself a learned pattern, not actual chance. Either way it's a monologue: the model talks, the human reads, nothing is actually explored together.
+
+**The Fix.** A seven-step, three-gate divergent-ideation interview (`disable-model-invocation: true` — run it by name, it never fires itself) built around one deliberate design choice: every "random" element — twelve domain lenses, ten three-way collisions, an unstuck provocation card — comes from `scripts/draw`, which pulls from a 122-entry `deck.json` using real OS entropy (`--seed` makes any draw exactly reproducible), not the model improvising chaos. The ten obvious answers get gathered first but only as material to invert, collide, and mutate, never as output. A fixed catalog (`TECHNIQUES.md`) of inversion questions, contradiction pairs, radicality tiers, and SCAMPER/TRIZ-flavored mutation operators gets applied in full at each step, building toward at least 40 tagged raw concepts and 20 mutations. Human judgment enters only at two gates — framing the question, and picking which raw ideas survive to mutation and the final ranking — everything else is agent legwork. Every one of the final twelve concepts has to carry its full descent chain (which lenses, collisions, inversions, or operators produced it) and pass a checkable surprise test, so the session can't quietly drift back to generic suggestions.
+
 ### `deep-monograph`
 
 **The Problem.** "Write me a deep article about X" either produces a shallow listicle dressed up in headers, or a wall of text that drowns the reader in disconnected facts — no coherent mental model, no traceable evidence, no idea which claims are verified fact versus manufacturer marketing versus the model's own guess, and no confirmation the assignment was even understood correctly before the agent started typing.

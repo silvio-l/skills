@@ -1,0 +1,78 @@
+#!/usr/bin/env python3
+"""Draw cards from deck.json using real OS entropy, not model-imagined randomness.
+
+Usage:
+  draw --category lenses --count 12
+  draw --category collision_units --collide --count 10
+  draw --category provocations --count 1
+  draw --category lenses --count 12 --seed 20260803   # reproduce a prior draw
+"""
+
+import argparse
+import json
+import sys
+from pathlib import Path
+from random import Random, SystemRandom
+
+DECK_PATH = Path(__file__).resolve().parent.parent / "deck.json"
+
+
+def load_deck():
+    with open(DECK_PATH, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def make_rng(seed):
+    if seed is None:
+        seed = SystemRandom().randrange(2**32)
+    return Random(seed), seed
+
+
+def draw_single(rng, pool, count):
+    if count > len(pool):
+        raise SystemExit(f"error: requested {count} draws from a pool of {len(pool)}")
+    return rng.sample(pool, count)
+
+
+def draw_triples(rng, pool, count):
+    max_triples = len(pool) * (len(pool) - 1) * (len(pool) - 2) // 6
+    if count > max_triples:
+        raise SystemExit(f"error: requested {count} distinct triples from a pool that only supports {max_triples}")
+    triples = []
+    seen = set()
+    while len(triples) < count:
+        triple = tuple(sorted(rng.sample(pool, 3)))
+        if triple in seen:
+            continue
+        seen.add(triple)
+        triples.append(triple)
+    return triples
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Draw cards from the brainstorming deck.")
+    parser.add_argument("--category", choices=["lenses", "collision_units", "provocations"], required=True)
+    parser.add_argument("--count", type=int, default=1)
+    parser.add_argument("--collide", action="store_true", help="draw distinct triples instead of single cards")
+    parser.add_argument("--seed", type=int, default=None, help="reuse a printed seed to reproduce a draw")
+    args = parser.parse_args()
+
+    if args.collide and args.category != "collision_units":
+        raise SystemExit("error: --collide only works with --category collision_units")
+
+    deck = load_deck()
+    pool = deck[args.category]
+    rng, seed = make_rng(args.seed)
+
+    if args.collide:
+        for triple in draw_triples(rng, pool, args.count):
+            print(" + ".join(triple))
+    else:
+        for card in draw_single(rng, pool, args.count):
+            print(card)
+
+    print(f"\n[seed: {seed} — rerun with --seed {seed} to reproduce this exact draw]", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    main()
