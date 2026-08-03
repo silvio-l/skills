@@ -74,6 +74,12 @@ colored HTML report with a one-click "copy an AI-agent fix prompt" button per
 finding (or all of them at once) alongside the Markdown report and a prioritized
 fix-plan.
 
+### `escalate`
+
+**The Problem.** Sonnet is the mandated default, but some tasks quietly need more — a stuck bug, a hard reasoning chain, a UI tweak, a security-sensitive change — and nothing forces the agent to notice and hand off instead of grinding on at the wrong tier. The two existing hard rules only cover design and planning/review; everything else is left to hope the agent remembers to ask for help.
+
+**The Fix.** A model-invoked skill that routes a task through a fixed signal → tier table (UI/design → `fable`; architecture/roadmap synthesis, hard reasoning, stuck bugs, high-stakes/hard-to-reverse correctness → `opus`; everything else stays on Sonnet, explicitly, to avoid wasteful escalation — `/code-review` and security audits keep their own existing routing) and dispatches via the `Agent` tool with the model set explicitly. Splits mixed-signal tasks across tiers instead of forcing one subagent to cover both, has the subagent do the work rather than just advise, verifies its actual diff before reporting back, and always states which tier handled the task and why.
+
 ## License
 
 [MIT](./LICENSE).
