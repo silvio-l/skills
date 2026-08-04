@@ -26,6 +26,8 @@ edit here → commit on dev → push dev → merge dev into main (ff-only) → p
 
 **Never edit `~/.claude/skills/<skill-name>/` directly.** Those paths are CLI-managed symlinks into `~/.agents/skills/<skill-name>/`. Any edit there is overwritten on the next install.
 
+**Standing authorization for this exact roundtrip.** The operator has pre-authorized the literal sequence above (`git push origin dev` → `git switch main && git merge --ff-only dev && git push origin main && git switch dev` → `npx skills@latest update … -g -y`) as the default close-out of any skill edit in this repo — run it without pausing to ask each time. This is a narrow carve-out for this specific sequence in this specific repo, per the global `~/.claude/CLAUDE.md` note that durable CLAUDE.md instructions are a valid advance-authorization mechanism. It does **not** extend to anything else that repo's global rules still gate on confirmation — force-push, `git reset --hard`, history rewrites, or any operation outside this exact roundtrip.
+
 ## Repo layout
 
 ```
