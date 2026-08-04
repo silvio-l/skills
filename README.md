@@ -80,6 +80,18 @@ fix-plan.
 
 **The Fix.** A model-invoked skill that routes a task through a fixed signal → tier table (UI/design → `fable`; architecture/roadmap synthesis, hard reasoning, stuck bugs, high-stakes/hard-to-reverse correctness → `opus`; everything else stays on Sonnet, explicitly, to avoid wasteful escalation — `/code-review` and security audits keep their own existing routing) and dispatches via the `Agent` tool with the model set explicitly. Splits mixed-signal tasks across tiers instead of forcing one subagent to cover both, has the subagent do the work rather than just advise, verifies its actual diff before reporting back, and always states which tier handled the task and why.
 
+### `app-icon-director`
+
+**The Problem.** Most app icon requests default to "generic symbol on a gradient" because nothing forces a deliberate choice between representing the *product* (function-first) versus the *brand* (company/logo-first) — and when it should be both, the usual result is a cluttered logo-plus-symbol collage instead of a genuinely owned visual idea.
+
+**The Fix.** A manually-invoked creative-direction skill that gathers existing brand/product context from the repo, forces an explicit PRODUCT/BRAND/HYBRID strategy choice with stated reasoning, triages which brand assets are actually icon-capable, and develops three genuinely distinct concepts (not three variations) scored against recognizability, distinctiveness, and brand/product fit before recommending one with a validation checklist (silhouette, blur, grayscale, dark/mono/tint, competitor-neighborhood tests). Concept generation is delegated to a Fable subagent per the operator's design-escalation rule — this skill plans and judges, it doesn't design inline. Stops at a production spec; hands off to the `app-icon` skill for actual Expo/RN asset generation.
+
+### `fetch-shared-chat`
+
+**The Problem.** Shared ChatGPT/Gemini/Claude.ai chat links are client-rendered SPAs — a plain `curl` or `WebFetch` returns an empty app shell, not the conversation, so the obvious approach silently fails. Worse, ChatGPT's DOM-rendered page client-side-redirects to its homepage both when a share is genuinely inaccessible *and* when nothing is actually wrong, making the two cases indistinguishable without digging further — and a naive fix risks fabricating a summary of content nobody ever actually read.
+
+**The Fix.** A model-invoked skill that dispatches on the share URL's host. ChatGPT goes through its React Router single-fetch `.data` endpoint via plain HTTP — no browser at all — decoded by a from-scratch, cross-validated reimplementation of the `turbo-stream` wire format, which additionally surfaces the *exact* server-side reason a share failed (deleted vs. access-denied vs. workspace-scoped) instead of the ambiguous DOM redirect. Gemini falls back to headless-Chromium rendering, since no server-side data endpoint is known for it. Claude.ai is attempted the same way but currently hits a Cloudflare bot challenge, which the skill detects and reports explicitly rather than passing through as fake content. Every failure path returns a concrete, worded reason instead of an empty or fabricated result.
+
 ## License
 
 [MIT](./LICENSE).
