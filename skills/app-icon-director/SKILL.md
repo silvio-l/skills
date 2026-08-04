@@ -12,7 +12,7 @@ Act as a creative director plus brand designer: analyze the existing product and
 
 If this skill was invoked with an argument, that argument is the target app/brand/goal. Otherwise, ask the user what app or brand this is for before continuing.
 
-This is visual design work. Per the operator's global hard rule, the actual concept generation (steps 4–7 below) must be delegated to a **Fable subagent** via the `Agent` tool with `model: "fable"` set explicitly — never done inline on the current model tier. Run steps 4–7 as a single Agent call, not four separate ones: write one self-contained brief covering all four steps (goal, gathered context from step 1, the chosen strategy from step 2, brand assets from step 3) since the subagent has not seen this conversation, and ask it to return the design core, three concepts, scores, and the worked-out recommended direction together. Steps 1–3 (context gathering, strategy choice, brand-asset triage) and step 8 (relaying results) may run on the current tier — they're research and judgment calls, not visual creation.
+This is visual design work. Per the operator's global hard rule, every actual act of visual creation or judgment — concept generation (steps 4–7), master art (step 10), and final review (step 11) — must be delegated to a **Fable subagent** via the `Agent` tool with `model: "fable"` set explicitly, never done inline on the current model tier. Run steps 4–7 as a single Agent call, not four separate ones: write one self-contained brief covering all four steps (goal, gathered context from step 1, the chosen strategy from step 2, brand assets from step 3) since the subagent has not seen this conversation, and ask it to return the design core, three concepts, scores, and the worked-out recommended direction together. Steps 1–3 (context gathering, strategy choice, brand-asset triage), step 8 (relaying results), and running the deterministic generator script itself in step 10 may run on the current tier — they're research, judgment calls, or mechanical script execution, not visual creation.
 
 ## The core claim
 
@@ -118,8 +118,29 @@ Relay the Fable subagent's actual output to the user (read it back, don't just r
 
 If the brand owns more than one app, do not design icons in isolation — keep geometry, materiality, light direction, depth logic, and brand color constant across the family; vary only the hero symbol, accent color, negative inner shape, and motif/letter per app.
 
-## Step 10: Production handoff
+## Step 10: Production (delegate the master art to Fable, run generation on the current tier)
 
-If asked to actually produce the asset: create or edit an editable vector source, keep semantic layers separate, don't draw a system mask into the motif, don't upscale small raster images, use the project's existing asset pipeline, keep source and export files separate, and don't modify existing brand assets without a traceable reason.
+If asked to actually produce the asset, this is a two-part handoff, not one:
 
-For React Native/Expo projects, hand the finished concept and production spec to the `app-icon` skill for the actual iOS/Android asset generation — this skill stops at the spec, it does not generate platform asset files itself.
+1. **Master art (Fable).** Have the Fable subagent author the recommended concept as a single square SVG source (`master-icon.svg`), fully self-contained (no external references), full-bleed to the canvas edge (platforms apply their own masking — don't draw a system frame into the motif). If the concept needs an Android adaptive icon, also have it produce `master-foreground.svg`: the hero motif alone, transparent background, kept inside the inner 72% of the canvas (the safe zone every launcher shape crops to) since Android composites this over a separate background layer. Don't upscale a small raster into an SVG — if no clean vector source exists, say so and stop rather than faking one.
+2. **Platform assets (current tier, scripted, deterministic).** Run the bundled generator on that SVG:
+
+   ```bash
+   S=~/.agents/skills/app-icon-director/scripts/generate_platform_icons.py
+   "$S" --master master-icon.svg --foreground master-foreground.svg \
+        --out <output-dir> --platforms ios,macos,windows,android
+   ```
+
+   This produces, from each platform's own current published spec (not a guess): the iOS App Store Connect icon (1024×1024, opaque, no alpha, sRGB); a macOS `.icns` built via `iconutil` from the standard 16–1024 iconset; a classic Windows `.ico` at the Microsoft-documented bare-minimum sizes (16/24/32/48/256, alpha preserved); and the Android launcher mipmap set plus a Play Console listing icon (512×512, 32-bit PNG **with** alpha — unlike iOS, Play Console requires transparency, not opaque). Add `--platforms ...,windows-store` for the full Microsoft Store MSIX asset set (~50 files: AppList target sizes in three plate variants, StoreLogo at five scale factors, one Medium tile) if the target is Store-published Windows, not just a plain desktop `.ico`.
+
+   The script ends every run with its own deterministic validation pass — every file the platform spec requires is checked for existence, valid image data, and exact pixel dimensions, printing `ALL CHECKS PASSED` or a `FAIL` line naming exactly what's missing or wrong, with a non-zero exit code on failure. **Do not report production as done from your own judgment of the file listing — the script's validation output is the source of truth. If it fails, fix the master art or masking and rerun; don't hand-patch individual output files**, and don't tell the user assets are ready without having actually seen `ALL CHECKS PASSED` in this run.
+
+For React Native/Expo projects specifically, hand the finished master SVG to the `app-icon` skill instead of running the generator above — it's already wired into Expo's own asset pipeline and config.
+
+## Step 11: Final visual review (Fable, mandatory before declaring done)
+
+Once validation passes, render a contact sheet: at minimum the iOS 1024 master, the smallest generated size per platform (16px ICO/ICNS entries, the 48px Android mdpi launcher), and the icon composited against 2–3 realistic neighboring icons or a plain light/dark background. Send this contact sheet plus the original brief (strategy, design core, chosen concept) to a **second, fresh Fable subagent call** — not the one that made the art — instructed to actually look at the rendered output and score it against the Step 8 validation checklist, called out separately for the smallest sizes specifically (that's where real icons fail, not in the 1024 hero shot). Relay its actual verdict, not a summary of your own impression. If it finds a failure (illegible at small size, muddy silhouette, wrong crop in the Android safe zone), treat that as blocking: send it back to the concept-authoring Fable call with the specific defect named, regenerate, and re-review — don't ship on the first pass by default.
+
+## Dependencies
+
+`scripts/generate_platform_icons.py` needs Pillow (`pip install pillow`). An SVG master additionally needs `rsvg-convert` (`brew install librsvg`, or `apt install librsvg2-bin`) — a pre-rendered ≥1024px square PNG master skips that dependency. macOS `.icns` packaging needs `iconutil` (built into macOS); on a non-macOS host the `.iconset` folder is still produced correctly, but `.icns` packaging is skipped with an explicit note rather than silently faked.
