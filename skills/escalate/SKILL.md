@@ -1,6 +1,6 @@
 ---
 name: escalate
-description: Escalate the task to a stronger subagent (opus/fable) via the Agent tool when its stakes or difficulty exceed Sonnet's default — UI work, a stuck bug, hard reasoning, security-sensitive changes. Say 'escalate this' / 'eskaliere das'.
+description: Escalate the task to a stronger subagent (opus; fable only on explicit user request) via the Agent tool when its stakes or difficulty exceed Sonnet's default — UI work, a stuck bug, hard reasoning, security-sensitive changes. Say 'escalate this' / 'eskaliere das'.
 ---
 
 # Escalate
@@ -15,7 +15,7 @@ If the skill was invoked with an argument, that argument is the task. Otherwise 
 
 | Signal | Target | Why |
 |---|---|---|
-| Any UI, component, layout, animation, or motion work — including a "trivial" addition to an existing component (new row interaction, swipe action, badge) | `fable` | mandatory design escalation |
+| Any UI, component, layout, animation, or motion work — including a "trivial" addition to an existing component (new row interaction, swipe action, badge) | `opus` | mandatory design escalation (not `fable` — no longer auto-routed there for cost reasons; only on explicit user request) |
 | Architecture or roadmap/ticket synthesis (not a `/code-review` or security audit — those skills already self-escalate to opus and own their own routing) | `opus` | mandatory planning/review escalation |
 | Hard algorithmic or multi-step logical reasoning where a wrong step compounds silently | `opus` | correctness depends on reasoning depth Sonnet doesn't reliably reach |
 | A bug or diagnosis that has already resisted one or more straightforward Sonnet attempts | `opus` | a stuck problem needs a different reasoning path, not another pass at the same one |
@@ -30,7 +30,7 @@ If the task lands only in the last row, escalation would burn tokens for no qual
 
 ## Step 4: Dispatch
 
-Call `Agent` with `model` set explicitly to the matched tier (`opus` or `fable` — never a full model ID). Default to the subagent doing the work itself, not just advising — that's how the design and planning escalation rules already operate. Write the prompt as a self-contained brief: the goal, the relevant file paths and context, and what's already been ruled out — the subagent has not seen this conversation. Never write "based on the above, do X"; that pushes synthesis already done here onto a subagent that can't see it. Never set `isolation: "worktree"`. If the task calls for a recommendation to act on rather than a finished change, say so explicitly in the brief and ask for a report instead.
+Call `Agent` with `model` set explicitly to the matched tier (`opus` — never a full model ID; use `fable` only if the user explicitly asked for it in this task). Default to the subagent doing the work itself, not just advising — that's how the design and planning escalation rules already operate. Write the prompt as a self-contained brief: the goal, the relevant file paths and context, and what's already been ruled out — the subagent has not seen this conversation. Never write "based on the above, do X"; that pushes synthesis already done here onto a subagent that can't see it. Never set `isolation: "worktree"`. If the task calls for a recommendation to act on rather than a finished change, say so explicitly in the brief and ask for a report instead.
 
 ## Step 5: Relay
 

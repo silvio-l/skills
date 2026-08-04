@@ -12,7 +12,7 @@ Act as a creative director plus brand designer: analyze the existing product and
 
 If this skill was invoked with an argument, that argument is the target app/brand/goal. Otherwise, ask the user what app or brand this is for before continuing.
 
-This is visual design work. Per the operator's global hard rule, every actual act of visual creation or judgment — concept generation (steps 4–7), master art (step 10), and final review (step 11) — must be delegated to a **Fable subagent** via the `Agent` tool with `model: "fable"` set explicitly, never done inline on the current model tier. Run steps 4–7 as a single Agent call, not four separate ones: write one self-contained brief covering all four steps (goal, gathered context from step 1, the chosen strategy from step 2, brand assets from step 3) since the subagent has not seen this conversation, and ask it to return the design core, three concepts, scores, and the worked-out recommended direction together. Steps 1–3 (context gathering, strategy choice, brand-asset triage), step 8 (relaying results), and running the deterministic generator script itself in step 10 may run on the current tier — they're research, judgment calls, or mechanical script execution, not visual creation.
+This is visual design work. Per the operator's global hard rule (Opus, not Fable — Fable is no longer auto-routed here for cost reasons as of 2026-08-04), every actual act of visual creation or judgment — concept generation (steps 4–7), master art (step 10), and final review (step 11) — must be delegated to an **Opus subagent** via the `Agent` tool with `model: "opus"` set explicitly, never done inline on the current model tier. Run steps 4–7 as a single Agent call, not four separate ones: write one self-contained brief covering all four steps (goal, gathered context from step 1, the chosen strategy from step 2, brand assets from step 3) since the subagent has not seen this conversation, and ask it to return the design core, three concepts, scores, and the worked-out recommended direction together. Steps 1–3 (context gathering, strategy choice, brand-asset triage), step 8 (relaying results), and running the deterministic generator script itself in step 10 may run on the current tier — they're research, judgment calls, or mechanical script execution, not visual creation.
 
 ## The core claim
 
@@ -69,7 +69,7 @@ Classify the existing mark:
 
 Never place a shrunk company logo on a colored background — develop an app-appropriate expression of the brand instead. Don't alter protected core brand features arbitrarily; under strict brand constraints, keep the logo unchanged and create distinctiveness through composition, background, depth, or a complementary product motif instead.
 
-## Step 4: Formulate the design core (delegate to Fable)
+## Step 4: Formulate the design core (delegate to Opus)
 
 Compress the project into:
 - **Function**: one verb
@@ -80,7 +80,7 @@ Compress the project into:
 
 Also produce a ban list of at least five generic or ill-fitting motifs to avoid (e.g., for a finance app: no coin, no currency symbol, no bar chart, no piggy bank, no green up-arrow, no bank building).
 
-## Step 5: Develop concepts (delegate to Fable)
+## Step 5: Develop concepts (delegate to Opus)
 
 Develop three genuinely distinct directions — not three variations of the same idea:
 
@@ -100,11 +100,11 @@ Apply these quality bars to every concept:
 
 Avoid: writing the app name out in the icon (unless a single letter is an established brand element, typography is the product's actual core, or the mark reads as a shape without reading the text); tiny engravings and thin lines that vanish at launcher size; a hand-drawn platform frame (the system already masks the shape); treating gloss/glass/3D effects as the idea rather than a finishing touch on top of a strong shape.
 
-## Step 6: Score and select (delegate to Fable)
+## Step 6: Score and select (delegate to Opus)
 
 Score each concept 1–10 on: recognizability at small size, distinctiveness from competitors, product fit, brand fit, emotional impact, adaptability to dark/mono/tint rendering modes, long-term durability. No concept may win on a score below half on recognizability or fit, however polished it looks otherwise. Recommend exactly one direction — beauty alone is not a selection reason.
 
-## Step 7: Work out the recommended direction (delegate to Fable)
+## Step 7: Work out the recommended direction (delegate to Opus)
 
 Lock down: one dominant hero shape; at most two supporting elements; a clear silhouette with generous negative space; optical (not just mathematical) centering; consistent radii, angles, and curves; at most three meaningful depth layers; one primary color, one secondary, optionally one accent; material effects used only to explain form and depth, never as decoration for its own sake.
 
@@ -112,20 +112,20 @@ Lock down: one dominant hero shape; at most two supporting elements; a clear sil
 
 Check the recommended concept against: silhouette test (still legible as flat black), heavy blur test (composition still reads by color/brightness distribution alone), grayscale test (hierarchy survives without color), smallest launcher size, light and dark backgrounds, dark/mono/tint rendering variants, next to typical neighboring app icons, distinctiveness from competitor silhouettes, recognizability after a brief glance. A motif that only convinces in a large presentation mockup is not done.
 
-Relay the Fable subagent's actual output to the user (read it back, don't just relay its summary) alongside which tier produced it. Deliver compactly: analysis, chosen strategy, design core, the three concepts, scores, recommendation, production spec, validation checklist.
+Relay the Opus subagent's actual output to the user (read it back, don't just relay its summary) alongside which tier produced it. Deliver compactly: analysis, chosen strategy, design core, the three concepts, scores, recommendation, production spec, validation checklist.
 
 ## Step 9: Icon families (multiple apps, one brand)
 
 If the brand owns more than one app, do not design icons in isolation — keep geometry, materiality, light direction, depth logic, and brand color constant across the family; vary only the hero symbol, accent color, negative inner shape, and motif/letter per app.
 
-## Step 10: Production (delegate the master art to Fable, run generation on the current tier)
+## Step 10: Production (delegate the master art to Opus, run generation on the current tier)
 
 If asked to actually produce the asset, this is a two-part handoff, not one:
 
-1. **Master art (Fable, via real image generation — never hand-written SVG).** An LLM authoring SVG markup by hand produces geometrically crude, flat-shaded output that reads as code, not as designed art. The master is always a real generated raster image, never a `master-icon.svg` written as text. Concretely:
-   a. Have the Fable subagent turn the locked-down concept (step 7) into a precise image-generation prompt: dominant shape, materials/depth, exact colors, composition, the one memorable hook, full-bleed square, no system frame drawn in (platforms mask their own shape), no rendered app-name text unless the concept specifically calls for it.
+1. **Master art (Opus, via real image generation — never hand-written SVG).** An LLM authoring SVG markup by hand produces geometrically crude, flat-shaded output that reads as code, not as designed art. The master is always a real generated raster image, never a `master-icon.svg` written as text. Concretely:
+   a. Have the Opus subagent turn the locked-down concept (step 7) into a precise image-generation prompt: dominant shape, materials/depth, exact colors, composition, the one memorable hook, full-bleed square, no system frame drawn in (platforms mask their own shape), no rendered app-name text unless the concept specifically calls for it.
    b. Generate it through an actual image-generation model — in this environment, fal.ai (`mcp__fal-ai__recommend_model` / `run_model` / `submit_job`; see `~/.claude/infrastructure/fal-ai.md` for validated raster endpoints such as `fal-ai/flux-pro/kontext` or `fal-ai/nano-banana` — avoid vector-output models like `fal-ai/recraft*`, which defeats the point). Use square aspect, ≥1024px, prefer 2048px+ for downscale headroom. Download the result to local disk as `master-icon.png` — the generator script needs a local file, not a URL.
-   c. Have Fable actually look at the generated image (it's vision-capable) and score it against the step-7 lock-down and the step-5 quality bars. If it drifts from the concept, muddies the silhouette, or adds unwanted detail, refine the prompt and regenerate — bounded to a few rounds — rather than shipping the first draft or hand-patching pixels.
+   c. Have Opus actually look at the generated image (it's vision-capable) and score it against the step-7 lock-down and the step-5 quality bars. If it drifts from the concept, muddies the silhouette, or adds unwanted detail, refine the prompt and regenerate — bounded to a few rounds — rather than shipping the first draft or hand-patching pixels.
    d. If the concept needs an Android adaptive icon, generate `master-foreground.png` the same way: the hero motif alone, kept inside the inner 72% of the canvas (the safe zone every launcher shape crops to) since Android composites this over a separate background layer. Image-generation models do not reliably return a true alpha channel even when asked for "transparent background" — generate the motif against a flat, distinctive background color, then run background removal (e.g. `fal-ai/birefnet`) to produce a real transparent PNG. **Never skip this and hand over an opaque render as the foreground** — the generator script trusts the master's own alpha channel, so an opaque "transparent" foreground silently composites as a solid square over the Android background layer instead of failing loudly.
    e. If fal.ai (or another genuine image-generation tool) isn't configured or available, stop and tell the user — a hand-written SVG approximation is a worse outcome than no master, not an acceptable fallback.
 2. **Platform assets (current tier, scripted, deterministic).** Run the bundled generator on that master:
@@ -142,9 +142,9 @@ If asked to actually produce the asset, this is a two-part handoff, not one:
 
 For React Native/Expo projects specifically, hand the finished master art to the `app-icon` skill instead of running the generator above — it's already wired into Expo's own asset pipeline and config.
 
-## Step 11: Final visual review (Fable, mandatory before declaring done)
+## Step 11: Final visual review (Opus, mandatory before declaring done)
 
-Once validation passes, render a contact sheet: at minimum the iOS 1024 master, the smallest generated size per platform (16px ICO/ICNS entries, the 48px Android mdpi launcher), and the icon composited against 2–3 realistic neighboring icons or a plain light/dark background. Send this contact sheet plus the original brief (strategy, design core, chosen concept) to a **second, fresh Fable subagent call** — not the one that made the art — instructed to actually look at the rendered output and score it against the Step 8 validation checklist, called out separately for the smallest sizes specifically (that's where real icons fail, not in the 1024 hero shot). Relay its actual verdict, not a summary of your own impression. If it finds a failure (illegible at small size, muddy silhouette, wrong crop in the Android safe zone), treat that as blocking: send it back to the concept-authoring Fable call with the specific defect named, regenerate, and re-review — don't ship on the first pass by default.
+Once validation passes, render a contact sheet: at minimum the iOS 1024 master, the smallest generated size per platform (16px ICO/ICNS entries, the 48px Android mdpi launcher), and the icon composited against 2–3 realistic neighboring icons or a plain light/dark background. Send this contact sheet plus the original brief (strategy, design core, chosen concept) to a **second, fresh Opus subagent call** — not the one that made the art — instructed to actually look at the rendered output and score it against the Step 8 validation checklist, called out separately for the smallest sizes specifically (that's where real icons fail, not in the 1024 hero shot). Relay its actual verdict, not a summary of your own impression. If it finds a failure (illegible at small size, muddy silhouette, wrong crop in the Android safe zone), treat that as blocking: send it back to the concept-authoring Opus call with the specific defect named, regenerate, and re-review — don't ship on the first pass by default.
 
 ## Dependencies
 
