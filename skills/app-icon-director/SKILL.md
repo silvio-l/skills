@@ -1,6 +1,6 @@
 ---
 name: app-icon-director
-description: Develop and evaluate a professional app icon concept: PRODUCT, BRAND, or HYBRID strategy from product and brand context. Use for new app icons, redesigns, logo-to-icon work, brand icons, icon families. 'App-Icon entwerfen', 'Icon-Strategie'.
+description: Develop and evaluate a professional app icon concept — PRODUCT, BRAND, or HYBRID strategy from product and brand context. Use for new app icons, redesigns, logo-to-icon work, brand icons, icon families. 'App-Icon entwerfen', 'Icon-Strategie'.
 disable-model-invocation: true
 metadata:
   argument-hint: "<app, brand, or design goal>"
