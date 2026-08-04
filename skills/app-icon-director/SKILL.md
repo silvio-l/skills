@@ -122,12 +122,12 @@ If the brand owns more than one app, do not design icons in isolation — keep g
 
 If asked to actually produce the asset, this is a two-part handoff, not one:
 
-1. **Master art (Fable).** Have the Fable subagent author the recommended concept as a single square SVG source (`master-icon.svg`), fully self-contained (no external references), full-bleed to the canvas edge (platforms apply their own masking — don't draw a system frame into the motif). If the concept needs an Android adaptive icon, also have it produce `master-foreground.svg`: the hero motif alone, transparent background, kept inside the inner 72% of the canvas (the safe zone every launcher shape crops to) since Android composites this over a separate background layer. Don't upscale a small raster into an SVG — if no clean vector source exists, say so and stop rather than faking one.
-2. **Platform assets (current tier, scripted, deterministic).** Run the bundled generator on that SVG:
+1. **Master art (Fable).** Have the Fable subagent render the recommended concept with its actual image-generation capability — a real generated image, not hand-written vector markup — as a single square raster master (`master-icon.png`), at least 2048×2048 for downscale headroom, full-bleed to the canvas edge (platforms apply their own masking — don't draw a system frame into the motif). LLMs writing SVG by hand produce geometrically crude, flat-shaded output that reads as code, not as designed art — never ask Fable to author `master-icon.svg` as the default path. Reach for an SVG master only in the narrow case where the concept itself is a genuinely flat, geometric vector mark (a pure emblem of simple shapes) and Fable can produce clean vector output directly; even then, treat it as a deliberate exception, not the default, and still prefer a rendered PNG if there's any doubt about vector quality. If the concept needs an Android adaptive icon, also have Fable render `master-foreground.png`: the hero motif alone, transparent background, kept inside the inner 72% of the canvas (the safe zone every launcher shape crops to) since Android composites this over a separate background layer. Don't upscale a small or low-quality image into the master — if Fable can't render the concept cleanly at high resolution, say so and stop rather than shipping a degraded master.
+2. **Platform assets (current tier, scripted, deterministic).** Run the bundled generator on that master:
 
    ```bash
    S=~/.agents/skills/app-icon-director/scripts/generate_platform_icons.py
-   "$S" --master master-icon.svg --foreground master-foreground.svg \
+   "$S" --master master-icon.png --foreground master-foreground.png \
         --out <output-dir> --platforms ios,macos,windows,android
    ```
 
@@ -135,7 +135,7 @@ If asked to actually produce the asset, this is a two-part handoff, not one:
 
    The script ends every run with its own deterministic validation pass — every file the platform spec requires is checked for existence, valid image data, and exact pixel dimensions, printing `ALL CHECKS PASSED` or a `FAIL` line naming exactly what's missing or wrong, with a non-zero exit code on failure. **Do not report production as done from your own judgment of the file listing — the script's validation output is the source of truth. If it fails, fix the master art or masking and rerun; don't hand-patch individual output files**, and don't tell the user assets are ready without having actually seen `ALL CHECKS PASSED` in this run.
 
-For React Native/Expo projects specifically, hand the finished master SVG to the `app-icon` skill instead of running the generator above — it's already wired into Expo's own asset pipeline and config.
+For React Native/Expo projects specifically, hand the finished master art to the `app-icon` skill instead of running the generator above — it's already wired into Expo's own asset pipeline and config.
 
 ## Step 11: Final visual review (Fable, mandatory before declaring done)
 
@@ -143,4 +143,4 @@ Once validation passes, render a contact sheet: at minimum the iOS 1024 master, 
 
 ## Dependencies
 
-`scripts/generate_platform_icons.py` needs Pillow (`pip install pillow`). An SVG master additionally needs `rsvg-convert` (`brew install librsvg`, or `apt install librsvg2-bin`) — a pre-rendered ≥1024px square PNG master skips that dependency. macOS `.icns` packaging needs `iconutil` (built into macOS); on a non-macOS host the `.iconset` folder is still produced correctly, but `.icns` packaging is skipped with an explicit note rather than silently faked.
+`scripts/generate_platform_icons.py` needs Pillow (`pip install pillow`). The default master is a rendered ≥1024px square PNG (no extra dependency). Only the narrow SVG-master exception in step 10 needs `rsvg-convert` (`brew install librsvg`, or `apt install librsvg2-bin`) to rasterize it. macOS `.icns` packaging needs `iconutil` (built into macOS); on a non-macOS host the `.iconset` folder is still produced correctly, but `.icns` packaging is skipped with an explicit note rather than silently faked.
