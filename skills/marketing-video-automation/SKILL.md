@@ -1,6 +1,6 @@
 ---
 name: marketing-video-automation
-description: Automate marketing/demo videos for mobile, web, Electron, and macOS/Tauri apps: deterministic storyboard, screen capture, zoom/GIF/WebP polish. Use for 'marketing video', 'App-Demo aufnehmen', 'Screen Studio style', 'App Store preview video'.
+description: "Automate marketing/demo videos for mobile, web, Electron, and macOS/Tauri apps: deterministic storyboard, screen capture, zoom/GIF/WebP polish. Use for 'marketing video', 'App-Demo aufnehmen', 'Screen Studio style', 'App Store preview video'."
 ---
 
 # Marketing Video Automation
