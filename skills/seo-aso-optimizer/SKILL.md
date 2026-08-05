@@ -17,7 +17,7 @@ Establish: the site's audience, its 2–3 core offerings/pages, and its brand vo
 
 ## Step 2 — Technical audit (deterministic)
 
-Run the crawl script — it hits every page in the sitemap and checks fixed rules (titles, meta descriptions, H1s, canonical, lang, viewport, structured data validity, alt text, thin content, orphan pages, broken internal links, accidental `noindex` directives, missing compression, robots.txt/sitemap/llms.txt presence). No LLM judgment happens inside it, so the same site always yields the same findings:
+Run the crawl script — it hits every page in the sitemap and checks fixed rules (titles, meta descriptions, H1s, canonical, lang, viewport, Open Graph/Twitter Card tags, structured data validity, alt text, thin content, orphan pages, broken internal links, accidental `noindex` directives, missing compression, robots.txt/sitemap/llms.txt presence). No LLM judgment happens inside it, so the same site always yields the same findings:
 
 ```
 python3 skills/seo-aso-optimizer/scripts/audit_site.py https://example.com --out-dir <workdir>
@@ -79,13 +79,13 @@ Execute `action-plan.md`'s P0 and P1 items in order. Show each diff to the user 
 
 ## Step 7 — Content
 
-Execute `action-plan.md`'s content items (new pages, new FAQ/guide entries, rewritten copy): lead with the answer to the target query in the first paragraph (this is what gets an AI answer engine to quote the page), then go deeper — real specifics, not generic filler. Run drafts through the `avoid-ai-writing` skill before finalizing; don't restate its rules here. Add structured data per `REFERENCE.md`'s schema-type table and confirm it parses (re-run Step 2's script, or check `https://validator.schema.org`).
+Execute `action-plan.md`'s content items (new pages, new FAQ/guide entries, rewritten copy): lead with the answer to the target query in the first paragraph (this is what gets an AI answer engine to quote the page), then go deeper — real specifics, not generic filler. Phrase FAQ/guide headings as the actual question a searcher would type ("How does X work?", not "Functionality") — it's what gets pulled into featured snippets and AI answers. Run drafts through the `avoid-ai-writing` skill before finalizing; don't restate its rules here. Add structured data per `REFERENCE.md`'s schema-type table and confirm it parses (re-run Step 2's script, or check `https://validator.schema.org`).
 
 **Done when:** every content item in `action-plan.md` has been written or explicitly skipped, and every new/changed page's structured data validates.
 
 ## Step 8 — Ship and verify
 
-If Step 2/3 found no sitemap in Search Console, or a stale one, submit it with `mcp__gsc__submit_sitemap`. Re-run the Step 2 script and confirm the finding groups touched in Step 6 are gone (or still explicitly declined). For a recurring check (e.g. fortnightly striking-distance refresh), the `schedule` skill can run this workflow on a cron cadence.
+If Step 2/3 found no sitemap in Search Console, or a stale one, submit it with `mcp__gsc__submit_sitemap`. For Bing (which Google's own sitemap-submit API doesn't reach): if the site already hosts an IndexNow key file, `GET https://api.indexnow.org/indexnow?url=<changed-url>&key=<key>` for each URL touched in Steps 6–7 — free, no signup, instant rather than waiting for the next crawl. If no key file exists yet, tell the user it needs a one-time setup (generate a key, host it at `/<key>.txt`) rather than skipping Bing silently — see `REFERENCE.md`. Re-run the Step 2 script and confirm the finding groups touched in Step 6 are gone (or still explicitly declined). For a recurring check (e.g. fortnightly striking-distance refresh), the `schedule` skill can run this workflow on a cron cadence.
 
 **Done when:** the re-audit's `findings.md` shows no new regressions against Step 6's fixes, and `action-plan.md`'s P2 tier is left as the next run's starting point.
 

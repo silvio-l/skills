@@ -101,6 +101,27 @@ class StructuralParsing(unittest.TestCase):
         p = parse("<head></head>")
         self.assertIsNone(p.meta_robots)
 
+    def test_og_tags_use_property_not_name(self):
+        # Open Graph tags are <meta property="og:title" ...>, not name= — a
+        # parser that only checks a.get("name") silently finds nothing.
+        html_text = (
+            '<meta property="og:title" content="Hello">'
+            '<meta property="og:description" content="World">'
+            '<meta property="og:image" content="https://example.com/x.png">'
+        )
+        p = parse(html_text)
+        self.assertEqual(p.og["og:title"], "Hello")
+        self.assertEqual(p.og["og:description"], "World")
+        self.assertEqual(p.og["og:image"], "https://example.com/x.png")
+
+    def test_twitter_card_uses_name_not_property(self):
+        p = parse('<meta name="twitter:card" content="summary_large_image">')
+        self.assertEqual(p.twitter_card, "summary_large_image")
+
+    def test_no_og_tags_leaves_empty_dict(self):
+        p = parse("<head></head>")
+        self.assertEqual(p.og, {})
+
     def test_word_count_excludes_script_and_style(self):
         html_text = (
             "<body><script>var junkWordsHere = 1;</script>"

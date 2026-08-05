@@ -23,6 +23,8 @@ INP needs real-user field data (CrUX), which a low-traffic site often doesn't ha
 | W3C Nu Html Checker — `https://validator.w3.org/nu/?doc=<url>&out=json` | Real markup errors the crawl script's parser can miss | Nothing — plain HTTP GET, no key, no signup |
 | `mcp__gsc__*` (this environment) | Real queries, clicks, impressions, position | A Google account with the property already verified |
 | Bing Webmaster Tools | The same shape of data as GSC, for Bing | A free account plus its own separate site verification — not wired into this skill (no MCP tool for it here yet); if the user already has it set up, cross-check striking-distance queries there the same way as Step 3 |
+| IndexNow (`https://api.indexnow.org/indexnow?url=<url>&key=<key>`) | Instant Bing/Yandex re-crawl notification for a changed URL, instead of waiting for the next scheduled crawl — genuinely narrows the Bing gap above, at least for freshness | Free, no account — just a self-generated key hosted as a text file at `/<key>.txt` on the site (one-time setup) |
+| CrUX History API (`chromeuxreport.googleapis.com`) | Historical Core Web Vitals trend (weekly, going back ~6 months), not just the single-point-in-time snapshot `pagespeed_check.py` gives | Same kind of free Google Cloud API key as PageSpeed Insights. Worth it for a recurring/scheduled check; skip it for a one-off audit — the PSI field data already covers the core "is it currently good" question |
 | `scripts/audit_site.py` against a competitor's domain | Their page count, schema coverage, thin-content profile, technical health — a real side-by-side, not a guess | Nothing — the script is domain-agnostic already |
 
 Skip paid tiers (Ahrefs, SEMrush, GTmetrix's deeper checks) unless the user already has access — this skill's job is doing the free tier well, not gatekeeping behind a subscription.
@@ -95,6 +97,7 @@ Favor long-tail for any page targeting a specific feature, use case, location, o
 | FAQ page or FAQ section | `FAQPage` |
 | Service + location page (local business) | `LocalBusiness` (or the closer subtype, e.g. `AutoRepair`) |
 | Blog post | `Article` |
+| FAQ/guide answer meant for voice assistants | Add `speakable` (`SpeakableSpecification`, via CSS selector) alongside the page's main type — niche, only worth it for content genuinely written to be read aloud |
 
 One JSON-LD block per page is normal; a page can combine types (e.g. `WebSite` + `Organization` via `@graph`) but shouldn't carry contradictory types for the same entity.
 

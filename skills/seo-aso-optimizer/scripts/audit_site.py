@@ -123,6 +123,8 @@ class PageParser(html.parser.HTMLParser):
         self.title = None
         self.meta_description = None
         self.meta_robots = None
+        self.og = {}
+        self.twitter_card = None
         self.canonical = None
         self.html_lang = None
         self.hreflangs = []
@@ -151,12 +153,17 @@ class PageParser(html.parser.HTMLParser):
             self._in_title = True
         elif tag == "meta":
             name = (a.get("name") or "").lower()
+            prop = (a.get("property") or "").lower()  # og:* tags use property=, not name=
             if name == "description":
                 self.meta_description = a.get("content", "")
             elif name == "viewport":
                 self.viewport = True
             elif name == "robots":
                 self.meta_robots = (a.get("content") or "").lower()
+            elif name == "twitter:card":
+                self.twitter_card = a.get("content", "")
+            elif prop.startswith("og:"):
+                self.og[prop] = a.get("content", "")
         elif tag == "link":
             rel = (a.get("rel") or "").lower()
             if rel == "canonical":
@@ -251,6 +258,8 @@ def audit_page(url, root_netloc):
         "title": (p.title or "").strip(),
         "meta_description": (p.meta_description or "").strip(),
         "meta_robots": p.meta_robots or "",
+        "og": p.og,
+        "twitter_card": p.twitter_card or "",
         "canonical": p.canonical,
         "html_lang": p.html_lang,
         "hreflangs": p.hreflangs,
@@ -295,6 +304,10 @@ def evaluate_rules(pages, root_netloc, extra_link_status):
             add("noindex_directive_on_sitemap_page", url, f"via {', '.join(noindex_sources)} — page is in the sitemap but tells Google not to index it")
         if not pg.get("content_encoding"):
             add("missing_compression", url, "no Content-Encoding despite Accept-Encoding: gzip, deflate — page is served uncompressed")
+        og = pg.get("og", {})
+        missing_og = [t for t in ("og:title", "og:description", "og:image") if not og.get(t)]
+        if missing_og:
+            add("missing_og_tags", url, f"missing: {', '.join(missing_og)} — link previews on social/chat apps will be blank or generic")
         if not pg["title"]:
             add("missing_title", url)
         elif not (TITLE_MIN <= len(pg["title"]) <= TITLE_MAX):
@@ -339,7 +352,16 @@ def crawl(base_url, max_pages):
 
     robots = get_robots(root)
     llms_txt = get_llms_txt(root)
-    sitemap_candidates = robots["sitemaps"] or [urljoin(root, "/sitemap.xml"), urljoin(root, "/sitemap-index.xml")]
+    # robots.txt's Sitemap: line is authoritative when present. The fallback list
+    # covers the common defaults across static-site generators, WordPress's core
+    # sitemap (since 5.5, wp-sitemap.xml — easy to miss and a silent-zero-findings
+    # trap if skipped), and Yoast/other plugins' sitemap_index.xml.
+    sitemap_candidates = robots["sitemaps"] or [
+        urljoin(root, "/sitemap.xml"),
+        urljoin(root, "/sitemap_index.xml"),
+        urljoin(root, "/sitemap-index.xml"),
+        urljoin(root, "/wp-sitemap.xml"),
+    ]
 
     sitemap_urls = []
     used_sitemap = None
