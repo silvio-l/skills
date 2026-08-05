@@ -50,6 +50,8 @@ For each one, classify it per `REFERENCE.md`'s two failure modes — but classif
 
 While you have a page's full query,page breakdown open, check whether it's actually the top query that needs the fix — a lower-ranked query on the same page can be the bigger opportunity (e.g. a transactional-intent query landing on a page that buries its call-to-action).
 
+For competitor analysis: `audit_site.py` is domain-agnostic — run it against a real competitor found via the `WebSearch` calls above (`--out-dir` somewhere separate) to compare page count, schema coverage, and technical health side by side with no new tooling needed.
+
 **Done when:** every striking-distance query is mapped to an owning page (or explicitly declined with a reason), every "converts badly" diagnosis cites the actual page content and SERP context that support it, and every one carries real replacement copy, not a description of what the copy should do.
 
 ## Step 4 — Keyword-to-page map
@@ -57,7 +59,7 @@ While you have a page's full query,page breakdown open, check whether it's actua
 Merge three inputs into one map — each target keyword owned by exactly one page (existing or "to create"):
 - Step 3's striking-distance queries.
 - Step 2's thin-content and orphan pages (they may just need a clearer keyword target).
-- A fresh AI-generated list of 25–50 candidate keywords for the site's niche, sorted by intent (emergency/transactional/informational/local) and favoring long-tail over short-tail — a specific, low-competition phrase beats a generic, saturated one. See `REFERENCE.md` for the short-tail/long-tail split and page templates for new pages.
+- A harvested candidate list from `scripts/keyword_expand.py <seed>` — real Google/YouTube autocomplete completions, not an invented brainstorm. Run it against 1–3 seed phrases central to the site, then sort what it returns by intent (emergency/transactional/informational/local) and favor long-tail over short-tail — a specific, low-competition phrase beats a generic, saturated one. Expect real noise in the output (autocomplete pulls in unrelated senses of ambiguous words); discard it rather than force-fitting it. See `REFERENCE.md` for the short-tail/long-tail split, page templates for new pages, and what "search volume" honestly means for a free workflow.
 
 **Done when:** no target keyword is unmapped, and no single page is asked to own more than one primary keyword.
 

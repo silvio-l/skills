@@ -18,12 +18,38 @@ INP needs real-user field data (CrUX), which a low-traffic site often doesn't ha
 
 | Tool | Gives you | Needs |
 |---|---|---|
+| Google + YouTube autocomplete (`scripts/keyword_expand.py`) | Real long-tail keyword phrases people actually type — the free version of what paid "keyword suggestion" tools sell | Nothing — undocumented public endpoint, used respectfully (rate-limited, capped, see the script's own risk note) |
 | PageSpeed Insights API (`scripts/pagespeed_check.py`) | Core Web Vitals + Lighthouse performance/SEO/accessibility scores | A free API key (Google Cloud Console, no billing account) — verified by testing: the anonymous quota is 0 requests/day, not just rate-limited |
 | W3C Nu Html Checker — `https://validator.w3.org/nu/?doc=<url>&out=json` | Real markup errors the crawl script's parser can miss | Nothing — plain HTTP GET, no key, no signup |
 | `mcp__gsc__*` (this environment) | Real queries, clicks, impressions, position | A Google account with the property already verified |
 | Bing Webmaster Tools | The same shape of data as GSC, for Bing | A free account plus its own separate site verification — not wired into this skill (no MCP tool for it here yet); if the user already has it set up, cross-check striking-distance queries there the same way as Step 3 |
+| `scripts/audit_site.py` against a competitor's domain | Their page count, schema coverage, thin-content profile, technical health — a real side-by-side, not a guess | Nothing — the script is domain-agnostic already |
 
 Skip paid tiers (Ahrefs, SEMrush, GTmetrix's deeper checks) unless the user already has access — this skill's job is doing the free tier well, not gatekeeping behind a subscription.
+
+### Tested and rejected — don't retry these
+
+Each of these looked like it should work and didn't, verified live rather than assumed:
+
+| Tool | Verdict |
+|---|---|
+| Google Trends' internal API (`trends.google.com/trends/api/explore`) | 429 on the very first cold request — needs session handling this workflow doesn't have. Use the trends.google.com web UI manually instead, for relative-interest comparisons only. |
+| Common Crawl CDX API | Documented and genuinely free, but errored (502) on a sanity-check query against `github.com` — infrastructure looked unstable when tested. Worth a retry another day for competitor-footprint research, not something to depend on. |
+| OpenLinkProfiler.org | 404 even against `wikipedia.org` and `github.com` — the service itself is not responding correctly right now, not a "no data for a small site" result. |
+| Bing's undocumented autosuggest endpoint | Returned an empty body on a plain query — either deprecated or needs parameters this workflow doesn't have. Google/YouTube autocomplete already covers this need. |
+
+### Search volume, honestly
+
+There is no free, precise, per-keyword search volume number. Anyone offering one for free is estimating. What's actually available:
+- **GSC impressions** (already core to Step 3) are ground truth — but only for queries the site already surfaces for at all. Useless for a keyword the site has never ranked for once.
+- **Google Ads Keyword Planner** gives real (if bucketed) volume ranges, genuinely free — but needs a Google Ads account (no ad spend required) and has no simple scriptable path (OAuth + a developer token with an approval process). Treat it as a manual, occasional cross-check, not something this skill automates.
+- **Autocomplete presence/ordering** (`keyword_expand.py`) and SERP "related searches" (visible via `WebSearch`) are directional only — a phrase showing up at all, or showing up early, means real people search it, not how many.
+
+Say this plainly to the user rather than presenting a volume-flavored number that's actually a guess.
+
+### Backlinks
+
+No free, reliable, programmatic backlink source exists (see "tested and rejected" above). The free web UIs some tools offer (Ahrefs' capped backlink checker, Moz's limited free tier) are manual, one-off lookups a human runs in a browser — not something to script into this workflow.
 
 ## Meta-length thresholds
 
