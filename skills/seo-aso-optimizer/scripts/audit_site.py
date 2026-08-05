@@ -37,6 +37,22 @@ class _RedirectCounter(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
+def decode_body(raw_bytes, content_encoding):
+    """Decompress a response body per its Content-Encoding header.
+
+    Matches case-insensitively and by substring (not exact equality) so
+    variants like "GZIP" or "gzip;q=1.0" still decode. An unrecognized
+    encoding is a known limitation — the raw bytes pass through unchanged
+    rather than being guessed at.
+    """
+    enc = (content_encoding or "").lower()
+    if "gzip" in enc:
+        return gzip.decompress(raw_bytes)
+    if "deflate" in enc:
+        return zlib.decompress(raw_bytes)
+    return raw_bytes
+
+
 def fetch(url):
     counter = _RedirectCounter()
     opener = urllib.request.build_opener(counter)
@@ -50,12 +66,7 @@ def fetch(url):
         with opener.open(req, timeout=TIMEOUT) as resp:
             raw = resp.read(2_000_000)
             encoding = resp.headers.get("Content-Encoding", "")
-            if encoding == "gzip":
-                body = gzip.decompress(raw)
-            elif encoding == "deflate":
-                body = zlib.decompress(raw)
-            else:
-                body = raw
+            body = decode_body(raw, encoding)
             return {
                 "status": resp.status,
                 "final_url": resp.geturl(),
@@ -92,7 +103,17 @@ def get_llms_txt(root):
     return r["status"] == 200
 
 
-def expand_sitemap(url, seen=None, depth=0):
+def is_safe_sitemap_url(url, root_netloc):
+    """A sitemap-derived <loc> value is only safe to fetch if it's same-origin
+    http(s) — a hostile sitemap (e.g. a competitor's, which this skill
+    explicitly directs auditing) could otherwise point at file:// to read
+    local files, or at an arbitrary third-party host.
+    """
+    parsed = urlparse(url)
+    return parsed.scheme in ("http", "https") and parsed.netloc == root_netloc
+
+
+def expand_sitemap(url, root_netloc, seen=None, depth=0):
     seen = seen if seen is not None else set()
     if url in seen or depth > 2:
         return []
@@ -109,11 +130,15 @@ def expand_sitemap(url, seen=None, depth=0):
     if tag == "sitemapindex":
         urls = []
         for loc in root_el.findall(".//sm:sitemap/sm:loc", ns):
-            if loc.text:
-                urls.extend(expand_sitemap(loc.text.strip(), seen, depth + 1))
+            loc_url = loc.text.strip() if loc.text else ""
+            if loc_url and is_safe_sitemap_url(loc_url, root_netloc):
+                urls.extend(expand_sitemap(loc_url, root_netloc, seen, depth + 1))
         return urls
     if tag == "urlset":
-        return [loc.text.strip() for loc in root_el.findall(".//sm:loc", ns) if loc.text]
+        return [
+            loc.text.strip() for loc in root_el.findall(".//sm:loc", ns)
+            if loc.text and is_safe_sitemap_url(loc.text.strip(), root_netloc)
+        ]
     return []
 
 
@@ -141,7 +166,7 @@ class PageParser(html.parser.HTMLParser):
         self._in_jsonld = False
         self._jsonld_buf = []
         self._skip_text_tags = 0
-        self._skip_tags = {"script", "style", "noscript"}
+        self._skip_tags = {"script", "style", "noscript", "nav", "header", "footer"}
 
     def handle_starttag(self, tag, attrs):
         a = dict(attrs)
@@ -223,10 +248,18 @@ def jsonld_types(raw_blocks):
             continue
         items = data if isinstance(data, list) else [data]
         for item in items:
-            if isinstance(item, dict):
-                t = item.get("@type")
-                if t:
-                    types.append(t if isinstance(t, str) else ",".join(t))
+            if not isinstance(item, dict):
+                continue
+            t = item.get("@type")
+            if t:
+                types.append(t if isinstance(t, str) else ",".join(t))
+            graph = item.get("@graph")
+            if isinstance(graph, list):
+                for member in graph:
+                    if isinstance(member, dict):
+                        gt = member.get("@type")
+                        if gt:
+                            types.append(gt if isinstance(gt, str) else ",".join(gt))
     return types, valid
 
 
@@ -279,6 +312,11 @@ def audit_page(url, root_netloc):
 
 def evaluate_rules(pages, root_netloc, extra_link_status):
     v = {}
+    # Normalized to the same rstripped form as `norm` below regardless of
+    # whether the caller passed a bare netloc or a full root URL with a
+    # trailing slash — the homepage-exclusion check below only works when
+    # both sides are shaped identically.
+    root_norm = root_netloc.rstrip("/")
 
     def add(rule, url, detail=""):
         v.setdefault(rule, []).append({"url": url, "detail": detail})
@@ -335,7 +373,7 @@ def evaluate_rules(pages, root_netloc, extra_link_status):
         if pg["word_count"] < THIN_WORDS:
             add("thin_content", url, f"{pg['word_count']} words (< {THIN_WORDS})")
         norm = url.rstrip("/")
-        if norm not in linked_targets and norm != root_netloc:
+        if norm not in linked_targets and norm != root_norm:
             add("orphan_page_no_internal_links_found", url)
 
     for target, status in extra_link_status.items():
@@ -343,6 +381,15 @@ def evaluate_rules(pages, root_netloc, extra_link_status):
             add("broken_internal_link_target", target, f"status={status}")
 
     return v
+
+
+def select_links_to_check(known, all_links, max_checks):
+    """Deterministically pick which additionally-discovered internal links to
+    probe: sorted before capping, so the same site always selects the same
+    subset regardless of set-iteration/hash-seed variance between runs.
+    """
+    candidates = sorted(u for u in all_links if u.rstrip("/") not in known)
+    return candidates[:max_checks]
 
 
 def crawl(base_url, max_pages):
@@ -366,7 +413,9 @@ def crawl(base_url, max_pages):
     sitemap_urls = []
     used_sitemap = None
     for cand in sitemap_candidates:
-        urls = expand_sitemap(cand)
+        if not is_safe_sitemap_url(cand, root_netloc):
+            continue
+        urls = expand_sitemap(cand, root_netloc)
         if urls:
             sitemap_urls = urls
             used_sitemap = cand
@@ -384,13 +433,15 @@ def crawl(base_url, max_pages):
         all_internal_links.update(internal_links)
 
     known = {u.rstrip("/") for u in crawl_set}
-    to_check = [u for u in all_internal_links if u.rstrip("/") not in known][:MAX_EXTRA_LINK_CHECKS]
+    eligible_extra_links = [u for u in all_internal_links if u.rstrip("/") not in known]
+    extra_links_truncated = len(eligible_extra_links) > MAX_EXTRA_LINK_CHECKS
+    to_check = select_links_to_check(known, all_internal_links, MAX_EXTRA_LINK_CHECKS)
     extra_link_status = {}
     for u in to_check:
         r = fetch(u)
         extra_link_status[u] = r["status"]
 
-    violations = evaluate_rules(pages, root, extra_link_status)
+    violations = evaluate_rules(pages, root.rstrip("/"), extra_link_status)
     for pg in pages:
         pg.pop("_internal_links", None)
 
@@ -402,6 +453,8 @@ def crawl(base_url, max_pages):
         "sitemap_url_count": len(sitemap_urls),
         "pages_crawled": len(pages),
         "truncated": truncated,
+        "extra_links_checked": len(to_check),
+        "extra_links_truncated": extra_links_truncated,
         "violations": violations,
         "pages": pages,
     }
@@ -416,6 +469,9 @@ def render_findings(result):
     lines.append(f"- sitemap used: {result['sitemap_used'] or 'NONE FOUND'}")
     lines.append(f"- pages in sitemap: {result['sitemap_url_count']}, crawled: {result['pages_crawled']}"
                   + (" (TRUNCATED — raise --max-pages)" if result["truncated"] else ""))
+    lines.append(f"- extra internal links checked: {result['extra_links_checked']}"
+                  + (" (TRUNCATED — only a sample of additionally-discovered links was checked)"
+                     if result["extra_links_truncated"] else ""))
     total_violations = sum(len(v) for v in result["violations"].values())
     lines.append(f"- rules failing: {len(result['violations'])}, total findings: {total_violations}")
     lines.append("")

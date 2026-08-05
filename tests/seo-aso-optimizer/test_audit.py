@@ -9,9 +9,11 @@ silently — see CLAUDE.md's testing rationale.
 
 Run: python3 tests/seo-aso-optimizer/test_audit.py
 """
+import gzip
 import importlib.util
 import sys
 import unittest
+import zlib
 from pathlib import Path
 
 sys.dont_write_bytecode = True
@@ -131,6 +133,21 @@ class StructuralParsing(unittest.TestCase):
         p = parse(html_text)
         self.assertEqual(p.words, 4)
 
+    def test_word_count_excludes_nav_header_footer_boilerplate(self):
+        html_text = (
+            "<nav>home about contact services blog pricing docs support</nav>"
+            "<header>brand tagline slogan</header>"
+            "<main>one two three</main>"
+            "<footer>copyright all rights reserved company address phone</footer>"
+        )
+        p = parse(html_text)
+        self.assertEqual(p.words, 3)
+
+    def test_word_count_still_counts_text_outside_nav_header_footer(self):
+        html_text = "<nav>ignored words here</nav><p>real content words counted here</p>"
+        p = parse(html_text)
+        self.assertEqual(p.words, 5)
+
 
 class JsonLdParsing(unittest.TestCase):
     def test_valid_single_type(self):
@@ -154,6 +171,171 @@ class JsonLdParsing(unittest.TestCase):
         )
         self.assertTrue(valid)
         self.assertEqual(sorted(types), ["FAQPage", "WebSite"])
+
+    def test_at_graph_property_member_types_detected(self):
+        # REFERENCE.md's own recommended pattern: a single JSON-LD block
+        # combining multiple typed entities via a top-level "@graph" array,
+        # not a bare top-level array of objects (covered above already).
+        raw = (
+            '{"@context": "https://schema.org", "@graph": '
+            '[{"@type": "WebSite"}, {"@type": "Organization"}]}'
+        )
+        types, valid = audit_site.jsonld_types([raw])
+        self.assertTrue(valid)
+        self.assertEqual(sorted(types), ["Organization", "WebSite"])
+
+    def test_top_level_type_alongside_at_graph_both_detected(self):
+        raw = '{"@type": "WebPage", "@graph": [{"@type": "Organization"}]}'
+        types, valid = audit_site.jsonld_types([raw])
+        self.assertEqual(sorted(types), ["Organization", "WebPage"])
+
+
+def make_page(url, **overrides):
+    """A page dict that trips no rule other than what the test cares about."""
+    page = {
+        "url": url,
+        "final_url": url,
+        "status": 200,
+        "redirects": 0,
+        "error": None,
+        "content_encoding": "gzip",
+        "x_robots_tag": "",
+        "title": "A page title that is exactly long enough to pass",
+        "meta_description": "A meta description that is long enough to pass the "
+        "seventy-to-one-sixty character window comfortably.",
+        "meta_robots": "",
+        "og": {"og:title": "t", "og:description": "d", "og:image": "i"},
+        "twitter_card": "",
+        "canonical": url,
+        "html_lang": "en",
+        "hreflangs": [],
+        "viewport": True,
+        "h1_count": 1,
+        "h1s": ["Heading"],
+        "jsonld_count": 1,
+        "jsonld_types": ["WebPage"],
+        "jsonld_valid": True,
+        "img_total": 0,
+        "img_no_alt": 0,
+        "word_count": 500,
+        "internal_link_count": 0,
+        "_internal_links": [],
+    }
+    page.update(overrides)
+    return page
+
+
+class EvaluateRulesOrphanPage(unittest.TestCase):
+    ROOT = "https://example.com"
+    # crawl() builds root as f"{scheme}://{netloc}/" (trailing slash, never
+    # rstripped) and passes that straight through as root_netloc — reproduce
+    # that exact shape here rather than a pre-cleaned value, or the test
+    # can't tell a correct call site from an accidentally-working one.
+    ROOT_AS_PASSED_BY_CRAWL = "https://example.com/"
+
+    def test_homepage_excluded_even_with_no_incoming_links(self):
+        home = make_page(f"{self.ROOT}/", _internal_links=[])
+        violations = audit_site.evaluate_rules([home], self.ROOT_AS_PASSED_BY_CRAWL, {})
+        self.assertNotIn("orphan_page_no_internal_links_found", violations)
+
+    def test_genuinely_orphaned_non_homepage_is_still_flagged(self):
+        home = make_page(f"{self.ROOT}/", _internal_links=["https://example.com/other"])
+        orphan = make_page(f"{self.ROOT}/orphan", _internal_links=[])
+        other = make_page(f"{self.ROOT}/other", _internal_links=[])
+        violations = audit_site.evaluate_rules(
+            [home, orphan, other], self.ROOT_AS_PASSED_BY_CRAWL, {}
+        )
+        orphan_urls = {v["url"] for v in violations.get("orphan_page_no_internal_links_found", [])}
+        self.assertIn(f"{self.ROOT}/orphan", orphan_urls)
+
+    def test_page_linked_from_another_page_is_not_orphaned(self):
+        home = make_page(f"{self.ROOT}/", _internal_links=[f"{self.ROOT}/about"])
+        about = make_page(f"{self.ROOT}/about", _internal_links=[])
+        violations = audit_site.evaluate_rules([home, about], self.ROOT_AS_PASSED_BY_CRAWL, {})
+        orphan_urls = {v["url"] for v in violations.get("orphan_page_no_internal_links_found", [])}
+        self.assertNotIn(f"{self.ROOT}/about", orphan_urls)
+
+
+class DecodeBody(unittest.TestCase):
+    def test_gzip_uppercase_is_decompressed(self):
+        raw = gzip.compress(b"hello world")
+        self.assertEqual(audit_site.decode_body(raw, "GZIP"), b"hello world")
+
+    def test_gzip_lowercase_is_decompressed(self):
+        raw = gzip.compress(b"hello world")
+        self.assertEqual(audit_site.decode_body(raw, "gzip"), b"hello world")
+
+    def test_deflate_mixed_case_is_decompressed(self):
+        raw = zlib.compress(b"hello deflate")
+        self.assertEqual(audit_site.decode_body(raw, "Deflate"), b"hello deflate")
+
+    def test_encoding_with_extra_parameters_still_matches(self):
+        raw = gzip.compress(b"hello params")
+        self.assertEqual(audit_site.decode_body(raw, "gzip;q=1.0"), b"hello params")
+
+    def test_unrecognized_encoding_passes_through_unchanged(self):
+        raw = b"not actually compressed"
+        self.assertEqual(audit_site.decode_body(raw, "br"), raw)
+
+    def test_empty_encoding_passes_through_unchanged(self):
+        raw = b"plain text body"
+        self.assertEqual(audit_site.decode_body(raw, ""), raw)
+
+
+class SelectLinksToCheck(unittest.TestCase):
+    def test_selection_is_deterministic_regardless_of_input_order(self):
+        known = {"https://example.com"}
+        links_a = {"https://example.com/c", "https://example.com/a", "https://example.com/b"}
+        links_b = {"https://example.com/b", "https://example.com/c", "https://example.com/a"}
+        self.assertEqual(
+            audit_site.select_links_to_check(known, links_a, 2),
+            audit_site.select_links_to_check(known, links_b, 2),
+        )
+
+    def test_known_links_are_excluded(self):
+        known = {"https://example.com/already-crawled"}
+        links = {"https://example.com/already-crawled", "https://example.com/extra"}
+        result = audit_site.select_links_to_check(known, links, 10)
+        self.assertEqual(result, ["https://example.com/extra"])
+
+    def test_result_is_capped_at_max_checks(self):
+        known = set()
+        links = {f"https://example.com/{i}" for i in range(10)}
+        result = audit_site.select_links_to_check(known, links, 3)
+        self.assertEqual(len(result), 3)
+
+    def test_result_is_sorted(self):
+        known = set()
+        links = {"https://example.com/z", "https://example.com/a", "https://example.com/m"}
+        result = audit_site.select_links_to_check(known, links, 10)
+        self.assertEqual(result, sorted(links))
+
+
+class IsSafeSitemapUrl(unittest.TestCase):
+    ROOT_NETLOC = "example.com"
+
+    def test_same_origin_https_is_safe(self):
+        self.assertTrue(
+            audit_site.is_safe_sitemap_url("https://example.com/sitemap2.xml", self.ROOT_NETLOC)
+        )
+
+    def test_same_origin_http_is_safe(self):
+        self.assertTrue(
+            audit_site.is_safe_sitemap_url("http://example.com/sitemap2.xml", self.ROOT_NETLOC)
+        )
+
+    def test_file_scheme_is_unsafe(self):
+        self.assertFalse(audit_site.is_safe_sitemap_url("file:///etc/passwd", self.ROOT_NETLOC))
+
+    def test_cross_origin_is_unsafe(self):
+        self.assertFalse(
+            audit_site.is_safe_sitemap_url("https://evil.example/sitemap.xml", self.ROOT_NETLOC)
+        )
+
+    def test_ftp_scheme_is_unsafe(self):
+        self.assertFalse(
+            audit_site.is_safe_sitemap_url("ftp://example.com/sitemap.xml", self.ROOT_NETLOC)
+        )
 
 
 class SitemapXmlParsing(unittest.TestCase):
