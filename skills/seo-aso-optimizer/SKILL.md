@@ -1,6 +1,6 @@
 ---
 name: seo-aso-optimizer
-description: Audit and optimize a website for SEO, AEO/GEO (AI search), and ASO: crawl checks, Search Console striking-distance keywords, page fixes, or an app's companion site. Use for 'SEO', 'ASO', 'bei Google ranken', 'Suchmaschinenoptimierung', 'GSC'.
+description: "Audit and optimize a website for SEO, AEO/GEO (AI search), and ASO — crawl checks, Search Console striking-distance keywords, page fixes, or an app's companion site. Use for 'SEO', 'ASO', 'bei Google ranken', 'Suchmaschinenoptimierung', 'GSC'."
 ---
 
 # SEO / AEO / ASO Optimizer
