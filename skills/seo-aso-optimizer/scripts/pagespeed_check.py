@@ -25,13 +25,20 @@ API = "https://www.googleapis.com/pagespeedonline/v5/runPagespeed"
 CATEGORIES = ["performance", "seo", "accessibility", "best-practices"]
 
 # Google's official "good" thresholds (web.dev/vitals) for lab/field metrics.
-THRESHOLDS = {
+# Only these three are actual Core Web Vitals — matches REFERENCE.md's table.
+CORE_WEB_VITALS = {
     "largest-contentful-paint": ("LCP", 2500, "ms"),
     "cumulative-layout-shift": ("CLS", 0.1, ""),
     "total-blocking-time": ("TBT (INP proxy)", 200, "ms"),
+}
+
+# Other Lighthouse metrics worth surfacing, but not Core Web Vitals.
+OTHER_METRICS = {
     "first-contentful-paint": ("FCP", 1800, "ms"),
     "speed-index": ("Speed Index", 3400, "ms"),
 }
+
+THRESHOLDS = {**CORE_WEB_VITALS, **OTHER_METRICS}
 
 
 def fetch_pagespeed(url, strategy):
@@ -58,16 +65,24 @@ def render(data, url, strategy):
             lines.append(f"- {c['title']}: {score}/100 [{flag}]")
     lines.append("")
 
-    lines.append("## Core Web Vitals (lab data, this run)")
+    def render_metric_lines(metrics):
+        out = []
+        for key, (label, good_max, unit) in metrics.items():
+            a = audits.get(key)
+            if not a or a.get("numericValue") is None:
+                continue
+            val = a["numericValue"]
+            passed = val <= good_max
+            shown = f"{val:.2f}" if unit == "" else f"{val:.0f}{unit}"
+            out.append(f"- {label}: {shown} — {'within' if passed else 'ABOVE'} Google's good threshold ({good_max}{unit})")
+        return out
+
     audits = lr.get("audits", {})
-    for key, (label, good_max, unit) in THRESHOLDS.items():
-        a = audits.get(key)
-        if not a or a.get("numericValue") is None:
-            continue
-        val = a["numericValue"]
-        passed = val <= good_max
-        shown = f"{val:.2f}" if unit == "" else f"{val:.0f}{unit}"
-        lines.append(f"- {label}: {shown} — {'within' if passed else 'ABOVE'} Google's good threshold ({good_max}{unit})")
+    lines.append("## Core Web Vitals (lab data, this run)")
+    lines.extend(render_metric_lines(CORE_WEB_VITALS))
+    lines.append("")
+    lines.append("## Other Lighthouse metrics (lab data, this run)")
+    lines.extend(render_metric_lines(OTHER_METRICS))
 
     field = data.get("loadingExperience", {}).get("metrics")
     if field:
