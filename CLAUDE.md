@@ -126,6 +126,20 @@ Tests are deliberately **not** added for `owasp-bsi-audit`'s scripts (`build_cat
 - Tests set `sys.dont_write_bytecode = True` and pass `PYTHONDONTWRITEBYTECODE=1` to any subprocesses, so they leave no `__pycache__` inside `skills/`. `.gitignore` covers it as a second line of defense.
 - Run them locally before pushing if you touched the underlying script. There is no CI to catch a red test.
 
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live as local markdown files under `.scratch/` (gitignored — local to this machine, not committed). See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Standard five-role vocabulary (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`), recorded as a `Status:` line per issue file — no external label system to map against. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
 ## Vocabulary
 
 See [`CONTEXT.md`](./CONTEXT.md). Read it before introducing new terms.
