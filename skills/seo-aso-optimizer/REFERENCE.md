@@ -120,3 +120,49 @@ One JSON-LD block per page is normal; a page can combine types (e.g. `WebSite` +
 5. **CTA + footer** — repeat the download/contact action; footer carries the standard legal/nav links.
 
 **Service × location depth** (local business with multiple services and/or service areas): one page per service-location combination, each with genuine local detail (landmarks, locally common problems, area-specific FAQs) rather than a templated mad-lib — thin, near-duplicate location pages are a Step 2 `thin_content` finding waiting to happen, and Google treats them as low-value.
+
+## Action plan template
+
+`<workdir>/action-plan.md`, produced fresh every run (Step 5). Three tiers, same shape every item:
+
+```
+## P0 — Critical (this week)
+- [ ] <Finding, one line, with its source: Step 2/3/4>
+      Why: <one sentence, tied to a real number or a real quote from the page/SERP>
+      Action: <the literal thing to do — exact replacement copy, exact FAQ Q+A text,
+               exact file/page to create. Never a bare verb like "improve" or "optimize".>
+
+## P1 — High-impact (this month)
+      (same shape)
+
+## P2 — Worth doing (backlog, next run's starting point)
+      (same shape)
+```
+
+A P0 item without literal replacement text, or a "why" that just restates the finding instead of citing the number/quote behind it, fails Step 5's completion criterion — send it back through Steps 2–4's evidence, don't paraphrase around the gap.
+
+### Worked example (from this skill's own whispaste.de test run)
+
+```
+## P0 — Critical (this week)
+- [ ] Striking-distance query cluster "whisper desktop" / "is whisper desktop free" /
+      "whisper desktop alternative" (Step 3 GSC + Step 4 keyword_expand.py: 1787
+      impressions/28d at position 6.7, 1.4% CTR; autocomplete confirms real demand for
+      the exact phrases "whisper desktop alternative(s)", "is whisper desktop free",
+      "is whisper desktop safe")
+      Why: The page already ranks and already explains what a "Whisper desktop app"
+      is, but has no FAQ entry in the literal phrasing real searchers use — a gap
+      confirmed by reading the live page content, not assumed from the query text.
+      Action: Add three FAQ entries (with FAQPage schema) to /en/whisper-desktop/ and
+      /whisper-desktop/:
+        Q: "Is there a free Whisper Desktop alternative?"
+        A: "Yes — WhisPaste is free and open-source (MIT), and unlike Windows-only
+            tools in this space, it also runs on macOS and Linux."
+        Q: "Is Whisper Desktop free?"
+        A: "Yes. WhisPaste has no account, no subscription, and no paid tier."
+        Q: "Is Whisper Desktop safe?"
+        A: "Yes — it's open source and auditable on GitHub, and runs fully offline
+            by default with no account required."
+```
+
+That's the bar: a P0 item someone could paste straight into the page without asking a follow-up question.

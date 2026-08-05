@@ -63,26 +63,34 @@ Merge three inputs into one map — each target keyword owned by exactly one pag
 
 **Done when:** no target keyword is unmapped, and no single page is asked to own more than one primary keyword.
 
-## Step 5 — Fix (gated on human sign-off)
+## Step 5 — Action plan (mandatory output)
 
-Propose concrete diffs for every Step 2 finding not already deferred. Show them to the user before applying — never auto-publish. This is exactly the point where an unsupervised agent produces confident, wrong content; don't skip the gate even when the fix looks mechanical.
+Steps 2–4 produced findings scattered across `findings.md`, GSC query data, and the keyword-to-page map. Before touching anything, consolidate all of it into one document: `<workdir>/action-plan.md`, using the fixed template in `REFERENCE.md`'s "Action plan template" — three priority tiers, and every item stating the finding, the one-sentence reason grounded in real data, and the literal action (the actual replacement text, the actual FAQ question and answer, the actual file to create — never a verb like "improve" or "optimize" standing alone). `REFERENCE.md` has a fully worked example built from this skill's own whispaste.de test run; match that level of concreteness, not the abstract description of it.
 
-**Done when:** every FAIL entry in `findings.md` is either fixed or carries an explicit "declined: reason" note.
+This is the step most likely to get rushed past — writing individual fixes feels like progress, writing the plan first feels like paperwork. It isn't: skipping straight to fixes is exactly how a "rewrite the title" or "add more content" non-answer sneaks back in.
 
-## Step 6 — Content
+**Done when:** every technical FAIL from Step 2, every striking-distance query from Step 3, and every entry in Step 4's keyword-to-page map appears in `action-plan.md` under a priority tier — nothing silently dropped — and every action is concrete enough that someone with no SEO background could execute it without asking what it means.
 
-For each page in the Step 4 map that needs new or rewritten copy: lead with the answer to the target query in the first paragraph (this is what gets an AI answer engine to quote the page), then go deeper — real specifics, not generic filler. Run drafts through the `avoid-ai-writing` skill before finalizing; don't restate its rules here. Add structured data per `REFERENCE.md`'s schema-type table and confirm it parses (re-run Step 2's script, or check `https://validator.schema.org`).
+## Step 6 — Fix (gated on human sign-off)
 
-**Done when:** every page in the Step 4 map has been written or explicitly skipped, and every new/changed page's structured data validates.
+Execute `action-plan.md`'s P0 and P1 items in order. Show each diff to the user before applying — never auto-publish. This is exactly the point where an unsupervised agent produces confident, wrong content; don't skip the gate even when the fix looks mechanical.
 
-## Step 7 — Ship and verify
+**Done when:** every P0/P1 item in `action-plan.md` is either applied or carries an explicit "declined: reason" note next to it.
 
-If Step 2/3 found no sitemap in Search Console, or a stale one, submit it with `mcp__gsc__submit_sitemap`. Re-run the Step 2 script and confirm the finding groups touched in Step 5 are gone (or still explicitly declined). For a recurring check (e.g. fortnightly striking-distance refresh), the `schedule` skill can run this workflow on a cron cadence.
+## Step 7 — Content
 
-**Done when:** the re-audit's `findings.md` shows no new regressions against Step 5's fixes.
+Execute `action-plan.md`'s content items (new pages, new FAQ/guide entries, rewritten copy): lead with the answer to the target query in the first paragraph (this is what gets an AI answer engine to quote the page), then go deeper — real specifics, not generic filler. Run drafts through the `avoid-ai-writing` skill before finalizing; don't restate its rules here. Add structured data per `REFERENCE.md`'s schema-type table and confirm it parses (re-run Step 2's script, or check `https://validator.schema.org`).
+
+**Done when:** every content item in `action-plan.md` has been written or explicitly skipped, and every new/changed page's structured data validates.
+
+## Step 8 — Ship and verify
+
+If Step 2/3 found no sitemap in Search Console, or a stale one, submit it with `mcp__gsc__submit_sitemap`. Re-run the Step 2 script and confirm the finding groups touched in Step 6 are gone (or still explicitly declined). For a recurring check (e.g. fortnightly striking-distance refresh), the `schedule` skill can run this workflow on a cron cadence.
+
+**Done when:** the re-audit's `findings.md` shows no new regressions against Step 6's fixes, and `action-plan.md`'s P2 tier is left as the next run's starting point.
 
 ## Reference
 
-`REFERENCE.md` — meta-length thresholds, striking-distance thresholds in detail, the schema.org type table, GSC dimension combinations, and page templates. Load it at Step 4 or Step 6, not before — it's detail those steps need, not orientation.
+`REFERENCE.md` — meta-length thresholds, striking-distance thresholds in detail, the schema.org type table, GSC dimension combinations, page templates, and the action-plan template with a worked example. Load it at Step 4 onward, not before — it's detail those steps need, not orientation.
 
 `APP-TO-WEBSITE.md` — the branch for apps without a marketing site: pulling keywords from a store listing and the hero/guides/FAQ structure that turns them into indexable pages.
