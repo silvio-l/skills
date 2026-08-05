@@ -55,16 +55,23 @@ Both routes need Accessibility and Automation permissions granted to whatever pr
 
 ## Stage the shot: no clutter, no Dock, no menu bar
 
-Do this every take, right before starting the recorder — not just the first:
+Do this every take, right before starting the recorder — not just the first. What "staged" means depends on whether the shot is one window or several composed together:
 
-- **Hide every other app.** `osascript -e 'tell application "System Events" to keystroke "h" using {command down, option down}'` — the ⌥⌘H "Hide Others" shortcut — after bringing the target app to the front. Nothing else is left on screen to accidentally appear in frame.
-- **Fix the target window's size and position**, not just its size: `osascript -e 'tell application "My App" to set bounds of window 1 to {x0, y0, x1, y1}'`. Pick bounds that match the deliverable's target aspect ratio and sit comfortably clear of the screen edges.
-- **Capture the window, not the display — this is what actually removes the Dock and menu bar, structurally rather than by hiding them:**
-  - `screencapture`: resolve a window ID with [`GetWindowID`](https://github.com/smokris/GetWindowID) (`brew install smokris/getwindowid/getwindowid`), then `screencapture -l$(GetWindowID "My App") -V20 out.mov` — captures only that window's content.
-  - OBS: use a **Window Capture** source (or the newer **macOS Screen Capture** source set to Window/Application, not Display) scoped to the target app, instead of a Display Capture source.
-  - `sck-record` can't do this — its own docs list "main display only, no window or region selection" as a limitation. If you still need it for system audio, fall back to hiding the Dock for the take: `defaults write com.apple.dock autohide -bool true && killall Dock` (and restore after: `... -bool false && killall Dock`) — there's no equivalent one-liner for the menu bar, which is one more reason to prefer window-scoped capture whenever the shot doesn't specifically need system audio.
+**Single window (the default case).** Hide everything else, then capture only that window — this removes the Dock and menu bar structurally rather than by hiding them:
 
-Confirm the first captured frame actually shows only the target window before treating the take as good — a staging step that silently didn't take effect (Hide Others denied by a permissions dialog, window bounds not applied before the app finished launching) is easy to miss until playback.
+- **Hide every other app.** `osascript -e 'tell application "System Events" to keystroke "h" using {command down, option down}'` — the ⌥⌘H "Hide Others" shortcut — after bringing the target app to the front.
+- **Fix the window's size and position**, not just its size: `osascript -e 'tell application "My App" to set bounds of window 1 to {x0, y0, x1, y1}'`. Pick bounds matching the deliverable's target aspect ratio, clear of the screen edges.
+- **Capture the window, not the display:**
+  - `screencapture`: resolve a window ID with [`GetWindowID`](https://github.com/smokris/GetWindowID) (`brew install smokris/getwindowid/getwindowid`), then `screencapture -l$(GetWindowID "My App") -V20 out.mov`.
+  - OBS: a **Window Capture** source (or the newer **macOS Screen Capture** source set to Window/Application, not Display) scoped to the target app.
+  - `sck-record` can't do this — its own docs list "main display only, no window or region selection" as a limitation; only reach for it here if system audio matters more than a clean frame.
+
+**A composed scene — several windows/apps choreographed together in one shot** (a desktop app next to a simulator, drag-and-drop between two windows, a multi-app flow). Window-scoped capture is the wrong tool here, since it would cut out the other windows the shot actually needs. Two ways to get it right:
+
+- **Preferred: OBS with one Window Capture source per window**, positioned on the scene canvas wherever the composition calls for — side by side, overlapping, whatever the storyboard needs. Each source is still individually window-scoped, so the Dock and menu bar stay excluded even though multiple windows are in frame. Fix every window's size/position first (same AppleScript pattern as above, once per window), since the scene layout is only reproducible if the windows underneath it are.
+- **Fallback: a full-display capture**, when OBS scene composition isn't available. Auto-hide the Dock for the take (`defaults write com.apple.dock autohide -bool true && killall Dock`; restore after with `-bool false`), and either accept the menu bar in frame if the deliverable is fine with a "desktop workspace" look, or crop it out afterward in post — `ffmpeg -i raw.mov -vf "crop=iw:ih-<menubar_height>:0:<menubar_height>" cropped.mov` — rather than relying on an unverified region flag at capture time.
+
+Either way, confirm the first captured frame actually matches what was staged before treating the take as good — a staging step that silently didn't take effect (Hide Others denied by a permissions dialog, window bounds not applied before the app finished launching) is easy to miss until playback.
 
 ## Capture: pick the lightest tool that covers the shot
 
@@ -74,7 +81,7 @@ Confirm the first captured frame actually shows only the target window before tr
    ```
    Apple's own man page calls this utility "not very well documented" — confirm once on the target machine that this really starts headless before relying on it in an unattended script. `-g`/`-G<id>` only add microphone/named input, not system/app audio; use `-k` to burn in click indicators if that's part of the shot.
 2. **[`sck-record`](https://github.com/connerkward/macos-screen-recorder-system-audio)** — a ScreenCaptureKit-based CLI recorder when the video needs the app's own sound; headless, no virtual-audio-device setup required. See the staging step above for its Dock/menu-bar caveat.
-3. **OBS Studio + `obs-cmd`/`obs-cli`** — reach for this only when the shot needs scene composition (blurred backdrop, device bezel baked in at capture time) that's easier live than in post. OBS's WebSocket control has shipped in the app since v28:
+3. **OBS Studio + `obs-cmd`/`obs-cli`** — reach for this when the shot needs scene composition: several windows arranged together (see "A composed scene" above), a blurred backdrop, or a device bezel baked in at capture time rather than in post. OBS's WebSocket control has shipped in the app since v28:
    ```bash
    obs-cmd recording start
    osascript ./storyboard.applescript
