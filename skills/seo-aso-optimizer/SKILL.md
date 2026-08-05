@@ -5,7 +5,7 @@ description: "Audit and optimize a website for SEO, AEO/GEO (AI search), and ASO
 
 # SEO / AEO / ASO Optimizer
 
-Audits and improves an existing website's chances of ranking on Google/Bing and being cited by AI answer engines (ChatGPT, Gemini, Google AI Overviews). The object being optimized is always a **website** — either the site the user already has, or a companion site built for an app that doesn't have one yet (see the branch below). Optimizing an App Store/Play Store listing itself (title, subtitle, keyword field, store screenshots) is out of scope.
+Audits and improves an existing website's chances of ranking on Google/Bing and being cited by AI answer engines (ChatGPT, Gemini, Google AI Overviews). The object being optimized is always a **website** — either the site the user already has, or a companion site built for an app that doesn't have one yet (see the branch below). Optimizing a native store listing itself (title, subtitle, keyword field, store screenshots — App Store, Play Store, Microsoft Store, or any other) is out of scope.
 
 Work through the steps below in order. Each ends on a completion criterion — don't move to the next step until it's met.
 

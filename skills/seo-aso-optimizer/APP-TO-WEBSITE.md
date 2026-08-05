@@ -2,11 +2,11 @@
 
 For an app with no marketing website (or only a bare landing page). The problem: someone searching Google for what the app does will never type the app's name — they type their problem. An app store listing alone doesn't get crawled and ranked the way a website does. This branch builds the missing website, then hands off to `SKILL.md` Step 2 to audit and refine it like any other site.
 
-Scope boundary: this produces a **marketing website** that ranks and converts. It does not touch the app's actual App Store/Play Store listing fields (title, subtitle, keyword field, store screenshots) — that's native store ASO and out of this skill.
+Scope boundary: this produces a **marketing website** that ranks and converts. It does not touch the app's actual store listing fields (title, subtitle, keyword field, store screenshots) on whichever store it lives in — App Store, Play Store, Microsoft Store, or any other — that's native store ASO and out of this skill.
 
 ## 1. Pull the source material
 
-From the app's store listing, gather into one file: app name, current description, category, and existing screenshots/icon. This is the seed for keyword research — the listing already names the problem the app solves, even if it doesn't use the words a searcher would.
+From the app's store listing (App Store, Play Store, Microsoft Store, ...), gather into one file: app name, current description, category, and existing screenshots/icon. This is the seed for keyword research — the listing already names the problem the app solves, even if it doesn't use the words a searcher would.
 
 ## 2. Keyword research: primary + long-tail
 

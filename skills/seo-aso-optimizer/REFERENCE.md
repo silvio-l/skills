@@ -33,7 +33,7 @@ Favor long-tail for any page targeting a specific feature, use case, location, o
 | Page | Primary `@type` |
 |---|---|
 | Homepage (business/product site) | `Organization` + `WebSite` |
-| Homepage (app companion site) | `SoftwareApplication` or `MobileApplication` |
+| Homepage (app companion site) | `SoftwareApplication` (desktop apps too) or `MobileApplication` (mobile only) |
 | Guide / how-to page | `Article` or `HowTo` |
 | FAQ page or FAQ section | `FAQPage` |
 | Service + location page (local business) | `LocalBusiness` (or the closer subtype, e.g. `AutoRepair`) |
