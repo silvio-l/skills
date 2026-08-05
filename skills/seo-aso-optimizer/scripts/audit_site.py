@@ -310,13 +310,15 @@ def audit_page(url, root_netloc):
     return page, sorted(set(internal_links))
 
 
-def evaluate_rules(pages, root_netloc, extra_link_status):
+def evaluate_rules(pages, root_url, extra_link_status):
+    """`root_url` is the site's full root URL (e.g. "https://example.com"),
+    not a bare netloc — distinct from `root_netloc` elsewhere in this module
+    (audit_page, is_safe_sitemap_url), which really is just the host.
+    """
     v = {}
-    # Normalized to the same rstripped form as `norm` below regardless of
-    # whether the caller passed a bare netloc or a full root URL with a
-    # trailing slash — the homepage-exclusion check below only works when
-    # both sides are shaped identically.
-    root_norm = root_netloc.rstrip("/")
+    # rstripped so it compares equal to `norm` below regardless of whether
+    # the caller happens to include a trailing slash.
+    root_norm = root_url.rstrip("/")
 
     def add(rule, url, detail=""):
         v.setdefault(rule, []).append({"url": url, "detail": detail})

@@ -38,8 +38,6 @@ OTHER_METRICS = {
     "speed-index": ("Speed Index", 3400, "ms"),
 }
 
-THRESHOLDS = {**CORE_WEB_VITALS, **OTHER_METRICS}
-
 
 def fetch_pagespeed(url, strategy):
     params = [("url", url), ("strategy", strategy)]

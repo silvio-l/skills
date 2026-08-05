@@ -227,10 +227,10 @@ def make_page(url, **overrides):
 
 class EvaluateRulesOrphanPage(unittest.TestCase):
     ROOT = "https://example.com"
-    # crawl() builds root as f"{scheme}://{netloc}/" (trailing slash, never
-    # rstripped) and passes that straight through as root_netloc — reproduce
-    # that exact shape here rather than a pre-cleaned value, or the test
-    # can't tell a correct call site from an accidentally-working one.
+    # evaluate_rules() normalizes its root argument internally (rstrip),
+    # and crawl() also now rstrips before calling it — passing the
+    # untrimmed, trailing-slash form here exercises both layers of that
+    # belt-and-suspenders fix rather than only the pre-cleaned shape.
     ROOT_AS_PASSED_BY_CRAWL = "https://example.com/"
 
     def test_homepage_excluded_even_with_no_incoming_links(self):
