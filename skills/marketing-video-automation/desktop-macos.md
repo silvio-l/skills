@@ -45,6 +45,10 @@ end
 hs -c "runStoryboard()"
 ```
 
+## Fallback: no addressable accessibility elements
+
+Some apps (custom-drawn canvases, games, some cross-platform toolkits) expose little or nothing to the accessibility tree, so `macos-automator-mcp`'s AppleScript/JXA and Hammerspoon's `hs.axuielement` have nothing to address. When that's genuinely the case — confirm it during exploration in step 2, don't assume it — fall back to `hs.eventtap.leftClick({x, y})`/keystrokes against fixed pixel coordinates, exactly as this file's other sections tell you to avoid. Two things make that fallback survivable rather than fragile: fix the window's size and screen position before recording every single time (`hs.window.focusedWindow():setFrame(...)`), since coordinates are only stable relative to a fixed window; and dry-run the storyboard more than the usual twice — coordinate clicks are far more sensitive to a slow-to-render frame landing a click one pixel off target.
+
 ## Permissions — review before running
 
 Both routes need Accessibility and Automation permissions granted to whatever process hosts them (Terminal, the MCP server, Hammerspoon), and a script granted those permissions can control anything visible on the Mac, not just the target app. Read a generated script once before running it, the same way you'd read any code before executing it with elevated rights.

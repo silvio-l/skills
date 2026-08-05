@@ -44,13 +44,14 @@ A GIF re-encodes every frame as a palette image with essentially no inter-frame 
 - `preload="none"` plus lazy-mounting the element (only once it's near the viewport) keeps an off-screen clip from costing bandwidth nobody asked for.
 - Strip the audio track entirely (`-an`) — a silent autoplaying clip needs no audio stream.
 - Respect `prefers-reduced-motion`: swap in the poster frame, or a much slower non-autoplaying cut, for users who've asked for less motion.
+- The clip is never the only carrier of what it shows: the benefit it demonstrates needs to exist as real, visible page text near the embed too, for anyone who never sees it play. This isn't opt-in the way burned-in captions are — it's a standing requirement, independent of whether the video itself carries any text.
 
 ```bash
 ffmpeg -i polished.mov -an -c:v libvpx-vp9 -b:v 0 -crf 32 -pix_fmt yuv420p demo.webm
 ffmpeg -i polished.mov -an -vf "scale=1920:-2" -c:v libx264 -crf 18 -pix_fmt yuv420p demo.mp4
 ```
 
-On-screen text — burned-in captions, callouts, a nearby text description of what the clip shows — is a separate, opt-in decision from the video itself; per `SKILL.md` step 4, add it only if actually requested, and default to a clean silent clip otherwise.
+Burned-in on-screen text — captions, callouts, an animated headline inside the frame — is a separate, opt-in decision from the clip itself; per `SKILL.md` step 4, add it only if actually requested, and default to a clean, text-free clip otherwise. That's independent of the page-text requirement above: a silent clip with zero burned-in text still needs its benefit stated in real text nearby.
 
 ## Export: GIF
 

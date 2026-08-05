@@ -44,6 +44,6 @@ Start the recorder, replay the storyboard **unmodified**, stop the recorder. Nev
 
 ## 4. Polish and export
 
-Apply zoom/cursor-highlight polish if the deliverable calls for that look, then export the deliverable that fits where it's going: silent autoplaying `<video>` for a website, GIF/WebP only where the platform specifically needs a static-embeddable format, and a spec-compliant MP4 for an App Store/Play Store preview. Any on-screen text — burned-in captions, callouts, an animated headline — is opt-in: default to none, and add it only when the user actually asks for it. See [`post-production.md`](post-production.md) for exact commands, delivery markup, and format specs.
+Apply zoom/cursor-highlight polish if the deliverable calls for that look, then export the deliverable that fits where it's going: silent autoplaying `<video>` for a website, GIF/WebP only where the platform specifically needs a static-embeddable format, and a spec-compliant MP4 for an App Store/Play Store preview. Any on-screen text — burned-in captions, callouts, an animated headline — is opt-in: default to none, and add it only when the user actually asks for it; that's separate from the clip's benefit also needing to exist as real page text nearby, which stands regardless. See [`post-production.md`](post-production.md) for exact commands, delivery markup, and format specs.
 
 **Done when:** every requested output file exists, and `ffprobe`/`gifsicle` confirm it opens cleanly at the target resolution — not just that the export command exited zero.
