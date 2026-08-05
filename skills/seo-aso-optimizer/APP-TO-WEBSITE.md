@@ -25,4 +25,4 @@ Follow `REFERENCE.md`'s hero → how it works → guides → FAQ → CTA templat
 
 ## 4. Hand off
 
-Once the site exists and is deployed, continue at `SKILL.md` Step 2 — the technical audit script and the rest of the workflow apply to this new site exactly like an existing one. Submit the sitemap via `mcp__gsc__submit_sitemap` as part of Step 7.
+Once the site exists and is deployed, continue at `SKILL.md` Step 2 — the technical audit script and the rest of the workflow apply to this new site exactly like an existing one. Submit the sitemap via `mcp__gsc__submit_sitemap` as part of Step 8.
