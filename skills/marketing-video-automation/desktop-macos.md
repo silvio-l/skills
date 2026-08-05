@@ -53,14 +53,27 @@ Some apps (custom-drawn canvases, games, some cross-platform toolkits) expose li
 
 Both routes need Accessibility and Automation permissions granted to whatever process hosts them (Terminal, the MCP server, Hammerspoon), and a script granted those permissions can control anything visible on the Mac, not just the target app. Read a generated script once before running it, the same way you'd read any code before executing it with elevated rights.
 
+## Stage the shot: no clutter, no Dock, no menu bar
+
+Do this every take, right before starting the recorder — not just the first:
+
+- **Hide every other app.** `osascript -e 'tell application "System Events" to keystroke "h" using {command down, option down}'` — the ⌥⌘H "Hide Others" shortcut — after bringing the target app to the front. Nothing else is left on screen to accidentally appear in frame.
+- **Fix the target window's size and position**, not just its size: `osascript -e 'tell application "My App" to set bounds of window 1 to {x0, y0, x1, y1}'`. Pick bounds that match the deliverable's target aspect ratio and sit comfortably clear of the screen edges.
+- **Capture the window, not the display — this is what actually removes the Dock and menu bar, structurally rather than by hiding them:**
+  - `screencapture`: resolve a window ID with [`GetWindowID`](https://github.com/smokris/GetWindowID) (`brew install smokris/getwindowid/getwindowid`), then `screencapture -l$(GetWindowID "My App") -V20 out.mov` — captures only that window's content.
+  - OBS: use a **Window Capture** source (or the newer **macOS Screen Capture** source set to Window/Application, not Display) scoped to the target app, instead of a Display Capture source.
+  - `sck-record` can't do this — its own docs list "main display only, no window or region selection" as a limitation. If you still need it for system audio, fall back to hiding the Dock for the take: `defaults write com.apple.dock autohide -bool true && killall Dock` (and restore after: `... -bool false && killall Dock`) — there's no equivalent one-liner for the menu bar, which is one more reason to prefer window-scoped capture whenever the shot doesn't specifically need system audio.
+
+Confirm the first captured frame actually shows only the target window before treating the take as good — a staging step that silently didn't take effect (Hide Others denied by a permissions dialog, window bounds not applied before the app finished launching) is easy to miss until playback.
+
 ## Capture: pick the lightest tool that covers the shot
 
-1. **`screencapture` (built in, no install)** — fine default for a quiet, no-audio product demo. Interactive selection is only turned on by `-i`; without it, `-V<seconds>` starts recording the main screen immediately for the given duration:
+1. **`screencapture` (built in, no install)** — fine default for a quiet, no-audio product demo; prefer the window-scoped `-l<windowid>` form from the staging step above over a bare `-V<seconds>` full-display capture, which pulls in the Dock and menu bar:
    ```bash
-   screencapture -V 20 demo.mov
+   screencapture -l$(GetWindowID "My App") -V 20 demo.mov
    ```
    Apple's own man page calls this utility "not very well documented" — confirm once on the target machine that this really starts headless before relying on it in an unattended script. `-g`/`-G<id>` only add microphone/named input, not system/app audio; use `-k` to burn in click indicators if that's part of the shot.
-2. **[`sck-record`](https://github.com/connerkward/macos-screen-recorder-system-audio)** — a ScreenCaptureKit-based CLI recorder when the video needs the app's own sound; headless, no virtual-audio-device setup required.
+2. **[`sck-record`](https://github.com/connerkward/macos-screen-recorder-system-audio)** — a ScreenCaptureKit-based CLI recorder when the video needs the app's own sound; headless, no virtual-audio-device setup required. See the staging step above for its Dock/menu-bar caveat.
 3. **OBS Studio + `obs-cmd`/`obs-cli`** — reach for this only when the shot needs scene composition (blurred backdrop, device bezel baked in at capture time) that's easier live than in post. OBS's WebSocket control has shipped in the app since v28:
    ```bash
    obs-cmd recording start
