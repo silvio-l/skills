@@ -38,7 +38,9 @@ If the GSC MCP tools are connected, call them in this order:
 
 From the query,page rows, find **striking-distance** queries: position roughly 5–15, with real impressions (not 1–2 flukes), and CTR below what that position normally earns. These are the site's highest-ROI targets — a small push moves them onto page 1. If GSC isn't connected yet, tell the user it would sharpen targeting, and continue with Step 4 using AI-suggested keywords only.
 
-**Done when:** every striking-distance query is mapped to an owning page, or explicitly declined with a reason (e.g., off-topic, cannibalizes another page).
+For each one, classify it per `REFERENCE.md`'s two failure modes before proposing anything. A "ranks OK, converts badly" query needs the actual replacement title/meta text and a one-sentence reason each change earns the click — see `REFERENCE.md`'s "Writing the fix" — never hand back "improve the title" as the answer.
+
+**Done when:** every striking-distance query is mapped to an owning page (or explicitly declined with a reason), and every "converts badly" one carries real replacement copy, not a description of what the copy should do.
 
 ## Step 4 — Keyword-to-page map
 

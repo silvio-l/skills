@@ -18,8 +18,16 @@ A title/description outside range isn't automatically wrong (a two-word brand na
 A **striking-distance** query is one search visibility push away from page 1: position roughly 5–15 in `mcp__gsc__get_search_analytics`, with real impressions (a query with 1–2 impressions over 28 days is noise, not a target), and a CTR visibly below what that position normally earns (position 1 typically clears 25–30% CTR, position 10 is closer to 2–3% — a query sitting at position 6 with 1% CTR is under-converting for its rank, meaning the *title/description*, not the ranking, is the fix; a query at position 12 with average CTR for that position needs a *ranking* fix instead).
 
 Distinguish the two failure modes before prescribing a fix:
-- **Ranks OK, converts badly** → rewrite title/meta description to match search intent more precisely.
+- **Ranks OK, converts badly** → rewrite the title and meta description. See "Writing the fix" below — "rewrite the title" is not a fix, the rewritten title is.
 - **Doesn't rank high enough** → the owning page needs more topical depth, better internal links pointing to it, or doesn't exist yet.
+
+### Writing the fix, not just naming it
+
+"Rewrite the title to match intent better" is not a deliverable — it's a restatement of the problem. For every "ranks OK, converts badly" query, produce the actual replacement title and meta description text, plus one sentence on why each specific change earns the click that the old one didn't. Check the length against the thresholds above before presenting it.
+
+Rewriting the snippet does not cost reach — ranking position drives impressions, not the title text, so nobody who currently sees the listing stops seeing it. The only question is which of those impressions become clicks. That means there's no real tension between "I want more visitors" and "fix the snippet": a clearer snippet keeps the same audience and converts more of it, it doesn't narrow who's reached.
+
+When the striking-distance query collides with a competitor's product name (someone else's tool ranks for the literal words, and this site's page is being served instead or alongside it), don't assume the audience is simply "the same, just needs convincing" — check what that competitor's product actually is (its own site or repo usually says platform, category, pricing in the first paragraph) before writing the fix. If it turns out to solve a genuinely different problem (a batch file-processing tool vs. a live-input tool, a Windows-only tool vs. a cross-platform one), an honest snippet that names the difference outperforms a vague one that lets the searcher assume a match: it correctly draws the click from whoever actually wants what this page offers, instead of wasting the impression on a click that bounces in three seconds either way.
 
 ## Short-tail vs. long-tail
 
