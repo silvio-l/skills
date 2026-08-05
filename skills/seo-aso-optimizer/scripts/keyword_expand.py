@@ -11,11 +11,11 @@ classification and prioritization stay a human/LLM step (SKILL.md Step 4).
 This is an undocumented endpoint, not a published API with usage terms for
 this — treat it as a courtesy, not a guarantee. Mitigations built in: a
 realistic User-Agent, a fixed delay between requests (~0.35s), a hard cap of
-3 seeds per run (~150 requests total, not thousands), and an early abort if
-several requests in a row fail outright (signals blocking, not just a
-query with no suggestions) rather than hammering a wall. Don't run this in
-a scheduled/looped job or raise MAX_SEEDS without good reason — it's an
-occasional research tool, not a monitoring pipeline.
+3 seeds per run (100 requests/seed, up to 300 total, not thousands), and an
+early abort if several requests in a row fail outright (signals blocking,
+not just a query with no suggestions) rather than hammering a wall. Don't
+run this in a scheduled/looped job or raise MAX_SEEDS without good reason —
+it's an occasional research tool, not a monitoring pipeline.
 
 Usage:
     python3 keyword_expand.py "whisper desktop" ["whispaste" ...]
@@ -88,11 +88,18 @@ MAX_CONSECUTIVE_FAILURES = 4  # stop hammering an endpoint that looks blocked/do
 def harvest(seed, sources=("google", "youtube")):
     found = set()
     consecutive_failures = 0
-    for i, query in enumerate(build_queries(seed)):
+    made_a_request = False
+    for query in build_queries(seed):
         ok = False
         for source, fn in (("google", google_autocomplete), ("youtube", youtube_autocomplete)):
             if source not in sources:
                 continue
+            # Pace every actual request, not just every query — two source
+            # calls within the same query are still two requests to the
+            # same endpoint family.
+            if made_a_request:
+                time.sleep(DELAY_SECONDS)
+            made_a_request = True
             try:
                 found.update(fn(query))
                 ok = True  # a real response, even an empty suggestion list, counts as reachable
@@ -107,8 +114,6 @@ def harvest(seed, sources=("google", "youtube")):
                 file=sys.stderr,
             )
             break
-        if i > 0:
-            time.sleep(DELAY_SECONDS)
     found.discard(seed)
     return sorted(found)
 
@@ -120,8 +125,13 @@ def main():
     args = ap.parse_args()
 
     seeds = args.seeds[:MAX_SEEDS]
+    requests_per_seed = len(build_queries("x")) * 2  # google + youtube; count is seed-independent
     if len(args.seeds) > MAX_SEEDS:
-        print(f"Only using the first {MAX_SEEDS} seeds ({MAX_SEEDS * 50} requests each is already the runtime budget).", file=sys.stderr)
+        print(
+            f"Only using the first {MAX_SEEDS} seeds "
+            f"({MAX_SEEDS * requests_per_seed} requests total is already the runtime budget).",
+            file=sys.stderr,
+        )
     sources = tuple(s.strip() for s in args.sources.split(","))
 
     for seed in seeds:
