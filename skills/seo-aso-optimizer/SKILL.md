@@ -17,7 +17,7 @@ Establish: the site's audience, its 2–3 core offerings/pages, and its brand vo
 
 ## Step 2 — Technical audit (deterministic)
 
-Run the crawl script — it hits every page in the sitemap and checks fixed rules (titles, meta descriptions, H1s, canonical, lang, viewport, structured data validity, alt text, thin content, orphan pages, broken internal links, robots.txt/sitemap/llms.txt presence). No LLM judgment happens inside it, so the same site always yields the same findings:
+Run the crawl script — it hits every page in the sitemap and checks fixed rules (titles, meta descriptions, H1s, canonical, lang, viewport, structured data validity, alt text, thin content, orphan pages, broken internal links, accidental `noindex` directives, missing compression, robots.txt/sitemap/llms.txt presence). No LLM judgment happens inside it, so the same site always yields the same findings:
 
 ```
 python3 skills/seo-aso-optimizer/scripts/audit_site.py https://example.com --out-dir <workdir>
@@ -25,7 +25,15 @@ python3 skills/seo-aso-optimizer/scripts/audit_site.py https://example.com --out
 
 Read the findings-first report (grouped by rule, most-violated first) printed to stdout and saved as `<workdir>/findings.md`. **Do not read `<workdir>/audit-data.json` up front** — it's the full per-page sidecar, meant for drilling into one specific rule or URL once you already know which one matters.
 
-**Done when:** every rule group in `findings.md` has been triaged — fix now, defer with a reason, or false-positive with a reason.
+Then check page speed — the crawl script only covers correctness/structure, not load performance, and slow pages both rank worse and convert worse:
+
+```
+python3 skills/seo-aso-optimizer/scripts/pagespeed_check.py https://example.com/ --strategy mobile
+```
+
+Needs a free `PAGESPEED_API_KEY` (see the script's docstring) — the anonymous quota is 0 requests/day, not just rate-limited. Run it at minimum against the homepage and the page with the most GSC impressions; more pages if the user asks for a full performance pass. `REFERENCE.md` has the Core Web Vitals thresholds the script checks against.
+
+**Done when:** every rule group in `findings.md` has been triaged — fix now, defer with a reason, or false-positive with a reason — and the page-speed check has run at least once, with any Core Web Vital outside Google's "good" threshold triaged the same way.
 
 ## Step 3 — Search Console reality check
 
@@ -38,9 +46,11 @@ If the GSC MCP tools are connected, call them in this order:
 
 From the query,page rows, find **striking-distance** queries: position roughly 5–15, with real impressions (not 1–2 flukes), and CTR below what that position normally earns. These are the site's highest-ROI targets — a small push moves them onto page 1. If GSC isn't connected yet, tell the user it would sharpen targeting, and continue with Step 4 using AI-suggested keywords only.
 
-For each one, classify it per `REFERENCE.md`'s two failure modes before proposing anything. A "ranks OK, converts badly" query needs the actual replacement title/meta text and a one-sentence reason each change earns the click — see `REFERENCE.md`'s "Writing the fix" — never hand back "improve the title" as the answer.
+For each one, classify it per `REFERENCE.md`'s two failure modes — but classify from evidence, not from the query text alone: fetch the owning page's actual current content (not just the audit script's title/meta/word-count fields) and run one `WebSearch` for the literal query to see what's really competing for it, before deciding why it under-converts. A "ranks OK, converts badly" query needs the actual replacement title/meta text and a one-sentence reason each change earns the click, grounded in what Steps 3 actually found on the page and in the SERP — see `REFERENCE.md`'s "Writing the fix". Never hand back "improve the title" as the answer, and never diagnose a mismatch you haven't confirmed by reading the page.
 
-**Done when:** every striking-distance query is mapped to an owning page (or explicitly declined with a reason), and every "converts badly" one carries real replacement copy, not a description of what the copy should do.
+While you have a page's full query,page breakdown open, check whether it's actually the top query that needs the fix — a lower-ranked query on the same page can be the bigger opportunity (e.g. a transactional-intent query landing on a page that buries its call-to-action).
+
+**Done when:** every striking-distance query is mapped to an owning page (or explicitly declined with a reason), every "converts badly" diagnosis cites the actual page content and SERP context that support it, and every one carries real replacement copy, not a description of what the copy should do.
 
 ## Step 4 — Keyword-to-page map
 

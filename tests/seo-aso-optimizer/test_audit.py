@@ -92,6 +92,15 @@ class StructuralParsing(unittest.TestCase):
         self.assertEqual(p.canonical, "https://example.com/")
         self.assertTrue(p.viewport)
 
+    def test_meta_robots_noindex_captured(self):
+        html_text = '<head><meta name="robots" content="noindex, nofollow"></head>'
+        p = parse(html_text)
+        self.assertIn("noindex", p.meta_robots)
+
+    def test_meta_robots_absent_is_none(self):
+        p = parse("<head></head>")
+        self.assertIsNone(p.meta_robots)
+
     def test_word_count_excludes_script_and_style(self):
         html_text = (
             "<body><script>var junkWordsHere = 1;</script>"

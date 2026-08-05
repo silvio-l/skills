@@ -9,12 +9,14 @@ Usage:
     python3 audit_site.py https://example.com [--max-pages 150] [--out-dir .]
 """
 import argparse
+import gzip
 import html.parser
 import json
 import re
 import sys
 import urllib.error
 import urllib.request
+import zlib
 from urllib.parse import urljoin, urlparse
 from xml.etree import ElementTree as ET
 
@@ -38,24 +40,40 @@ class _RedirectCounter(urllib.request.HTTPRedirectHandler):
 def fetch(url):
     counter = _RedirectCounter()
     opener = urllib.request.build_opener(counter)
-    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    # Advertise gzip/deflate so Content-Encoding reflects what the server
+    # actually offers (Python's urllib sends no Accept-Encoding by default,
+    # which would make every server look "uncompressed").
+    req = urllib.request.Request(
+        url, headers={"User-Agent": USER_AGENT, "Accept-Encoding": "gzip, deflate"}
+    )
     try:
         with opener.open(req, timeout=TIMEOUT) as resp:
-            body = resp.read(2_000_000)
+            raw = resp.read(2_000_000)
+            encoding = resp.headers.get("Content-Encoding", "")
+            if encoding == "gzip":
+                body = gzip.decompress(raw)
+            elif encoding == "deflate":
+                body = zlib.decompress(raw)
+            else:
+                body = raw
             return {
                 "status": resp.status,
                 "final_url": resp.geturl(),
                 "redirects": counter.count,
                 "body": body,
                 "content_type": resp.headers.get("Content-Type", ""),
+                "content_encoding": encoding,
+                "x_robots_tag": resp.headers.get("X-Robots-Tag", ""),
                 "error": None,
             }
     except urllib.error.HTTPError as e:
         return {"status": e.code, "final_url": url, "redirects": counter.count,
-                "body": b"", "content_type": "", "error": str(e)}
+                "body": b"", "content_type": "", "content_encoding": "", "x_robots_tag": "",
+                "error": str(e)}
     except Exception as e:
         return {"status": None, "final_url": url, "redirects": counter.count,
-                "body": b"", "content_type": "", "error": str(e)}
+                "body": b"", "content_type": "", "content_encoding": "", "x_robots_tag": "",
+                "error": str(e)}
 
 
 def fetch_text(url):
@@ -104,6 +122,7 @@ class PageParser(html.parser.HTMLParser):
         super().__init__(convert_charrefs=True)
         self.title = None
         self.meta_description = None
+        self.meta_robots = None
         self.canonical = None
         self.html_lang = None
         self.hreflangs = []
@@ -136,6 +155,8 @@ class PageParser(html.parser.HTMLParser):
                 self.meta_description = a.get("content", "")
             elif name == "viewport":
                 self.viewport = True
+            elif name == "robots":
+                self.meta_robots = (a.get("content") or "").lower()
         elif tag == "link":
             rel = (a.get("rel") or "").lower()
             if rel == "canonical":
@@ -207,6 +228,8 @@ def audit_page(url, root_netloc):
     page = {
         "url": url, "final_url": r["final_url"], "status": r["status"],
         "redirects": r["redirects"], "error": r["error"],
+        "content_encoding": r.get("content_encoding", ""),
+        "x_robots_tag": r.get("x_robots_tag", ""),
     }
     if r["status"] != 200 or not r["body"]:
         return page, []
@@ -227,6 +250,7 @@ def audit_page(url, root_netloc):
     page.update({
         "title": (p.title or "").strip(),
         "meta_description": (p.meta_description or "").strip(),
+        "meta_robots": p.meta_robots or "",
         "canonical": p.canonical,
         "html_lang": p.html_lang,
         "hreflangs": p.hreflangs,
@@ -262,6 +286,15 @@ def evaluate_rules(pages, root_netloc, extra_link_status):
             continue
         if pg["redirects"] > 0:
             add("sitemap_url_redirects", url, f"-> {pg['final_url']} ({pg['redirects']} hop(s))")
+        noindex_sources = []
+        if "noindex" in pg.get("meta_robots", ""):
+            noindex_sources.append("meta robots")
+        if "noindex" in pg.get("x_robots_tag", "").lower():
+            noindex_sources.append("X-Robots-Tag header")
+        if noindex_sources:
+            add("noindex_directive_on_sitemap_page", url, f"via {', '.join(noindex_sources)} — page is in the sitemap but tells Google not to index it")
+        if not pg.get("content_encoding"):
+            add("missing_compression", url, "no Content-Encoding despite Accept-Encoding: gzip, deflate — page is served uncompressed")
         if not pg["title"]:
             add("missing_title", url)
         elif not (TITLE_MIN <= len(pg["title"]) <= TITLE_MAX):

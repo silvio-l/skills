@@ -1,6 +1,29 @@
 # Reference
 
-Consulted on demand from `SKILL.md` Step 4 and Step 6 — not needed for orientation.
+Consulted on demand from `SKILL.md` Step 2 onward — not needed for orientation.
+
+## Core Web Vitals thresholds
+
+Google's official "good" bar (web.dev/vitals) — what `scripts/pagespeed_check.py` checks each metric against:
+
+| Metric | Good | Needs improvement | Poor |
+|---|---|---|---|
+| LCP (Largest Contentful Paint) | ≤ 2.5s | ≤ 4s | > 4s |
+| CLS (Cumulative Layout Shift) | ≤ 0.1 | ≤ 0.25 | > 0.25 |
+| INP (Interaction to Next Paint) | ≤ 200ms | ≤ 500ms | > 500ms |
+
+INP needs real-user field data (CrUX), which a low-traffic site often doesn't have enough Chrome users to populate yet — the script reports "no field data" plainly rather than faking a number, and falls back to Total Blocking Time (lab data) as the closest available proxy.
+
+## Free tools beyond GSC, no signup
+
+| Tool | Gives you | Needs |
+|---|---|---|
+| PageSpeed Insights API (`scripts/pagespeed_check.py`) | Core Web Vitals + Lighthouse performance/SEO/accessibility scores | A free API key (Google Cloud Console, no billing account) — verified by testing: the anonymous quota is 0 requests/day, not just rate-limited |
+| W3C Nu Html Checker — `https://validator.w3.org/nu/?doc=<url>&out=json` | Real markup errors the crawl script's parser can miss | Nothing — plain HTTP GET, no key, no signup |
+| `mcp__gsc__*` (this environment) | Real queries, clicks, impressions, position | A Google account with the property already verified |
+| Bing Webmaster Tools | The same shape of data as GSC, for Bing | A free account plus its own separate site verification — not wired into this skill (no MCP tool for it here yet); if the user already has it set up, cross-check striking-distance queries there the same way as Step 3 |
+
+Skip paid tiers (Ahrefs, SEMrush, GTmetrix's deeper checks) unless the user already has access — this skill's job is doing the free tier well, not gatekeeping behind a subscription.
 
 ## Meta-length thresholds
 
