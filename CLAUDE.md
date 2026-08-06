@@ -116,8 +116,8 @@ There is no CI and no global test runner. Verification is still the roundtrip: p
 **Tests are welcome where a script can fail silently** — i.e. where a bug produces plausible-but-wrong output that the roundtrip cannot see. Today this applies to:
 
 - `skills/apple-notes/scripts/_helper.py` — regex-driven HTML stripping and base64 extraction. A missed edge case produces text the agent will happily use without noticing the loss. Tests live at `tests/apple-notes/test_helper.py`.
-
-Tests are deliberately **not** added for `owasp-bsi-audit`'s scripts (`build_catalog.py`, `render_report.py`) — they wrap upstream catalog sources (ASVS, MASVS, BSI Kompendium) and a report renderer; a bug surfaces as an obviously malformed report or a fetch failure, not silent plausible-but-wrong output.
+- `skills/owasp-bsi-audit/scripts/build_catalog.py` and `render_report.py` — the catalog parser's regex/XML parsing and the renderer's sorting/grouping/scope-diffing logic can each produce a plausible-but-wrong result (a mis-parsed control, a mis-sorted finding) that only shows up as a subtly wrong report a human has to notice by eye. Tests live at `tests/owasp-bsi-audit/test_build_catalog.py` and `test_render_report.py`.
+- `skills/name-clearance-red-team/scripts/*.py` — the risk model, digital-availability classifiers, name-variant generator, and report renderer all produce exactly this failure mode (a blocked lookup misread as "no hits", a wrong verdict, a missed variant) rather than an obvious crash. Tests live at `tests/name-clearance-red-team/test_*.py`.
 
 ### Conventions
 

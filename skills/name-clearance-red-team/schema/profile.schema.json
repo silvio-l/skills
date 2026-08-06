@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "name-clearance-red-team/profile.schema.json",
+  "title": "Profile",
+  "description": "The intake record written at Checkpoint A (profile.json). Required fields must never be guessed or defaulted silently — they are asked. Recommended fields may be defaulted, but every default used must also appear in 'assumptions'.",
+  "type": "object",
+  "required": ["name", "name_type", "goods_and_services", "target_territories", "planned_use", "mode", "prior_events", "assumptions", "created_at"],
+  "properties": {
+    "name": {"type": "string"},
+    "name_type": {
+      "type": "string",
+      "enum": ["company", "product", "service", "software", "app", "game", "website", "publication", "project", "organization", "event", "pseudonym", "other"]
+    },
+    "goods_and_services": {
+      "type": "array",
+      "items": {"type": "string"},
+      "minItems": 1,
+      "description": "Concrete, free-text description of what the name will be used for. Never inferred — this is what decides whether a conflicting mark actually collides (rule #4)."
+    },
+    "target_territories": {
+      "type": "array",
+      "items": {"type": "string"},
+      "minItems": 1,
+      "description": "E.g. ['DE', 'EU']. Never inferred — always asked, default DE+EU offered but must be confirmed."
+    },
+    "target_customers": {"type": "string"},
+    "planned_use": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["word_mark", "logo", "company_name", "product_name", "domain", "app_store_name", "social_media"]
+      },
+      "minItems": 1
+    },
+    "industry": {"type": "string"},
+    "business_model": {"type": "string"},
+    "languages": {"type": "array", "items": {"type": "string"}},
+    "launch_date": {"type": "string"},
+    "legal_entity": {"type": "string"},
+    "future_markets": {"type": "array", "items": {"type": "string"}},
+    "known_competitors": {"type": "array", "items": {"type": "string"}},
+    "candidate_domains": {"type": "array", "items": {"type": "string"}},
+    "risk_tolerance": {"type": "string", "enum": ["low", "medium", "high"], "default": "low"},
+    "search_depth": {"type": "string", "enum": ["quick", "deep"], "default": "deep"},
+    "mode": {"type": "string", "enum": ["quick", "deep", "launch", "handoff"]},
+    "prior_events": {
+      "type": "object",
+      "description": "The Checkpoint A question that no search can answer for the user (four of the §11 hard stops live only here).",
+      "required": ["cease_and_desist", "ongoing_dispute", "unclear_rights_chain", "high_investment", "none"],
+      "properties": {
+        "cease_and_desist": {"type": "boolean"},
+        "ongoing_dispute": {"type": "boolean"},
+        "unclear_rights_chain": {"type": "boolean"},
+        "high_investment": {"type": "boolean"},
+        "none": {"type": "boolean"},
+        "details": {"type": "string"}
+      }
+    },
+    "sector_modules_applicable": {
+      "type": "array",
+      "description": "Module names identified as potentially relevant during Phase 8 triage (e.g. ['finance', 'healthcare']). Every name here must end up either as a 'sector-<name>' cluster's findings or an entry in sector_modules_not_applicable — the special_sector_rules_checked gate checks exactly this.",
+      "items": {"type": "string"}
+    },
+    "sector_modules_not_applicable": {
+      "type": "array",
+      "description": "For each §8 special-sector module not triggered by this name/industry, a reason it was excluded. Read by the special_sector_rules_checked gate.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "module": {"type": "string"},
+          "reason": {"type": "string"}
+        }
+      }
+    },
+    "assumptions": {
+      "type": "array",
+      "description": "Rule #9: every assumption must be flagged as an assumption. Any recommended-field default that was used without explicit user confirmation goes here.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "field": {"type": "string"},
+          "assumed_value": {"type": "string"},
+          "reason": {"type": "string"}
+        }
+      }
+    },
+    "created_at": {"type": "string", "description": "ISO 8601 timestamp."}
+  }
+}

@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "name-clearance-red-team/searchlog.schema.json",
+  "title": "SearchLogRow",
+  "description": "One attempted (or planned) lookup. searchlog/_plan.json holds the full planned array (every row status='not_attempted'); searchlog/<cluster-id>.json holds that cluster's rows after execution. This file is the keystone artifact: every one of the 13 gates in RISK-MODEL.md is derived from these rows, not from the findings. A blocked or skipped lookup is a row here even when it produced zero findings — 'the cluster ran and found nothing' and 'the cluster never ran' must stay distinguishable on disk.",
+  "type": "object",
+  "required": ["query", "source_id", "territory", "search_type", "source_category", "cluster_id", "date", "performed_by", "status"],
+  "properties": {
+    "query": {
+      "type": "string",
+      "description": "The literal search string/name variant used, or planned to be used."
+    },
+    "source_id": {
+      "type": "string",
+      "description": "References an entry in SOURCES.md, e.g. 'dpma-register', 'tmview', 'wipo-gbd', 'handelsregister', 'euipo-tmclass', 'github-search', 'npm-registry', 'rdap'."
+    },
+    "territory": {
+      "type": "string",
+      "description": "Single target territory this row is about, e.g. 'DE', 'EU', 'US'. Never combined — rule #6."
+    },
+    "search_type": {
+      "type": "string",
+      "enum": ["exact", "similarity", "company_name", "unregistered", "linguistic", "sector", "digital"],
+      "description": "Drives which gate this row counts toward (exact_search_completed, similarity_search_completed, unregistered_rights_checked, company_names_checked, ...)."
+    },
+    "source_category": {
+      "type": "string",
+      "enum": ["registered_mark", "unregistered", "company_register", "digital", "linguistic", "sector"]
+    },
+    "cluster_id": {
+      "type": "string",
+      "description": "Which cluster this row belongs to, e.g. 'de-eu-registers', 'linguistic-de', 'sector-finance'. Required on every row, including in searchlog/_plan.json before any cluster has run — render_report.py merges _plan.json and every searchlog/<cluster-id>.json file into one list keyed on (query, source_id, territory, cluster_id); omitting cluster_id lets two distinct rows collide (or a plan row and its completed counterpart fail to match), silently dropping a row or leaving it stuck at not_attempted. absolute_grounds_checked and special_sector_rules_checked additionally read this field directly for per-language/per-module coverage, by the same 'sector-<module>' naming convention findings already use."
+    },
+    "date": {
+      "type": "string",
+      "description": "ISO 8601 date/time the lookup was attempted (or planned, for not_attempted rows)."
+    },
+    "performed_by": {
+      "type": "string",
+      "enum": ["agent", "user"],
+      "description": "'user' rows come from the Checkpoint C manual-lookup handoff, where the user looked up the source themselves and reported back what they saw. A 'user' row with status=completed satisfies its gate exactly like an agent-completed row — this is the deadlock escape hatch documented in the plan."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["completed", "blocked", "not_attempted", "pending_user_verification"],
+      "description": "completed = actual result content was seen (a hit list, or an explicit 'no results' rendered by the source itself). blocked = the lookup was attempted but produced no trustworthy content (see block_reason) — this is NEVER the same as 'no hits found' and must never be recorded as a zero-finding cluster without a blocked row explaining why. not_attempted = planned but not yet run. pending_user_verification = queued for Checkpoint C, waiting on the user."
+    },
+    "block_reason": {
+      "type": "string",
+      "enum": ["empty_shell", "captcha", "bot_block", "http_error", "rate_limited", "tos_forbids_automation", "no_public_access"],
+      "description": "Required when status=blocked. 'empty_shell' = the fetch returned a JS app shell with no rendered content — the single most dangerous failure mode of this skill if misread as 'no hits'."
+    },
+    "result_summary": {
+      "type": "string",
+      "description": "What was literally seen: 'no results', 'N hits, see findings/<cluster-id>.json', or a description of the block (e.g. 'CAPTCHA page, no query executed')."
+    },
+    "manual_instructions": {
+      "type": "object",
+      "description": "Required when status is blocked or pending_user_verification. Everything a human needs to redo this lookup at a browser.",
+      "properties": {
+        "url": {"type": "string"},
+        "search_string": {"type": "string"},
+        "filters": {"type": "string"}
+      }
+    }
+  }
+}
