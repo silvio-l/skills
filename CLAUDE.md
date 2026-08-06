@@ -22,7 +22,9 @@ edit here → commit on dev → push dev → merge dev into main (ff-only) → p
 
    Run this only **after step 4** (both branches pushed, `main` current) — otherwise `update` pulls a stale `main` and the edit silently does not land.
 
-   **Do not use `add … -g` to refresh.** On the current `skills` CLI (≥1.5.x) global `add` fails with `PromptScript: PromptScript does not support global skill installation` for any skill that ships scripts (all of mine). `add` is for a *first-time* install only — and even then use it without `-g` (`npx skills@latest add silvio-l/skills`, which prompts for scope/skill/agent and installs project- or user-level). Once a skill is installed, `update` is the only working refresh path.
+   **Do not use `add` to refresh** — it's for a *first-time* install of a brand-new skill only (`update` has no path to add a skill it doesn't already know about). Once a skill is installed, `update` is the only working refresh path.
+
+   **First-time install: run `add` with `-g`, and from *outside* this repo's working directory — never from inside it.** `npx skills@latest add silvio-l/skills -g -s <skill-name> -y`. The `-g` failure this used to note (`PromptScript: PromptScript does not support global skill installation`) is real but harmless — it only affects the unrelated "PromptScript" agent target; every other agent (including Claude Code) installs fine, verify via `ls ~/.agents/skills/<skill-name>`. The actual danger is `cwd`: run `add` (with or without `-g`) while `cwd` is inside this repo, and its project-scope auto-detection **replaces `skills/<skill-name>/` with a symlink into a newly created `.agents/skills/<skill-name>/`**, and drops `.agents/`, `.claude/`, `skills-lock.json` into the repo tree — a destructive clobber of the source directory this file governs. `cd ~` (or any directory outside the repo) before running `add`, every time.
 
 **Never edit `~/.claude/skills/<skill-name>/` directly.** Those paths are CLI-managed symlinks into `~/.agents/skills/<skill-name>/`. Any edit there is overwritten on the next install.
 
