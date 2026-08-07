@@ -84,7 +84,7 @@ otherwise have passed. `scripts/retopo_bake.py` currently runs `quads_convert_to
 `cleanup_mesh()`, i.e. **before** the decimate — that is not this pass. Until the script grows it, run
 the four operators above on the low-poly cage explicitly.
 
-### Known gap: this cleanup does not catch spiky non-manifold survivors fused into the main mesh
+### Known gap: this cleanup does not catch spiky non-manifold survivors fused into the main mesh — and local mesh repair does not either
 
 Confirmed on a hero building sourced from a raw AI mesh with 33.20% non-manifold verts and 573
 disconnected islands pre-cleanup: after decimate + the four-step cleanup above + bake, a region of
@@ -92,18 +92,54 @@ thin, spiky, degenerate geometry near a shopfront awning survived and baked into
 wire/sail-shaped artifact. It was **not** a separable junk island (a `bmesh` connected-component
 traversal from a raycast hit found it topologically fused to 90% of the mesh — 14,195 of 15,814
 faces — so it can't be selected and deleted in isolation), and it was confirmed geometric, not a
-texture problem, via a clay (untextured) render of the same framing. Two remediation attempts both
-failed: masked texture-space inpainting was ruled out before touching pixels once a UV-coordinate
-back-projection showed the auto-packed atlas has no spatial locality (a small screen region maps to
-hundreds of scattered, unrelated islands elsewhere in the same texture); and localized Laplacian
-smoothing of the affected verts made it *worse*, because moving vertices after the bake desyncs the
-already-UV-mapped texture from the new geometry (visible as harsher, stretched distortion) without
-a re-bake to match. **The weld + dissolve-degenerate + limited-dissolve + re-triangulate sequence in
-this section is tuned for coplanar/needle-thin decimate debris, not for relaxing a spiky, fused,
-non-manifold survivor region** — that needs either a targeted local remesh of just the affected
-vertex group (bounded, not yet implemented) or catching it earlier, before decimation fuses it to
-clean geometry. Re-bake is mandatory after any geometry edit made downstream of a bake — never move
-verts against a texture that already has UVs baked onto the old positions.
+texture problem, via a clay (untextured) render of the same framing.
+
+**Five remediation techniques were tried against this specific source mesh; all five failed or made
+it worse.** In order: masked texture-space inpainting was ruled out before touching pixels once a
+UV-coordinate back-projection showed the auto-packed atlas has no spatial locality (a small screen
+region maps to hundreds of scattered, unrelated islands elsewhere in the same texture); hard-cutoff
+Laplacian smoothing of the affected verts on the already-baked low-poly made it *worse*, because
+moving vertices after the bake desyncs the already-UV-mapped texture from the new geometry (visible
+as harsher, stretched distortion) without a re-bake to match; feathered (radius-falloff) Laplacian
+smoothing on the pre-bake high-poly source (so a re-bake would stay in sync) still failed once
+attempted, because a clay-render check revealed the region is not merely spiky but genuinely
+self-intersecting, overlapping topology with inverted normals — smoothing of any radius profile can
+only blur that, not resolve it; deleting the region and using `bmesh.ops.holes_fill()` on the
+resulting boundary failed because the boundary itself was highly fragmented (18,761 boundary edges
+for 4,361 deleted faces — many small interleaved loops, not one clean loop `holes_fill` can handle);
+and a **local Voxel Remesh** of just the affected region and a context margin (separate the region
+into its own object, `remesh_voxel_size` tuned to local density, rejoin and weld the seam) — the
+technique this section used to recommend as the not-yet-implemented next step — **was implemented
+and also failed**: voxel-remeshing an already self-intersecting, multi-layered volume faithfully
+reconstructs a *different-shaped* mess, not a clean one, because the input was never a well-formed
+solid to begin with. Voxel Remesh's robustness to messy topology assumes the input is a plausible
+solid with local noise, not a region that is fundamentally open/overlapping at the geometry level.
+
+**The actual fix that worked was not mesh repair at all: re-sampling the generator.** Every AI-mesh
+generator vendor this skill routes to (`AI-MESH-SERVICES.md`) is stochastic — the same reference
+image and the same parameters produce a *different* mesh on each call. A second `fal-ai/hyper3d/
+rodin` call with the identical reference image and identical tier/addon/quality parameters produced
+a mesh with no wire-mesh/black-hole failure in the same region (confirmed via the same clay-render
+diagnostic used to catch it), at a cost (one API call, ~$1.20, a few minutes) far lower than any one
+of the five failed local-repair attempts above (each of which required a Blender session, a clay
+render, and — for the ones that got that far — a full retopo/bake/LOD/export cycle to evaluate).
+**When a source-mesh region is confirmed genuinely corrupted (self-intersecting/fused non-manifold
+geometry that survives the standard cleanup), the first remediation to try is re-generating from the
+same input, not editing the mesh** — it is cheaper, and unlike local repair it isn't fighting
+topology that was never a valid solid to begin with. Local repair remains worth attempting first
+only for noise that's plausibly *simplification* debris (coplanar slivers, needle triangles from
+decimation) rather than source-level tangled geometry — the weld + dissolve-degenerate +
+limited-dissolve + re-triangulate sequence in this section is tuned for exactly that case. Re-bake is
+still mandatory after any geometry edit made downstream of a bake, local-repair or regenerated:
+never move verts (or swap in a new mesh) against a texture that already has UVs baked onto old
+positions.
+
+Re-sampling is not a silver bullet: it does not guarantee the specific defect region comes back
+clean (it is drawn from the same stochastic distribution, not a targeted fix), and a persistent
+defect that survives two or three re-samples in the same region is real evidence the *reference
+image itself* underspecifies that region (e.g. a feature only visible from an angle the single
+front-facing reference doesn't show) — at that point, a multi-view reference capture is the
+correctly-scoped next step, not a fourth re-sample.
 
 ### Considered and rejected: a voxel-remesh prepass before the decimate
 
