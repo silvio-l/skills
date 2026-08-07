@@ -154,9 +154,16 @@ This is exactly why step 2 (weld + fill-holes) exists as a pipeline step rather 
   is baked into the albedo. `'EMIT'` is the alternative for a pure unlit color transfer. There is no
   `type='COLOR'`.
 - `render.engine` must be `'CYCLES'`; Eevee cannot bake selected-to-active.
-- `cage_extrusion` must be large enough to enclose the high-poly surface, or rays miss and the bake
-  comes back with holes. Small models need a small value; scale it with the mesh, do not hardcode it
-  for every asset.
+- `cage_extrusion` is a two-sided failure mode, not just "bigger is safer": too small and the cage
+  doesn't enclose a bulging high-poly surface (cornices, overhangs), so rays miss outward; too large
+  and the cast ray *overshoots* a concave recess (a window reveal, an oval wall opening) and misses
+  the high-poly surface sitting *inside* it, baking a jagged black hole into the color/normal texture
+  at exactly that recess instead. Confirmed by direct comparison on a hero building: the old 5%-of-
+  extent default (`retopo_bake.py`, since fixed) produced black holes in both dormer window frames and
+  an oval gable window; dropping to 1% of extent on the identical mesh fixed it with no new misses at
+  the bulging details. `retopo_bake.py`'s current default is 1% of the object's largest dimension
+  (min 0.005) — scale it with the mesh, do not hardcode a fixed value for every asset, and drop it
+  further than the default on a mesh with deep/narrow recesses.
 - `bpy.ops.uv.smart_project()` needs EDIT mode with faces selected. This is one of the operators
   `blender-scripting/SKILL.md`'s "`bpy.ops` works fine in background" note does *not* cover — wrap it:
   `mode_set(mode='EDIT')` → `mesh.select_all(action='SELECT')` → project → back to `'OBJECT'`.
@@ -304,6 +311,19 @@ Two boundaries on this:
 - **Not every asset class needs the chain.** It pays for hero and background assets seen at genuinely
   variable distance. A UI-adjacent prop, an asset only ever shown at one fixed distance, or anything
   already at the bottom of its budget does not need four levels — say so rather than generating them.
+- **The flat ratio is a starting point, not a guarantee — verify every level by rendering it, the same
+  rule that applies to LOD0.** Collapse Decimate can fail catastrophically well before the table's
+  numbers on a mesh with many thin protruding features (a clock tower, dormers, chimneys — anything
+  that reads as a spike rather than a blob): confirmed on a hero building where the ~75%-per-level
+  chain (LOD0 15.8K → LOD1 ~3.9K → LOD2 ~1K) produced a *recognizable* LOD1 but a LOD2 that rendered as
+  two or three giant inverted/degenerate triangles with the building's geometry gone — not simplified,
+  destroyed. This was not a chaining artifact (decimating straight from LOD0 to the same ~1K target
+  failed identically) and not fixed by the `delimit={'NORMAL'}` option. What worked: decimating LOD2
+  **directly from LOD0** (never through LOD1, so error from one aggressive step never compounds into
+  the next) at a target found by testing render output at a few candidate tri counts — 2,200 tris held
+  up, 1,200 did not, on this asset. There is no formula to compute the safe floor in advance; render
+  each LOD level before shipping it, exactly as FINISHING-PIPELINE.md and SKILL.md already require for
+  LOD0, and raise the target-tris for that level until it stops breaking.
 
 *Maintainer note:* `blender-scripting` has no Decimate/LOD content of its own — this recipe is this
 skill's material, executed through `blender-scripting`'s headless conventions. If a Decimate/LOD

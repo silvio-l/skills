@@ -19,6 +19,7 @@ probed with hasattr, per blender-scripting/SKILL.md's "Version robustness" rule.
 """
 
 import argparse
+import math
 import os
 import sys
 
@@ -63,8 +64,16 @@ def parse_args(argv):
                          "(default: 0). Runs after the weld, before decimate.")
     p.add_argument("--skip-cleanup", action="store_true",
                    help="Skip the weld/fill-holes cleanup pass entirely.")
+    p.add_argument("--skip-post-cleanup", action="store_true",
+                   help="Skip the post-decimation weld/dissolve pass (see post_decimation_cleanup).")
+    p.add_argument("--post-dissolve-angle", type=float, default=1.0,
+                   help="Limited-dissolve angle in degrees for the post-decimation pass "
+                        "(default: 1.0 -- collapses near-coplanar slivers Decimate leaves behind).")
     p.add_argument("--cage-extrusion", type=float, default=None,
-                   help="Bake ray cage extrusion. Default: derived from the object's size.")
+                   help="Bake ray cage extrusion. Default: 1%% of the object's largest "
+                        "dimension (min 0.005) -- see the extrusion fallback in main() for "
+                        "why 5%% (an earlier default) bakes black holes into concave detail "
+                        "like window reveals.")
     p.add_argument("--bake-samples", type=int, default=16,
                    help="Cycles samples per bake pass (default: 16).")
     p.add_argument("--output", default=None,
@@ -221,6 +230,49 @@ def cleanup_mesh(obj, weld_distance, hole_fill_sides):
     return before, after
 
 
+def post_decimation_cleanup(obj, weld_distance, dissolve_angle_deg):
+    """Weld -> dissolve degenerate -> limited dissolve -> re-triangulate, run on the
+    low-poly cage after Decimate and before Smart UV Project.
+
+    This is a *different* pass from cleanup_mesh() above: that one runs pre-decimate
+    to join disconnected source chunks; this one runs post-decimate because Collapse
+    decimation itself leaves behind near-duplicate vertices and thin near-coplanar
+    slivers along collapsed edges. Smart UV Project treats each of those as its own
+    seam boundary, which is what turns a plausible low-poly cage into hundreds of
+    confetti-sized UV islands even when the pre-decimate weld already fixed the
+    original disconnected-mesh problem -- confirmed by measurement: a cage that
+    passed the pre-decimate weld still produced 588 UV shells averaging 13.6 faces
+    each (validate_asset.py's uv-shell-density floor is 16.0), and the shells were
+    concentrated exactly where Decimate had been most aggressive, not at the
+    original mesh's seams.
+
+    Because this pass slightly reduces the triangle count (degenerate/dissolved
+    faces disappear), decimate to a target *above* the class floor if the caller
+    needs to land inside a tight budget window -- see FINISHING-PIPELINE.md's
+    tri-budget-undershoot note.
+    """
+    before = triangle_count(obj.data)
+    set_active(obj)
+    select_only([obj])
+    bpy.ops.object.mode_set(mode="EDIT")
+    bpy.ops.mesh.select_all(action="SELECT")
+    if hasattr(bpy.ops.mesh, "remove_doubles"):
+        bpy.ops.mesh.remove_doubles(threshold=weld_distance)
+    else:
+        bpy.ops.mesh.merge(type="DISTANCE", threshold=weld_distance)
+    bpy.ops.mesh.select_all(action="SELECT")
+    bpy.ops.mesh.dissolve_degenerate()
+    bpy.ops.mesh.select_all(action="SELECT")
+    bpy.ops.mesh.dissolve_limited(angle_limit=math.radians(dissolve_angle_deg))
+    bpy.ops.mesh.select_all(action="SELECT")
+    bpy.ops.mesh.quads_convert_to_tris()
+    bpy.ops.object.mode_set(mode="OBJECT")
+    after = triangle_count(obj.data)
+    print("Post-decimation cleanup: weld %.5f, dissolve %.1f deg -> %d tris (was %d)"
+          % (weld_distance, dissolve_angle_deg, after, before))
+    return before, after
+
+
 def smart_uv_project(obj, margin):
     """smart_project is an edit-mode operator - it needs faces selected."""
     set_active(obj)
@@ -359,6 +411,15 @@ def main():
     # 3. decimate the (cleaned) duplicate into the low-poly cage
     decimate_to(low, args.target_tris)
 
+    # 3.5. weld/dissolve what Decimate itself left behind, before the unwrap ever
+    #      sees it -- see post_decimation_cleanup's docstring for why this is a
+    #      separate pass from step 2's pre-decimate cleanup.
+    if not args.skip_post_cleanup:
+        post_weld_distance = args.weld_distance
+        if post_weld_distance is None:
+            post_weld_distance = max(1e-5, object_extent(high) * 0.001)
+        post_decimation_cleanup(low, post_weld_distance, args.post_dissolve_angle)
+
     # 4. fresh UVs on the low-poly copy only
     smart_uv_project(low, args.margin)
 
@@ -379,7 +440,16 @@ def main():
     configure_cycles(scene, args.bake_samples)
     extrusion = args.cage_extrusion
     if extrusion is None:
-        extrusion = max(0.01, object_extent(high) * 0.05)
+        # 5% of extent used to be the default here and reliably misses concave detail
+        # (dormer window reveals, oval wall openings): the extruded low-poly cage ray-casts
+        # inward looking for the high-poly surface, and at 5% the cast ray sails past a
+        # recessed reveal's back wall entirely, baking black (no hit) instead of the
+        # high-poly detail actually there. Confirmed by direct comparison on this skill's
+        # own reference building: 5% (0.0949 on a ~1.9-unit object) produced jagged black
+        # holes in both dormer window frames and the oval gable window in the baked color
+        # texture; 1% (0.02) on the identical mesh/decimate/UV result made them disappear
+        # with no new artifacts elsewhere (cupola, cornices, roof overhang all stayed intact).
+        extrusion = max(0.005, object_extent(high) * 0.01)
     print("Bake: cage_extrusion %.4f, %d samples, %dpx" % (extrusion, args.bake_samples, size))
 
     # selected-to-active: high-poly selected, low-poly selected AND active
