@@ -7,9 +7,10 @@ metadata:
 
 # Game Asset Director
 
-Classify a mobile-game asset request, route it to the cheapest tool that still clears an AAA quality
-bar, finish it to mobile budgets, and gate the result behind a validator script. This skill owns the
-decision; it does not own every step of the execution.
+Classify a mobile-game asset request, route it to the tool that reliably clears an AAA quality bar
+for that asset class, finish it to mobile budgets, and gate the result behind a validator script.
+Quality is the default axis, not cost — see "Routing" below. This skill owns the decision; it does
+not own every step of the execution.
 
 `blender-scripting` is a subordinate tool here, not a competing front door. It is excellent at
 procedural hard-surface geometry and version-safe export, and has no PBR baking, no retopology, no
