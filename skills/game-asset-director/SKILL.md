@@ -39,7 +39,7 @@ which is noise against what a visibly bad hero asset costs. Every AI tier below 
 | Category | Signal | Route |
 |---|---|---|
 | **A. Procedural hard-surface** | rock, terrain, modular building/kit, generic prop, GN tree, "N variants of X" | Hand off entirely to `blender-scripting`, then run `scripts/validate_asset.py` — it does not self-validate against mobile budgets. |
-| **B. Hero / character / organic / building** | character, creature, boss, hero prop, unique named asset, a structure that genuinely needs free-camera rotation — **read the fixed-camera rule below before sending a building here** | `fal-ai/hyper3d/rodin` with **HighPack** (quad topology + PBR + 4K, ~$1.20). Alternate: `fal-ai/meshy/v6-preview/image-to-3d` where its style fits better. → `scripts/retopo_bake.py` → LOD chain → validate **with `--class building` for a structure, not `--class character`** — see FINISHING-PIPELINE.md's budget table. **Budget manual Blender retouch as part of this route:** image-to-3D cannot guarantee occluded geometry (dormer interiors, balcony undersides, similar detail on ornate one-off architecture) comes back defect-free — see AI-MESH-SERVICES.md's "Known limitation". |
+| **B. Hero / character / organic / building** | character, creature, boss, hero prop, unique named asset, a structure that genuinely needs free-camera rotation — **read the fixed-camera rule below before sending a building here** | `fal-ai/hyper3d/rodin` with **HighPack** (quad topology + PBR + 4K, ~$1.20). If a retry is needed on a different vendor, try `tripo3d/tripo/v2.5/image-to-3d` HD first — independently benchmarked stronger geometry/low-poly output than Meshy, see AI-MESH-SERVICES.md's "Choosing a tier". Meshy (`fal-ai/meshy/v6-preview/image-to-3d`) is a fallback only where its specific style fits better, not a default second try. → `scripts/retopo_bake.py` → LOD chain → validate **with `--class building` for a structure, not `--class character`** — see FINISHING-PIPELINE.md's budget table. **Budget manual Blender retouch as part of this route:** image-to-3D cannot guarantee occluded geometry (dormer interiors, balcony undersides, similar detail on ornate one-off architecture) comes back defect-free — see AI-MESH-SERVICES.md's "Known limitation". |
 | **C. Complex background prop** | one-off statue, furniture, "barrel with graffiti" — visible but not hero-tier | `tripo3d/tripo/v2.5/image-to-3d` with HD textures. Drop to `fal-ai/hunyuan3d/v2/turbo` or `fal-ai/trellis` **only** for high-volume far-background filler where the user signals volume over per-asset fidelity. → finishing pipeline as B, except that a simple, non-ornate prop may take the cheaper naive-Decimate path with a visual spot-check instead of the full retopo/bake — see FINISHING-PIPELINE.md's "When a bare Decimate is enough (category C only)". |
 | **D. Asset pack** | "enemy pack", "matching set", any request for visual consistency across several assets | Generate a consistent **reference-image set first** via `fal-ai/nano-banana/edit` (or `fal-ai/flux-pro/kontext`), then convert each image through B or C by its own hero-vs-background status. Not Meshy's web-only "3D agent" — see [AI-MESH-SERVICES.md](AI-MESH-SERVICES.md). |
 | **E. PBR texture / material only** | "make this look like rusted iron", no new mesh | Procedural Principled-BSDF graph via `blender-scripting`. AI photo-to-PBR only when the user supplies an actual reference photo. |
@@ -47,12 +47,30 @@ which is noise against what a visibly bad hero asset costs. Every AI tier below 
 | **G. LOD-only on an existing mesh** | "add LODs to this" | Chained Decimate per [FINISHING-PIPELINE.md](FINISHING-PIPELINE.md), executed headlessly through `blender-scripting`'s conventions, then re-validate. |
 | **H. 2D game asset** | sprite, item/UI icon, portrait, tile art — anything flat that is not an app icon | `fal-ai/nano-banana/edit` (or `fal-ai/flux-pro/kontext`) → `fal-ai/birefnet` where transparency is needed → `fal-ai/esrgan` to the target in-engine resolution → `scripts/validate_2d_asset.py`. See [SPRITE-PIPELINE.md](SPRITE-PIPELINE.md). |
 
+### Before generating any reference image, check for a named style profile
+
+Categories B, C, D and H all begin by generating or choosing a **reference image**, and that image sets
+the quality ceiling for everything downstream — no retopo, bake, or validator pass recovers art
+direction that was never in it. So, after the category is decided and before the first image is
+generated:
+
+1. Read the request for a **named or clearly implied art style** — a period, genre or named look, a
+   style the project has already established, or reference images the user supplied.
+2. If the user supplied reference images, use them. Otherwise check
+   [REFERENCE-STYLES.md](REFERENCE-STYLES.md) for a matching profile and fold **four to eight concrete
+   cues** from it (materials, roofline, ornament placement, palette, lighting) into the image prompt.
+3. If neither exists, ask for a reference image rather than prompting from adjectives. "Historic",
+   "charming", "European" are not art direction and produce generic geometry.
+
+Name the profile in the announcement, next to the category and tool. A profile never changes *which*
+category a request routes to — it changes only what the reference image looks like.
+
 ### Fixed-camera structures go to category H (2D), not category B (3D)
 
 Before routing any building or structure to category B, establish what the camera actually does. If
 the asset is only ever seen from a **fixed or stepped isometric camera** — the common case for
-city-builder and strategy mobile games, and what real Anno 1800 itself does (stepped rotation around a
-fixed elevation, never free orbit) — **route it through category H by default.** Use category B only
+city-builder and strategy mobile games, which typically allow stepped rotation around a fixed
+elevation but never a free orbit — **route it through category H by default.** Use category B only
 when the asset genuinely needs free-camera rotation or in-engine 3D interaction: collision meshes,
 physics, a rotatable inspect view.
 
@@ -71,6 +89,26 @@ this rule came out of: the isometric reference image alone already cleared the A
 dormers, correct wrought-iron balcony detail, sharp facade trim — while three separate 3D
 reconstructions of that same subject, across two vendors, all came back with a hollow roof cavity and
 warped balconies.
+
+**Qualification: those defects were judged in a studio close-up, and that is the wrong bar.** The
+renders behind the paragraph above were isolated single-subject close-ups at roughly 2.2× the asset's
+bounding radius on a neutral backdrop. The same finished, baked building was afterwards re-rendered the
+way a city-builder actually shows it — three instances on a ground plane at ~5.5–8× the bounding radius,
+warm low-angle golden-hour key plus a cool dusk fill — and at that distance neither the warped balconies
+nor the roof cavity read as broken; the asset looks coherent and detailed. Reasons 2 (cheaper) and 3
+(faster) are unaffected and keep H the default. Reason 1 also stays structurally true — 2D has no
+reconstruction step, so it cannot have that defect class at all — but *how much that is worth* depends
+on whether the defect is visible at the camera distance the game actually uses, and on this asset it was
+not. Concretely:
+
+- **A defect that survives a scene-context render is real** and does block: keep the asset in H, or fix
+  it manually before shipping it as B.
+- **A defect that disappears at the real viewing distance is not a defect for that use case.** It is not
+  grounds for rerouting a 3D asset to 2D on its own, and it is not something to report to the user as a
+  broken pipeline.
+
+Either way the decision comes from the distance-and-lighting test described in "Validation is necessary,
+not sufficient" below — never from a close-up alone.
 
 ### Ambiguity rule
 
@@ -133,6 +171,26 @@ validator's PASS with your own read of the mesh. The validator's word is still f
 does check — this does not reopen "trust your own judgment over the script" for topology, budgets, or
 UV correctness; it only means the checked set can be incomplete, and a render is how that gets found.
 
+### Render at the distance and lighting the asset actually ships at
+
+An isolated studio close-up is a *diagnostic* view, not the pass/fail bar. No shipping game shows a
+building the way that render does, so judging pass/fail from it alone rejects assets that are fine and
+sends work to a manual retouch nobody needed. Before calling a hero 3D asset failed — and **before
+deciding to reroute it to category H** — render a **scene-context test** alongside the two diagnostic
+angles:
+
+- **multiple instances** of the asset, not one, on a **ground plane**, at the camera distance the game
+  actually uses (for a city-builder/strategy view that is roughly 5–8× the asset's bounding radius; a
+  single-subject diagnostic close-up sits near 2×),
+- **scene-appropriate lighting** — the game's own key/fill setup, e.g. a warm low-elevation sun plus a
+  cool ambient fill for a golden-hour village, not a neutral studio grey.
+
+Then judge from that image. This was found the same way everything else in this section was: an asset
+whose balcony and dormer defects looked disqualifying in a 2.2×-radius studio close-up read as coherent
+and detailed at village distance under warm directional light, and would have been thrown away on the
+close-up alone. The reverse case is equally binding — a defect still visible in the scene-context render
+is real, blocks, and does not get argued down.
+
 The two-angle render is also how category B's unseen-geometry defects get caught (see
 AI-MESH-SERVICES.md's "Known limitation"). When one shows up, repairing it is part of the route, not a
 pipeline failure to report:
@@ -153,7 +211,13 @@ python3 skills/game-asset-director/scripts/validate_2d_asset.py --image sprite.p
 **On failure:**
 
 - **Free retry** — adjust this skill's own script parameters (target tri count, bake margin, texture
-  size, canvas size) for up to ~2 rounds, then stop and report specifics.
+  size, canvas size) for up to ~2 rounds, then stop and report specifics. **A manual Blender touch-up
+  counts as a free-round action**, not a paid one: capping a cavity, patching a hidden gap, nudging a
+  warped region, cutting a hole the generator closed over. On ornate hero geometry that pass is expected
+  production reality rather than a pipeline failure — a second, independent practitioner hit the same
+  class of content defect (a chimney whose interior hole never reconstructed) and fixed it exactly this
+  way, by cutting the hole and repainting that part in Blender. Two free rounds still cap it: if the
+  touch-up does not get there, stop and report rather than rolling into a new paid generation.
 - **Paid retry** — a defect needing a *new generation* (wrong base topology, wrong composition) stops
   immediately and reports to the user before spending again. Same discipline as
   `~/.claude/infrastructure/fal-ai.md`'s "Exhausted balance" rule: stop and ask, never retry-loop
@@ -190,3 +254,4 @@ Otherwise, cleanup is part of the task, not an optional finishing touch.
 | Picking or calling an AI-mesh endpoint (IDs, prices, tiers, auth) | [AI-MESH-SERVICES.md](AI-MESH-SERVICES.md) |
 | Retopo/bake, mobile polycount and texture budgets, LOD chain, ORM packing | [FINISHING-PIPELINE.md](FINISHING-PIPELINE.md) |
 | Any 2D asset (category H) or a pack's reference-image pass (category D) | [SPRITE-PIPELINE.md](SPRITE-PIPELINE.md) |
+| The request names or implies a specific art style, or ships its own reference images | [REFERENCE-STYLES.md](REFERENCE-STYLES.md) |

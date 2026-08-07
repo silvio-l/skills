@@ -36,9 +36,9 @@ Do not simplify the textured mesh. Build a **new** low-poly mesh, give it its ow
    36,201-tri source. Skipping this step is what turns into a >1,000-island UV explosion two steps
    later (see "Why UV shell count explodes" below) — it is not a margin problem or a Smart UV Project
    angle-limit problem, both of which were checked and ruled out on the same asset.
-3. **Decimate the (cleaned) duplicate** (Collapse) down to the target triangle count. This is the
-   low-poly cage — its own UVs are about to be thrown away, so the UV damage from this step does not
-   matter.
+3. **Decimate the (cleaned) duplicate** (Collapse) down to the target triangle count, then run the
+   **post-decimation cleanup pass** below. This is the low-poly cage — its own UVs are about to be
+   thrown away, so the UV damage from this step does not matter.
 4. **Smart UV Project** the low-poly copy. A fresh, non-overlapping, 0–1-space layout with real
    padding. This is the layout the baked textures will be authored into.
 5. **Cycles bake, "Selected to Active"** — select the high-poly, make the low-poly the active object,
@@ -62,6 +62,58 @@ source already known to be a single clean manifold mesh. Four parameters carry m
 `--target-tris` (the budget below), `--texture-size` (the budget below), `--margin` (UV island padding
 — too small and adjacent islands bleed into each other at lower mip levels, showing up as seams
 on-device but not in the editor), and the cleanup pass (`--weld-distance`, `--hole-fill-sides`).
+
+### Post-decimation cleanup (required, and not the same pass as step 2)
+
+Step 2 cleans the mesh *before* decimation; Collapse Decimate then leaves its own debris behind — long
+needle-thin triangles, degenerate faces, coplanar slivers. Those are what produce shading artifacts,
+z-fighting sparkle at distance, and poor vertex-cache behaviour on device, and they survive every check
+in `validate_asset.py`. Run a second, shorter pass **after** the decimate and **before** the Smart UV
+Project, in this order:
+
+1. **Merge by distance** (weld) at the same threshold step 2 used.
+2. **Dissolve degenerate** faces and zero-area geometry.
+3. **Limited dissolve at a small angle (~1°)** to collapse coplanar slivers into their neighbours.
+4. **Re-triangulate** any n-gons steps 2–3 produced, so `topology` still passes.
+
+It costs seconds and removes a few percent of the triangles the decimate produced. **Set
+`--target-tris` above the class floor, not at it, and re-count after the cleanup rather than after the
+decimate.** `validate_asset.py`'s `tri-budget` enforces a *range* (building 8,000–20,000, and so on),
+so decimating to exactly 8,000 and then shaving 3–5% lands at ~7,600 and fails a check the asset would
+otherwise have passed. `scripts/retopo_bake.py` currently runs `quads_convert_to_tris()` inside
+`cleanup_mesh()`, i.e. **before** the decimate — that is not this pass. Until the script grows it, run
+the four operators above on the low-poly cage explicitly.
+
+### Considered and rejected: a voxel-remesh prepass before the decimate
+
+A widely circulated AI-mesh pipeline puts a **voxel remesh** in front of the decimate — voxel size
+`0.0015` of the object's largest dimension — to fuse a raw generator output described there as ~2
+million triangles of messy, overlapping shells into one manifold surface before the triangle budget gets
+spent. **Do not add it to this skill's default pipeline.** It fixes an input pathology the vendors routed
+here do not have.
+
+Measured directly on this skill's own raw Rodin source (`building.glb`: one mesh object, 36,201 tris,
+dimensions 1.618 × 1.624 × 1.817), Voxel Remesh at that ratio and its neighbours:
+
+| Voxel size (fraction of max dim) | Absolute voxel size | Result |
+|---|---|---|
+| — (untouched source) | — | 36,201 tris |
+| 0.0030 | 0.00545 | 937,004 tris |
+| **0.0015** (the published value) | 0.00273 | **3,769,340 tris** |
+| 0.0005 | 0.00091 | 34,082,592 tris |
+
+Nothing was fused and nothing was cleaned: the mesh was re-tessellated 26–940× denser and would have to
+be decimated straight back down, spending minutes of compute for no gain. Rodin returns quad topology at
+an already-reasonable density — 36K tris is close to a usable budget on its own — so there is no shell
+soup to collapse. The fragmentation this skill's sources *do* have (383 loose parts, 8,473 boundary
+edges) is a welding problem, which is exactly what step 2 treats.
+
+**When to test it again:** a newly routed generator whose *untouched* import comes back as overlapping
+or interpenetrating shells. Two cheap checks on the raw import decide it — a large disconnected
+loose-part count, and a raw triangle count far above the target budget (>500K on a hero asset is the
+signal). Then size the voxel to *that* mesh's real dimensions and measure the result; do not copy
+`0.0015` across, since it is tuned to a different generator's output at a different scale. Until such a
+vendor is actually routed here and measured, this stays rejected — not pending, and not quietly adopted.
 
 ### Manual escalation when the automated retopo is not good enough
 
@@ -226,6 +278,33 @@ object active via `bpy.context.view_layer.objects.active`, then `bpy.ops.object.
 Link new objects with `bpy.context.scene.collection`, not `bpy.context.collection`, per
 `blender-scripting/SKILL.md`'s collection-linking rule. Re-run `validate_asset.py` on the chain.
 
+**Name and parent the chain so the engine builds the LOD group itself.** Produce `<name>_LOD0` …
+`<name>_LODn` as sibling children of an empty named `<name>`, all sharing LOD0's single material and
+baked texture set. Unity's model importer recognises that exact convention — a common root with
+`_LOD0.._LODn` suffixed children — and **creates the LODGroup component automatically on import**, so
+dropping the GLB into the project yields a distance-switching prefab with zero per-asset setup. Getting
+the naming wrong costs nothing at export time and costs manual LODGroup wiring on every single asset
+afterwards, which is why it is worth being pedantic about.
+
+**Rename before you create the root empty — `retopo_bake.py`'s output name will collide otherwise.**
+The script names its result `<high-poly name>_LOD0` and leaves the high-poly source in the scene under
+its own name. So if the source is `TownHall_HighPoly`, LOD0 is `TownHall_HighPoly_LOD0` and the root
+empty would have to be `TownHall_HighPoly` — a name already taken. Blender resolves that silently by
+appending `.001`, which the GLTF name mapping below turns into `TownHall_HighPoly001`, and Unity's
+root-plus-`_LODn` match then fails with no error anywhere. Fix it before building the chain: rename the
+LOD objects to the **asset** name (`TownHall_LOD0` …) and either rename the high-poly source out of the
+way or exclude it from the export scene. Then create the empty as `TownHall`.
+
+Two boundaries on this:
+
+- **The ~75% per level above is this skill's ratio; keep it.** A published reference pipeline for
+  background village houses used 39k / 15k / 5k / 1.5k, i.e. ~60–70% per step off a LOD0 two to five
+  times this skill's whole building budget (8,000–20,000). Those numbers are that pipeline's example at
+  its own budget, not a replacement for the table above.
+- **Not every asset class needs the chain.** It pays for hero and background assets seen at genuinely
+  variable distance. A UI-adjacent prop, an asset only ever shown at one fixed distance, or anything
+  already at the bottom of its budget does not need four levels — say so rather than generating them.
+
 *Maintainer note:* `blender-scripting` has no Decimate/LOD content of its own — this recipe is this
 skill's material, executed through `blender-scripting`'s headless conventions. If a Decimate/LOD
 section is ever added there, this section should shrink to a pointer.
@@ -245,3 +324,30 @@ version-safe functions — `export_gltf`, `export_fbx`, `export_obj`, `export_st
 - the post-export `gltf-transform` order (`resize` → `webp` → `draco`, never `optimize`).
 
 Do not write a second export path. Do not re-derive those settings.
+
+### What the caller still owes the exporter
+
+Two things sit on this side of the delegation line — they are texture prep and scene state, not export
+settings, so doing them here does not reopen the export path.
+
+**1. Export copies of the textures, produced non-destructively.**
+
+- **Base color → JPEG, quality ~92.** Albedo tolerates it and the size saving is the largest single win
+  in the whole export step.
+- **Normal map → PNG, always.** JPEG's block artifacts on a normal map turn into visible shading noise
+  across the whole surface. There is no quality setting that makes this safe.
+- **Downscale only where the bake was authored above the export target.** This skill bakes at
+  `--texture-size` (default 2048) against a 2K standard / 2K–4K building budget, so at the default there
+  is nothing to shrink; the win exists when a building was deliberately baked at 4K and ships at 2K. A
+  reference pipeline baking at 8K and exporting at 4K, together with the JPEG/PNG split above, measured
+  ~80% off its GLB sizes with no visible loss at gameplay distance — the same *ratio* does not transfer,
+  the *technique* does.
+- **The full-resolution bake stays in the working `.blend`.** Swap the material's image nodes to the
+  export copies, export, swap back. Only the exported file is reduced, so a re-export at another size
+  stays possible without re-baking.
+
+**2. Select and unhide the whole hierarchy before calling the exporter.** glTF's "Selected Objects"
+option does **not** pull in the children of a selected root, and hidden objects drop out silently. Either
+mistake produces a ~180-byte GLB that reads as a mysterious exporter failure rather than a selection bug.
+With the LOD chain above this is the default trap: selecting the `<name>` root empty alone exports
+nothing. Select every `_LOD*` child explicitly and unhide them first.

@@ -74,6 +74,33 @@ use the harness's background-execution/notification mechanism instead of a block
 Original open TripoSR is also on fal as `fal-ai/triposr` — research baseline only, not a production
 route for this skill.
 
+### Commercial licensing
+
+Everything this skill produces is expected to be shippable in a commercial game. Researched against each
+vendor's own terms in **August 2026**; re-verify before a new large paid campaign, because AI-service
+terms change often.
+
+- All three routed endpoints — `fal-ai/hyper3d/rodin`, `tripo3d/tripo/v2.5/image-to-3d`,
+  `fal-ai/meshy/v6-preview/*` — carry fal.ai's own **"Commercial use"** badge on their model pages.
+- **Hyper3D / Rodin** — commercial rights come with paid downloads (pay per kept asset), across GLB,
+  FBX, OBJ, USDZ and STL. Caveat stated by the vendor: assets generated on **free-trial or promotional
+  credits** may carry usage restrictions.
+- **Tripo** — paid tiers grant broad commercial rights (use, reproduce, modify, distribute, monetize).
+  The **free tier is CC BY 4.0**: commercial use is allowed but requires attribution.
+- **Meshy** — paid plans give outright ownership with no attribution requirement. The **free plan is
+  CC BY 4.0**, same attribution condition.
+
+**The practical rule.** fal.ai bills these endpoints per generation as metered paid API usage, so every
+generation routed through this skill already sits under each vendor's paid-tier commercial terms — the
+attribution-bound free tiers do not apply here. Two things to keep it that way:
+
+1. **Never generate a shipping asset outside fal.ai's paid metered billing** — not through a free vendor
+   account, not on promotional credits.
+2. **Do not publish AI-generated reference images or 3D output to a vendor's public "community"
+   gallery** where the platform ties public sharing to reduced ownership rights. Confirmed for Meshy
+   specifically: full ownership of a paid generation holds as long as it is not published to Meshy's
+   public Community.
+
 ### Generating a reference image with no existing photo to start from
 
 Category B/D routing assumes a reference image already exists to feed the image-to-3D endpoints
@@ -96,6 +123,17 @@ reference with it, then hand that image to the normal Category B/C/D image-to-3D
 - **Visible but not hero** — Tripo 2.5 HD.
 - **Far background, high count** — Hunyuan3D turbo or Trellis.
 
+**Independent third-party signal, not a result we ran ourselves:** a blind-vote community benchmark
+("Top3D Arena," reviewed by a 3D-industry practitioner) has Tripo and Hunyuan3D sharing first place
+for general quality and Tripo alone first for low-poly geometry specifically, with Meshy trailing
+behind both — mismatched shapes and reconstruction artifacts on the same reference subjects, despite
+being the most heavily advertised of the three (source: a vendor-comparison video reviewed 2026-08-07,
+~34K views at review time). This does not overturn Rodin as the category B default — our own test this
+session (one hero building, Rodin HighPack) produced a genuinely usable result, so there is no first-party
+reason to drop it. What it does change: reach for **Tripo before Meshy** as the fallback when a category
+B/C generation needs a second attempt on a different vendor — both this external signal and this file's
+own vendor research agree Tripo's geometry and low-poly output are the stronger of the two, not Meshy's.
+
 Raw AI mesh output is **never** shippable as-is: expect dense triangulated geometry, arbitrary UV
 layout, and baked-in lighting. Everything that arrives from these endpoints goes through
 [FINISHING-PIPELINE.md](FINISHING-PIPELINE.md) before it counts as an asset. *Simple* static
@@ -110,7 +148,7 @@ This is a **structural limit of current (2026) image-to-3D technology** — not 
 Blender-pipeline bug, and not a vendor worth switching away from. It is load-bearing for every AI-mesh
 route in categories B and C. State it to the user up front; do not let them find it in a render.
 
-**Evidence.** One ornate hero building (Anno-1800-style town hall: dormers, wrought-iron balconies,
+**Evidence.** One ornate hero building (19th-century-style town hall: dormers, wrought-iron balconies,
 clock tower, corner turret), three generations, two vendors, one defect class:
 
 | Run | Endpoint | Result |
@@ -147,7 +185,16 @@ Three claims, deliberately kept apart — collapsing them either writes off mult
 
 1. **Near-duplicate multi-image input is tested and does not fix it.** Runs 2 and 3 above. Handing a
    mesh service several images that are all close variants of one viewpoint buys nothing; the missing
-   information is still missing.
+   information is still missing. Re-checked afterwards as a controlled A/B: the single-view Rodin GLB
+   (36,201 tris) and the multi-view Rodin GLB (38,760 tris) of the same town hall were imported raw and
+   rendered from an **identical** roof-focused camera. Both come back with the roof deck open into a
+   hollow interior; the multi-view result's dormers are, if anything, softer and blobbier, and both keep
+   the smeared balcony geometry. No improvement on the defect class this skill has been fighting — so
+   multi-view is **not** promoted to a default input method for category B on the strength of it.
+   Practitioners do recommend authoring front/left/right/back reference views before converting, and one
+   reported exactly the residual this predicts: with no *top* view, a chimney's interior hole never
+   reconstructed and had to be cut and repainted in Blender by hand. Side views cannot carry
+   top-occluded information, which is the same wall as the sealed-cavity case below.
 2. **Genuinely independent multi-view input is untested, and plausible for the thin-lattice defect
    only.** `fal-ai/era3d` — confirmed live via
    `https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/era3d` (HTTP 200, full schema) —

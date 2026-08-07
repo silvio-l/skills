@@ -7,6 +7,13 @@ category D, where a 3D pack borrows this pipeline to produce its consistent refe
 Same quality bar as the 3D branch. A sprite with a haloed alpha edge or a non-power-of-two canvas is a
 defect, not a stylistic choice.
 
+**Before writing the generate prompt, do the style-profile check** from SKILL.md's "Before generating
+any reference image, check for a named style profile" — it applies to this branch exactly as it does to
+the 3D ones. If the request names or implies a style and the user supplied no images of their own, fold
+four to eight concrete cues from the matching [REFERENCE-STYLES.md](REFERENCE-STYLES.md) profile into
+the prompt. Everything below assumes that step already happened; none of these three stages can add art
+direction the prompt did not carry.
+
 ## Three stages
 
 All three endpoints run on the one `FAL_KEY` in `~/.config/fal/.env` — auth and calling pattern in
