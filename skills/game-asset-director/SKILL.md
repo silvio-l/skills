@@ -72,7 +72,16 @@ the asset is only ever seen from a **fixed or stepped isometric camera** — the
 city-builder and strategy mobile games, which typically allow stepped rotation around a fixed
 elevation but never a free orbit — **route it through category H by default.** Use category B only
 when the asset genuinely needs free-camera rotation or in-engine 3D interaction: collision meshes,
-physics, a rotatable inspect view.
+physics, a rotatable inspect view, **or dynamic lighting/shadow interaction with the rest of the
+scene** — a day-night cycle, weather, or buildings that need to cast real shadows onto their
+neighbors and the ground. A flat sprite's lighting is baked in at generation time and cannot respond
+to a moving light source or occlude anything outside itself; that is a structural gap, not a texture
+setting, and it is exactly as load-bearing a reason for B as needing to rotate the object is. Most
+shipping isometric/strategy city-builders — including the ones that read as "flat" to the player —
+render real 3D geometry under a camera the player can never free-orbit, precisely because dynamic
+lighting is one of the reasons the genre looks as good as it does. Mobile performance is not a
+counter-argument: it is what the retopo/bake/LOD pipeline in FINISHING-PIPELINE.md exists for —
+detail gets baked onto cheap geometry instead of paid for at render time.
 
 This is a requirements question, not an ambiguity call — the ambiguity rule below does not override
 it. Three reasons, in order of weight:
