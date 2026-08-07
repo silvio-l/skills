@@ -84,6 +84,27 @@ otherwise have passed. `scripts/retopo_bake.py` currently runs `quads_convert_to
 `cleanup_mesh()`, i.e. **before** the decimate — that is not this pass. Until the script grows it, run
 the four operators above on the low-poly cage explicitly.
 
+### Known gap: this cleanup does not catch spiky non-manifold survivors fused into the main mesh
+
+Confirmed on a hero building sourced from a raw AI mesh with 33.20% non-manifold verts and 573
+disconnected islands pre-cleanup: after decimate + the four-step cleanup above + bake, a region of
+thin, spiky, degenerate geometry near a shopfront awning survived and baked into a visible
+wire/sail-shaped artifact. It was **not** a separable junk island (a `bmesh` connected-component
+traversal from a raycast hit found it topologically fused to 90% of the mesh — 14,195 of 15,814
+faces — so it can't be selected and deleted in isolation), and it was confirmed geometric, not a
+texture problem, via a clay (untextured) render of the same framing. Two remediation attempts both
+failed: masked texture-space inpainting was ruled out before touching pixels once a UV-coordinate
+back-projection showed the auto-packed atlas has no spatial locality (a small screen region maps to
+hundreds of scattered, unrelated islands elsewhere in the same texture); and localized Laplacian
+smoothing of the affected verts made it *worse*, because moving vertices after the bake desyncs the
+already-UV-mapped texture from the new geometry (visible as harsher, stretched distortion) without
+a re-bake to match. **The weld + dissolve-degenerate + limited-dissolve + re-triangulate sequence in
+this section is tuned for coplanar/needle-thin decimate debris, not for relaxing a spiky, fused,
+non-manifold survivor region** — that needs either a targeted local remesh of just the affected
+vertex group (bounded, not yet implemented) or catching it earlier, before decimation fuses it to
+clean geometry. Re-bake is mandatory after any geometry edit made downstream of a bake — never move
+verts against a texture that already has UVs baked onto the old positions.
+
 ### Considered and rejected: a voxel-remesh prepass before the decimate
 
 A widely circulated AI-mesh pipeline puts a **voxel remesh** in front of the decimate — voxel size
