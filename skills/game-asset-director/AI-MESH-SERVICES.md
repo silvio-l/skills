@@ -31,20 +31,33 @@ curl -X POST "https://queue.fal.run/fal-ai/hyper3d/rodin?fal_webhook=https://...
   -H "Authorization: Key $FAL_KEY" -H "Content-Type: application/json" -d '{...}'
 ```
 
-From Python, `fal_client` handles polling for you:
+The fal.ai Python SDK (`fal_client`) is **not assumed installed** — `pip3 install fal-client` fails on
+a stock Homebrew Python with PEP 668's "externally-managed-environment" error, and this skill does not
+force it with `--break-system-packages`. Call the plain REST API with `requests` (stdlib-adjacent,
+already available) instead of adding that dependency:
 
 ```python
-import fal_client
+import requests
 
-result = fal_client.run(
-    "fal-ai/hyper3d/rodin",
-    arguments={"input_image_urls": [data_uri], "tier": "Regular", "addons": "HighPack"},
-)
-glb_url = result["model_mesh"]["url"]
+HEADERS = {"Authorization": "Key %s" % FAL_KEY, "Content-Type": "application/json"}
+
+# synchronous endpoint
+resp = requests.post("https://fal.run/fal-ai/trellis", headers=HEADERS,
+                      json={"image_url": "data:image/png;base64,..."})
+result = resp.json()
+
+# queued endpoint (Rodin HighPack, Tripo HD, Meshy v6): submit, then poll status_url
+resp = requests.post("https://queue.fal.run/fal-ai/hyper3d/rodin", headers=HEADERS, json={
+    "input_image_urls": [data_uri], "tier": "Regular", "addons": "HighPack",
+})
+job = resp.json()
+# poll job["status_url"] until status == "COMPLETED", then GET job["response_url"]
+glb_url = requests.get(job["response_url"], headers=HEADERS).json()["model_mesh"]["url"]
 ```
 
 Queue jobs that outlive the agent turn should use a webhook or a stored request id; do not busy-poll
-a paid endpoint in a tight loop.
+a paid endpoint in a tight loop — and never `sleep`-loop the poll inside a single tool call either,
+use the harness's background-execution/notification mechanism instead of a blocking wait.
 
 ## Endpoint catalog
 
@@ -61,6 +74,19 @@ a paid endpoint in a tight loop.
 Original open TripoSR is also on fal as `fal-ai/triposr` — research baseline only, not a production
 route for this skill.
 
+### Generating a reference image with no existing photo to start from
+
+Category B/D routing assumes a reference image already exists to feed the image-to-3D endpoints
+above. When there is none — a from-scratch hero asset, no source photo, no earlier pack image to
+condition on — **`fal-ai/nano-banana/edit` and `fal-ai/flux-pro/kontext` cannot start the chain**: both
+are edit/conditioning endpoints that require an existing `image_url`/`image_urls` input, not pure
+text-to-image generators. Following this file's routing table literally in that situation blocks with
+no next step.
+
+Use **`fal-ai/flux-pro/v1.1-ultra`** instead (verified live on its fal.ai model page): $0.06/image,
+prompt-only input, `aspect_ratio` parameter, no conditioning image required. Generate the from-scratch
+reference with it, then hand that image to the normal Category B/C/D image-to-3D routing above.
+
 ## Choosing a tier
 
 - **Hard-surface, procedural, or repeatable** — do not use any of these. `blender-scripting` produces
@@ -75,6 +101,25 @@ layout, and baked-in lighting. Everything that arrives from these endpoints goes
 [FINISHING-PIPELINE.md](FINISHING-PIPELINE.md) before it counts as an asset. Static hard-surface
 subjects survive the raw output better than organic/character ones — which is exactly backwards from
 where you want the quality, hence the retopo/bake step being mandatory rather than optional.
+
+### Known limitation: single-image reconstruction quality
+
+Confirmed on a real showcase asset, not theoretical: a single reference photo only constrains the
+surfaces it actually shows. Two failure modes follow directly from that, at any quality tier:
+
+- **Unseen geometry reconstructs poorly or not at all.** A roof interior, an underside, anything not
+  visible from the one reference angle came back as an open/hollow cavity with torn-looking mesh
+  fragments — not a rendering artifact, confirmed from multiple render angles and from raw non-manifold
+  edge counts on the mesh itself (see FINISHING-PIPELINE.md's cleanup-pass rationale).
+- **Thin, lattice-like detail reconstructs as flat, warped blobs.** Wrought-iron balconies and railings
+  came back unrecognizable even on facades directly visible in the reference image — a known weak point
+  of image-to-3D diffusion models for fine appendage geometry, not something the cleanup pass or a
+  higher quality tier fixes.
+
+Multi-view input (Rodin's `input_image_urls` accepts more than one image; `tripo3d/tripo/v2.5/
+multiview-to-3d` and `fal-ai/meshy/v5/multi-image-to-3d` are built for it) is a plausible mitigation
+for hero architectural assets, but this is **an untested hypothesis, not a verified fix** — record it
+as a follow-up experiment before spending on it, do not assume it resolves either failure mode above.
 
 ## Caveat: Meshy's "3D agent" is not an API feature
 

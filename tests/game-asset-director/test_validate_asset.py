@@ -60,6 +60,12 @@ class TriBudgetTests(unittest.TestCase):
         self.assertTrue(V.check_tri_budget(5000, "character")[0])
         self.assertFalse(V.check_tri_budget(5000, "prop")[0])
 
+    def test_building_bounds(self):
+        self.assertTrue(V.check_tri_budget(8000, "building")[0])
+        self.assertTrue(V.check_tri_budget(20000, "building")[0])
+        self.assertFalse(V.check_tri_budget(7999, "building")[0])
+        self.assertFalse(V.check_tri_budget(20001, "building")[0])
+
     def test_unknown_class_fails_loudly(self):
         ok, reason = V.check_tri_budget(5000, "vehicle")
         self.assertFalse(ok)
@@ -191,6 +197,63 @@ class UvPaddingTests(unittest.TestCase):
     def test_invalid_texture_size_fails(self):
         shells = [self._box(0.0, 0.4, 0.0, 0.4), self._box(0.5, 0.8, 0.0, 0.4)]
         self.assertFalse(V.check_uv_padding(shells, 0)[0])
+
+
+class ManifoldTests(unittest.TestCase):
+    def test_fully_closed_mesh_passes(self):
+        edges = {("a", "b"): 2, ("b", "c"): 2, ("c", "a"): 2}
+        ok, reason = V.check_manifold(edges)
+        self.assertTrue(ok)
+        self.assertIn("manifold", reason)
+
+    def test_small_open_bottom_boundary_passes(self):
+        """A background prop with an unseen, unmodeled bottom is normal."""
+        edges = {("e%d" % i): 2 for i in range(196)}
+        edges.update({("b%d" % i): 1 for i in range(4)})  # 4/200 = 2%, at the tolerance
+        ok, _ = V.check_manifold(edges, max_boundary_ratio=0.02)
+        self.assertTrue(ok)
+
+    def test_open_roof_style_hole_fails(self):
+        """This is the showcase-asset defect: real content, ALL CHECKS PASSED
+        on every other check, but the roof cavity is wide open."""
+        edges = {}
+        for i in range(60):
+            edges["closed%d" % i] = 2
+        for i in range(40):
+            edges["boundary%d" % i] = 1
+        ok, reason = V.check_manifold(edges, max_boundary_ratio=0.02)
+        self.assertFalse(ok)
+        self.assertIn("holes", reason)
+
+    def test_overshared_edges_count_as_non_manifold(self):
+        edges = {"a": 2, "b": 2, "c": 3}
+        ok, reason = V.check_manifold(edges, max_boundary_ratio=0.1)
+        self.assertFalse(ok)
+        self.assertIn("over-shared", reason)
+
+    def test_no_edges_fails(self):
+        self.assertFalse(V.check_manifold({})[0])
+
+
+class UvShellDensityTests(unittest.TestCase):
+    def test_well_packed_shells_pass(self):
+        ok, _ = V.check_uv_shell_density([50, 42, 38, 60], min_avg_faces=16)
+        self.assertTrue(ok)
+
+    def test_confetti_shells_fail(self):
+        """The showcase-asset defect: 1349 UV islands on an 8000-tri mesh
+        (avg 5.9 faces/island) - the failure the module default is set to catch."""
+        shell_face_counts = [8000 // 1349] * 1349
+        ok, reason = V.check_uv_shell_density(shell_face_counts)
+        self.assertFalse(ok)
+        self.assertIn("confetti", reason)
+
+    def test_exactly_at_minimum_passes(self):
+        ok, _ = V.check_uv_shell_density([16, 16, 16], min_avg_faces=16)
+        self.assertTrue(ok)
+
+    def test_no_shells_fails(self):
+        self.assertFalse(V.check_uv_shell_density([])[0])
 
 
 class NgonTests(unittest.TestCase):

@@ -22,29 +22,53 @@ Do not simplify the textured mesh. Build a **new** low-poly mesh, give it its ow
 **bake** the high-poly detail onto it as image maps.
 
 1. **Duplicate** the high-poly mesh. The original is the bake source and must stay untouched.
-2. **Decimate the duplicate** (Collapse) down to the target triangle count. This is the low-poly cage
-   — its own UVs are about to be thrown away, so the UV damage from this step does not matter.
-3. **Smart UV Project** the low-poly copy. A fresh, non-overlapping, 0–1-space layout with real
+2. **Weld + close small gaps** on the duplicate (merge-by-distance, then Fill Holes on the resulting
+   boundary loops). Raw AI-mesh output is routinely exported as disconnected per-chunk triangle soup —
+   surfaces that touch geometrically but were never vertex-welded — and this is *before* decimation
+   makes it worse. Confirmed by direct measurement on a real Rodin HighPack asset: 383 disconnected
+   mesh components and 8,473 open boundary edges (14.5% of all edges) already present at the raw
+   36,201-tri source. Skipping this step is what turns into a >1,000-island UV explosion two steps
+   later (see "Why UV shell count explodes" below) — it is not a margin problem or a Smart UV Project
+   angle-limit problem, both of which were checked and ruled out on the same asset.
+3. **Decimate the (cleaned) duplicate** (Collapse) down to the target triangle count. This is the
+   low-poly cage — its own UVs are about to be thrown away, so the UV damage from this step does not
+   matter.
+4. **Smart UV Project** the low-poly copy. A fresh, non-overlapping, 0–1-space layout with real
    padding. This is the layout the baked textures will be authored into.
-4. **Cycles bake, "Selected to Active"** — select the high-poly, make the low-poly the active object,
+5. **Cycles bake, "Selected to Active"** — select the high-poly, make the low-poly the active object,
    and bake `NORMAL`, `AO`, and a color pass from the high-poly onto the low-poly's new UVs.
-5. **Wire the baked images** into the low-poly's Principled BSDF (base color → Base Color, normal →
+6. **Wire the baked images** into the low-poly's Principled BSDF (base color → Base Color, normal →
    Normal Map node → Normal, AO into the ORM pack or an AO multiply).
 
 The high-frequency detail now lives in the normal map instead of the geometry, which is precisely the
 trade a mobile GPU wants: cheap triangles, one texture fetch.
 
-`scripts/retopo_bake.py` implements all five steps headlessly:
+`scripts/retopo_bake.py` implements all six steps headlessly:
 
 ```bash
 blender --background high_poly.blend \
   --python skills/game-asset-director/scripts/retopo_bake.py \
-  -- --target-tris 6000 --texture-size 2048 --margin 0.02 --output finished.blend
+  -- --target-tris 6000 --texture-size 2048 --margin 0.004 --output finished.blend
 ```
 
-Three parameters carry most of the quality: `--target-tris` (the budget below), `--texture-size` (the
-budget below), and `--margin` (UV island padding — too small and adjacent islands bleed into each
-other at lower mip levels, showing up as seams on-device but not in the editor).
+`--margin 0.004` (~8 texels at 2048px) is the default; pass `--skip-cleanup` to disable step 2 for a
+source already known to be a single clean manifold mesh. Four parameters carry most of the quality:
+`--target-tris` (the budget below), `--texture-size` (the budget below), `--margin` (UV island padding
+— too small and adjacent islands bleed into each other at lower mip levels, showing up as seams
+on-device but not in the editor), and the cleanup pass (`--weld-distance`, `--hole-fill-sides`).
+
+### Why UV shell count explodes — and why margin does not fix it
+
+The intuitive read of a badly fragmented bake (huge amount of black dead space around thousands of
+tiny UV islands) is "the margin is too large." That was tested directly on a real showcase asset and
+falsified: re-running Smart UV Project on the same low-poly mesh at `margin=0.003` instead of `0.02`
+produced the *exact same* shell count (1,349). Margin controls the padding *around* each island; it
+has no effect on *how many* islands Smart UV Project creates in the first place. Shell count is fixed
+by mesh connectivity — Smart UV Project cannot merge UV islands across disconnected mesh components —
+and the loose-part count on that asset's raw high-poly source (383) was already in the same order of
+magnitude as its final shell count, confirming the source mesh's fragmentation as the actual driver.
+This is exactly why step 2 (weld + fill-holes) exists as a pipeline step rather than a `--margin` or
+`--angle-limit` tuning knob: it treats the cause, not the symptom.
 
 ### Bake gotchas that produce silently wrong output
 
@@ -63,6 +87,10 @@ other at lower mip levels, showing up as seams on-device but not in the editor).
   `mode_set(mode='EDIT')` → `mesh.select_all(action='SELECT')` → project → back to `'OBJECT'`.
 - Decimate `COLLAPSE` takes a `ratio` in 0–1, **not** a triangle count. Compute the current triangle
   count as `sum(len(p.vertices) - 2 for p in mesh.polygons)`, then `ratio = target / current`.
+- `mesh.remove_doubles` / `mesh.fill_holes` are EDIT-mode operators too, same wrapping as
+  `smart_project` above. `fill_holes(sides=0)` closes boundary loops of any size — including a
+  legitimate open bottom on a prop that was modeled that way on purpose. Pass `--hole-fill-sides` with
+  a finite limit, or `--skip-cleanup`, when that matters for a given asset.
 
 ## Mobile budgets
 
@@ -73,13 +101,22 @@ script is the source of truth, this table is the rationale.
 |---|---|
 | Character / hero | 3,000 – 10,000 tris |
 | Background / mid-ground prop | 100 – 2,000 tris |
+| Building (hero architecture) | 8,000 – 20,000 tris |
 | Per LOD level | **~75% triangle reduction** from the previous level |
+
+`building` is its own class, not "character with a bigger number" — a hero building carries more
+silhouette-defining detail than a character (gables, dormers, a tower, balconies, facade trim) and
+typically reads at a larger screen size for longer. Forcing a building through the character budget
+(3,000–10,000) is what produced the aggressive 36,201→8,000 decimation in the showcase asset that
+first exposed this gap — with headroom to 20,000 tris, a hero building does not need to shed 78% of
+its triangles to pass validation.
 
 Texture budgets:
 
 | Case | Size |
 |---|---|
 | Standard (hero, character, near-camera prop) | 2K (2048×2048) |
+| Building (hero architecture) | 2K–4K (2048–4096) |
 | Small prop | 1K (1024) or 512 |
 | Every case | **Power-of-two dimensions, required** |
 
@@ -101,15 +138,26 @@ blender --background finished.blend \
 |---|---|
 | `tri-budget` | Triangle count inside the class range above |
 | `topology` | Quads and tris only — n-gons and degenerate faces fail |
+| `manifold` | Every edge shared by exactly 2 faces, within a small tolerance for a legitimate open bottom — fails on holes or self-intersecting geometry |
 | `uv-shells` | Every island inside 0–1 space; no island stacked on another |
+| `uv-shell-density` | Average faces per UV island above a floor — fails on confetti-fragmented unwraps even when every individual island is technically valid |
 | `uv-padding` | Tightest inter-island gap, measured in **texels** at the map size (default minimum 2) — this is what verifies `--margin` survived |
 | `texture:*` | Power-of-two, square, and inside the class's size range |
+
+`manifold` and `uv-shell-density` exist because of a real gap found by running this pipeline
+end-to-end on a showcase asset: `tri-budget`, `topology`, `uv-shells`, and `uv-padding` all passed on
+an asset with an open, hollow roof cavity and a bake with ~1,300 confetti-sized UV islands — every
+individual check was narrowly correct and the combination still printed `ALL CHECKS PASSED` on a
+visibly broken asset. A **validator pass on a visibly broken asset is a validator bug to fix, not a
+judgment call** — see SKILL.md's "Validation is necessary, not sufficient."
 
 Known boundaries, so nobody mistakes a pass for more than it is: the stacking test compares island
 *bounding boxes*, so it catches duplicated and buried islands but not exactly-coincident mirrored UVs
 (those weld into a single island, and mirrored UVs are often intentional anyway). Padding is likewise
 a bounding-box gap, deliberately set to a lax default so a tightly interlocked pack does not
-false-fail. Neither test rasterizes texels. `--class` is yours to pass correctly — validating a
+false-fail. Neither test rasterizes texels. `uv-shell-density` is an average, so it can still miss a
+mesh with a few huge islands and many small ones — it catches the systemic-fragmentation case it was
+built for, not every possible bad packing. `--class` is yours to pass correctly — validating a
 character as a prop is a green run that means nothing.
 
 ## LOD chain

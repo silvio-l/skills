@@ -26,15 +26,23 @@ import sys
 TRI_BUDGETS = {
     "character": (3000, 10000),   # character / hero
     "prop": (100, 2000),          # background / mid-ground prop
+    # a hero building carries more silhouette-defining detail than a character (gables,
+    # dormers, a tower, balconies) and reads at a larger screen size for longer - budget
+    # sized above character rather than reusing it as a workaround
+    "building": (8000, 20000),
 }
 
 TEXTURE_BUDGETS = {
     "character": (1024, 2048),    # 2K standard, 1K acceptable
     "prop": (512, 1024),          # small props: 1K or 512
+    "building": (2048, 4096),     # 4K where the facade carries the whole visual read
 }
 
 LOD_REDUCTION = 0.75              # ~75% of the triangles drop per LOD level
 LOD_TOLERANCE = 0.10              # +/- 10 percentage points is still a valid step
+
+MANIFOLD_BOUNDARY_TOLERANCE = 0.02   # legitimate open-bottomed props have a small boundary loop
+MIN_FACES_PER_SHELL = 16             # below this, texture space is confetti, not islands
 
 
 # ---------------------------------------------------------------------------
@@ -167,6 +175,61 @@ def check_ngons(face_vertex_counts):
         len(face_vertex_counts), quads, tris)
 
 
+def check_manifold(edge_face_counts, max_boundary_ratio=MANIFOLD_BOUNDARY_TOLERANCE):
+    """A closed, bake-safe mesh has every edge shared by exactly two faces.
+
+    `edge_face_counts` maps each edge to how many faces use it. A count of 1 is a
+    boundary edge - a hole; a count above 2 is self-intersecting or duplicated
+    geometry. Either is the AI-mesh failure mode this check exists for: raw
+    image-to-3D output can be non-manifold well before any retopo step touches
+    it (an unseen side of a single reference photo reconstructs as an open
+    cavity, not a guess at the missing surface), and none of tri-budget,
+    topology (n-gon), or UV-shell checks can see it - a hole made of clean
+    triangles passes all three.
+
+    A small boundary ratio is normal and not flagged: a background prop is
+    routinely modeled with an open bottom that a player will never see, and
+    that boundary loop is a fixed, small fraction of a healthy mesh's edges.
+    """
+    if not edge_face_counts:
+        return False, "mesh has no edges"
+    total = len(edge_face_counts)
+    boundary = sum(1 for c in edge_face_counts.values() if c == 1)
+    overshared = sum(1 for c in edge_face_counts.values() if c > 2)
+    ratio = (boundary + overshared) / total
+    if ratio > max_boundary_ratio:
+        return False, ("%d boundary + %d over-shared edge(s) of %d (%.1f%%) - mesh has "
+                       "holes or self-intersecting geometry, exceeds %.1f%% tolerance"
+                       % (boundary, overshared, total, ratio * 100, max_boundary_ratio * 100))
+    return True, "%d/%d edges manifold (%.2f%% boundary/over-shared, within %.1f%% tolerance)" % (
+        total - boundary - overshared, total, ratio * 100, max_boundary_ratio * 100)
+
+
+def check_uv_shell_density(shell_face_counts, min_avg_faces=MIN_FACES_PER_SHELL):
+    """Guards against a failure the bounds/overlap/padding checks cannot see: the
+    mesh unwraps into hundreds of confetti-sized islands, each too small to
+    receive a useful texel budget, even though every individual island is
+    valid, non-overlapping, inside 0-1 space, and correctly padded. A validator
+    built only from those three checks prints ALL CHECKS PASSED on a bake that
+    is mostly empty black texture with a scatter of illegible slivers.
+
+    `shell_face_counts` is the face count of each UV island - parallel to the
+    `shells` list `check_uv_shells` operates on, but counting faces per island
+    instead of collecting UV coordinates.
+    """
+    if not shell_face_counts:
+        return False, "no UV shells to measure"
+    total_faces = sum(shell_face_counts)
+    avg = total_faces / len(shell_face_counts)
+    if avg < min_avg_faces:
+        return False, ("%d UV shells average %.1f faces each (minimum %.1f) - texture "
+                       "space is fragmented into confetti, most likely a disconnected "
+                       "source mesh rather than a Smart UV Project packing problem"
+                       % (len(shell_face_counts), avg, min_avg_faces))
+    return True, "%d UV shells average %.1f faces each (minimum %.1f)" % (
+        len(shell_face_counts), avg, min_avg_faces)
+
+
 def is_power_of_two(n):
     return isinstance(n, int) and n > 0 and (n & (n - 1)) == 0
 
@@ -244,19 +307,15 @@ def read_mesh_stats(obj):
 UV_WELD_PRECISION = 5   # decimal places two UVs must share to count as the same point
 
 
-def read_uv_shells(obj):
-    """-> [[(u, v), ...], ...] one list of UV coords per UV island.
+def _uv_face_islands(mesh, uv_layer):
+    """-> [[face_index, ...], ...] one list of face indices per UV island.
 
     Islands are grouped by shared *UV* coordinate, not by mesh connectivity: a
     seam splits one connected mesh into several islands, so grouping by mesh
     topology would report a seamed sphere as a single shell and the overlap
-    check would never fire.
+    check would never fire. Shared by `read_uv_shells` (needs the UV coords)
+    and `read_uv_shell_face_counts` (needs just the island sizes).
     """
-    mesh = obj.data
-    if not mesh.uv_layers:
-        return []
-    uv_layer = mesh.uv_layers.active or mesh.uv_layers[0]
-
     parent = list(range(len(mesh.polygons)))
 
     def find(a):
@@ -272,23 +331,54 @@ def read_uv_shells(obj):
 
     # two faces belong to the same island when they share a welded UV point
     uv_to_face = {}
-    face_uvs = []
     for fi, poly in enumerate(mesh.polygons):
-        coords = []
         for li in poly.loop_indices:
             uv = uv_layer.data[li].uv
-            coords.append((uv[0], uv[1]))
             key = (round(uv[0], UV_WELD_PRECISION), round(uv[1], UV_WELD_PRECISION))
             if key in uv_to_face:
                 union(uv_to_face[key], fi)
             else:
                 uv_to_face[key] = fi
-        face_uvs.append(coords)
 
     islands = {}
     for fi in range(len(mesh.polygons)):
-        islands.setdefault(find(fi), []).extend(face_uvs[fi])
+        islands.setdefault(find(fi), []).append(fi)
     return list(islands.values())
+
+
+def read_uv_shells(obj):
+    """-> [[(u, v), ...], ...] one list of UV coords per UV island."""
+    mesh = obj.data
+    if not mesh.uv_layers:
+        return []
+    uv_layer = mesh.uv_layers.active or mesh.uv_layers[0]
+    shells = []
+    for face_ids in _uv_face_islands(mesh, uv_layer):
+        coords = []
+        for fi in face_ids:
+            for li in mesh.polygons[fi].loop_indices:
+                uv = uv_layer.data[li].uv
+                coords.append((uv[0], uv[1]))
+        shells.append(coords)
+    return shells
+
+
+def read_uv_shell_face_counts(obj):
+    """-> [face_count, ...] one entry per UV island, parallel to read_uv_shells."""
+    mesh = obj.data
+    if not mesh.uv_layers:
+        return []
+    uv_layer = mesh.uv_layers.active or mesh.uv_layers[0]
+    return [len(face_ids) for face_ids in _uv_face_islands(mesh, uv_layer)]
+
+
+def read_edge_face_counts(mesh):
+    """-> {edge_key: face_count}. A manifold mesh has exactly 2 everywhere."""
+    counts = {}
+    for poly in mesh.polygons:
+        for key in poly.edge_keys:
+            counts[key] = counts.get(key, 0) + 1
+    return counts
 
 
 def read_textures(obj):
@@ -341,6 +431,12 @@ def parse_args(argv):
                         "(default: the largest texture on the material, else 1024).")
     p.add_argument("--min-texel-padding", type=int, default=2,
                    help="Minimum inter-island gap in texels (default: 2).")
+    p.add_argument("--max-boundary-ratio", type=float, default=MANIFOLD_BOUNDARY_TOLERANCE,
+                   help="Max fraction of non-2-face edges before manifold check fails "
+                        "(default: %.2f)." % MANIFOLD_BOUNDARY_TOLERANCE)
+    p.add_argument("--min-avg-shell-faces", type=float, default=MIN_FACES_PER_SHELL,
+                   help="Min average faces per UV island before the density check fails "
+                        "(default: %.1f)." % MIN_FACES_PER_SHELL)
     return p.parse_args(argv)
 
 
@@ -358,6 +454,8 @@ def main():
 
     tris, face_counts = read_mesh_stats(obj)
     shells = read_uv_shells(obj)
+    shell_face_counts = read_uv_shell_face_counts(obj)
+    edge_face_counts = read_edge_face_counts(obj.data)
     textures = read_textures(obj)
 
     # padding is measured in texels, so it needs the actual map size
@@ -368,7 +466,9 @@ def main():
     results = [
         ("tri-budget",) + check_tri_budget(tris, args.asset_class),
         ("topology",) + check_ngons(face_counts),
+        ("manifold",) + check_manifold(edge_face_counts, args.max_boundary_ratio),
         ("uv-shells",) + check_uv_shells(shells),
+        ("uv-shell-density",) + check_uv_shell_density(shell_face_counts, args.min_avg_shell_faces),
         ("uv-padding",) + check_uv_padding(shells, texture_size, args.min_texel_padding),
     ]
 

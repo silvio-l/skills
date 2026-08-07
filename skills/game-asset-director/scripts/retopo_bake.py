@@ -49,10 +49,20 @@ def parse_args(argv):
                    help="Triangle budget for the low-poly result (default: 6000).")
     p.add_argument("--texture-size", type=int, default=2048,
                    help="Square bake texture resolution, power of two (default: 2048).")
-    p.add_argument("--margin", type=float, default=0.02,
-                   help="Smart UV Project island margin in UV units (default: 0.02).")
+    p.add_argument("--margin", type=float, default=0.004,
+                   help="Smart UV Project island margin in UV units (default: 0.004, "
+                        "~8px at 2048). 0.02 wastes most of the texture as padding once "
+                        "shell count climbs past a few hundred - see FINISHING-PIPELINE.md.")
     p.add_argument("--object", default=None,
                    help="Name of the high-poly source object (default: the active mesh object).")
+    p.add_argument("--weld-distance", type=float, default=None,
+                   help="Merge-by-distance threshold before decimate, in scene units. "
+                        "Default: 0.1%% of the object's largest dimension.")
+    p.add_argument("--hole-fill-sides", type=int, default=0,
+                   help="Max boundary-loop size Fill Holes will close, 0 = unlimited "
+                         "(default: 0). Runs after the weld, before decimate.")
+    p.add_argument("--skip-cleanup", action="store_true",
+                   help="Skip the weld/fill-holes cleanup pass entirely.")
     p.add_argument("--cage-extrusion", type=float, default=None,
                    help="Bake ray cage extrusion. Default: derived from the object's size.")
     p.add_argument("--bake-samples", type=int, default=16,
@@ -141,6 +151,74 @@ def decimate_to(obj, target_tris):
     result = triangle_count(obj.data)
     print("Decimate: result %d tris" % result)
     return result
+
+
+def loose_part_count(mesh):
+    """Disconnected-component count via union-find over mesh.edges - no bmesh
+    needed. Used only for the before/after log line; not a validator check
+    (validate_asset.py's own manifold/uv-shell-density checks are the gate)."""
+    parent = list(range(len(mesh.vertices)))
+
+    def find(a):
+        while parent[a] != a:
+            parent[a] = parent[parent[a]]
+            a = parent[a]
+        return a
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[rb] = ra
+
+    for e in mesh.edges:
+        union(e.vertices[0], e.vertices[1])
+    return len(set(find(i) for i in range(len(mesh.vertices))))
+
+
+def cleanup_mesh(obj, weld_distance, hole_fill_sides):
+    """Weld coincident-but-unwelded vertices and close small boundary gaps,
+    run on the low-poly duplicate before decimate.
+
+    Root cause, confirmed by direct measurement (not assumed): raw AI-mesh
+    output from image-to-3D services is frequently exported as disconnected
+    per-chunk triangle soup - geometrically touching surfaces that were never
+    vertex-welded into one continuous mesh. On a real Rodin HighPack asset
+    this showed up as 383 disconnected mesh components and 8,473 open
+    boundary edges (14.5% of all edges) *before* any decimation touched it.
+    Smart UV Project cannot join UV islands across disconnected mesh
+    components, so that fragmentation - not the unwrap angle and not the
+    `--margin` value - is what turns into ~1,300+ confetti-sized UV islands
+    after Smart UV Project, wasting nearly all of the bake texture as padding
+    and dead space. It is also the same defect that shows up visually as an
+    open/hollow roof cavity or torn-looking mesh shards: a boundary edge is a
+    hole, not a rendering artifact.
+
+    This is a cleanup pass, not a repair of missing geometry: welding closes
+    gaps between fragments that are touching or nearly touching, and Fill
+    Holes closes the resulting small boundary loops. It cannot invent surface
+    detail a single reference photo never captured (an unseen roof interior,
+    thin lattice geometry like railings) - that is a source-generation
+    limitation, documented in AI-MESH-SERVICES.md, not something a mesh
+    cleanup step can fix.
+    """
+    before = loose_part_count(obj.data)
+    set_active(obj)
+    select_only([obj])
+    bpy.ops.object.mode_set(mode="EDIT")
+    bpy.ops.mesh.select_all(action="SELECT")
+    if hasattr(bpy.ops.mesh, "remove_doubles"):
+        bpy.ops.mesh.remove_doubles(threshold=weld_distance)
+    else:
+        bpy.ops.mesh.merge(type="DISTANCE", threshold=weld_distance)
+    bpy.ops.mesh.select_all(action="SELECT")
+    bpy.ops.mesh.fill_holes(sides=hole_fill_sides)
+    bpy.ops.mesh.select_all(action="SELECT")
+    bpy.ops.mesh.quads_convert_to_tris()
+    bpy.ops.object.mode_set(mode="OBJECT")
+    after = loose_part_count(obj.data)
+    print("Cleanup: weld %.5f, fill-holes sides=%d -> %d loose part(s) (was %d)"
+          % (weld_distance, hole_fill_sides, after, before))
+    return before, after
 
 
 def smart_uv_project(obj, margin):
@@ -267,14 +345,24 @@ def main():
     high = find_source_object(args.object)
     print("High-poly source: %r (%d tris)" % (high.name, triangle_count(high.data)))
 
-    # 1. duplicate, 2. decimate the duplicate into the low-poly cage
+    # 1. duplicate
     low = duplicate_object(high, high.name + "_LOD0")
+
+    # 2. weld + close small gaps on the duplicate, before decimate collapses them
+    #    into geometry that is harder to reason about (see cleanup_mesh's docstring)
+    if not args.skip_cleanup:
+        weld_distance = args.weld_distance
+        if weld_distance is None:
+            weld_distance = max(1e-5, object_extent(high) * 0.001)
+        cleanup_mesh(low, weld_distance, args.hole_fill_sides)
+
+    # 3. decimate the (cleaned) duplicate into the low-poly cage
     decimate_to(low, args.target_tris)
 
-    # 3. fresh UVs on the low-poly copy only
+    # 4. fresh UVs on the low-poly copy only
     smart_uv_project(low, args.margin)
 
-    # 4. bake targets
+    # 5. bake targets
     size = args.texture_size
     mat = ensure_material(low, low.name + "_mat")
     images = {
@@ -313,7 +401,7 @@ def main():
         except RuntimeError as exc:
             raise SystemExit("ERROR: %s bake failed: %s" % (key, exc))
 
-    # 5. wire the baked maps into the Principled BSDF
+    # 6. wire the baked maps into the Principled BSDF
     bsdf = principled_of(mat)
     if bsdf is None:
         print("WARNING: no Principled BSDF found, baked images left unconnected")

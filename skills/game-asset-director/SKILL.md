@@ -39,7 +39,7 @@ which is noise against what a visibly bad hero asset costs. Every AI tier below 
 | Category | Signal | Route |
 |---|---|---|
 | **A. Procedural hard-surface** | rock, terrain, modular building/kit, generic prop, GN tree, "N variants of X" | Hand off entirely to `blender-scripting`, then run `scripts/validate_asset.py` — it does not self-validate against mobile budgets. |
-| **B. Hero / character / organic** | character, creature, boss, hero prop, unique named asset | `fal-ai/hyper3d/rodin` with **HighPack** (quad topology + PBR + 4K, ~$1.20). Alternate: `fal-ai/meshy/v6-preview/image-to-3d` where its style fits better. → `scripts/retopo_bake.py` → LOD chain → validate. |
+| **B. Hero / character / organic / building** | character, creature, boss, hero prop, unique named asset, a single hero building/structure | `fal-ai/hyper3d/rodin` with **HighPack** (quad topology + PBR + 4K, ~$1.20). Alternate: `fal-ai/meshy/v6-preview/image-to-3d` where its style fits better. → `scripts/retopo_bake.py` → LOD chain → validate **with `--class building` for a structure, not `--class character`** — see FINISHING-PIPELINE.md's budget table. |
 | **C. Complex background prop** | one-off statue, furniture, "barrel with graffiti" — visible but not hero-tier | `tripo3d/tripo/v2.5/image-to-3d` with HD textures. Drop to `fal-ai/hunyuan3d/v2/turbo` or `fal-ai/trellis` **only** for high-volume far-background filler where the user signals volume over per-asset fidelity. → same finishing pipeline as B. |
 | **D. Asset pack** | "enemy pack", "matching set", any request for visual consistency across several assets | Generate a consistent **reference-image set first** via `fal-ai/nano-banana/edit` (or `fal-ai/flux-pro/kontext`), then convert each image through B or C by its own hero-vs-background status. Not Meshy's web-only "3D agent" — see [AI-MESH-SERVICES.md](AI-MESH-SERVICES.md). |
 | **E. PBR texture / material only** | "make this look like rusted iron", no new mesh | Procedural Principled-BSDF graph via `blender-scripting`. AI photo-to-PBR only when the user supplies an actual reference photo. |
@@ -79,20 +79,35 @@ Note for maintainers: `blender-scripting` currently has **no** Decimate/LOD cont
 chained-Decimate recipe lives in [FINISHING-PIPELINE.md](FINISHING-PIPELINE.md) and is this skill's
 own material, executed through `blender-scripting`'s headless conventions.
 
-## Validation is a script, not a judgment
+## Validation is necessary, not sufficient
 
 The last step of every 3D branch is `scripts/validate_asset.py`; of every 2D branch,
-`scripts/validate_2d_asset.py`. **These scripts are the source of truth.** A file that exists, a
-render that looks fine, and the agent's own reading of a mesh are all irrelevant — an asset is done
-when the validator prints `ALL CHECKS PASSED` and exits zero, and not before.
+`scripts/validate_2d_asset.py`. **These scripts are the floor, not the ceiling.** `ALL CHECKS PASSED`
+and exit zero is a hard requirement — never report an asset done without it, never report a validator
+result you did not actually run, and never paraphrase a `FAIL` into a qualified pass. But it is not by
+itself proof the asset is good.
+
+This was found, not assumed: a real showcase asset (a hero building through Category B end-to-end)
+printed `ALL CHECKS PASSED` — tri-budget, topology, UV shells, UV padding, textures — while the
+rendered result had an open, hollow roof cavity and a bake wasted on ~1,300 confetti-sized UV islands,
+both directly visible in a render and in the raw baked textures. The individual checks were each
+narrowly correct; the combination still missed a defect any human would catch by looking at the
+result. `manifold` and `uv-shell-density` were added to `validate_asset.py` specifically to close that
+gap, but the lesson generalizes: **a validator pass on a visibly broken asset is a validator bug to
+fix, not a judgment call to make in its place.**
+
+So: render the finished asset from at least two angles and actually look at it before reporting a 3D
+asset done — alongside the validator, not instead of it. If the render looks wrong and the validator
+passed, the validator is missing a check; add one (following the pure-predicate pattern already in
+`scripts/validate_asset.py`) rather than either shipping the visible defect or overriding the
+validator's PASS with your own read of the mesh. The validator's word is still final on anything it
+does check — this does not reopen "trust your own judgment over the script" for topology, budgets, or
+UV correctness; it only means the checked set can be incomplete, and a render is how that gets found.
 
 ```bash
 blender --background asset.blend --python skills/game-asset-director/scripts/validate_asset.py
 python3 skills/game-asset-director/scripts/validate_2d_asset.py --image sprite.png --target 512x512
 ```
-
-Never report a validator result you did not actually run, and never paraphrase a `FAIL` into a
-qualified pass.
 
 **On failure:**
 
