@@ -1,6 +1,6 @@
 ---
 name: blender-scripting
-description: Generate Blender 3D models headlessly via Python (bpy/bmesh/Geometry Nodes) with design sense — buildings, props, trees, rocks — plus FBX/GLTF export and API debugging. Use for 'Blender-Modell erstellen', 'prozedural generieren', 'Blender headless'.
+description: "Generate Blender 3D geometry headlessly via Python (bpy/bmesh/Geometry Nodes) — procedural buildings, props, trees, rocks, FBX/GLTF export, bpy debugging. Finished mobile-game assets: use game-asset-director. Use for 'Blender-Modell erstellen'."
 ---
 
 # Blender Scripting
@@ -14,6 +14,8 @@ blender --background --python-expr "import bpy; ..."  # one-liner
 ```
 
 `--background` (`-b`) needs no display and no running Blender instance. Iterate by re-running the script — there is no persistent session to keep in sync.
+
+When the request is for a *finished, production-ready mobile-game asset* rather than raw procedural geometry for its own sake, defer to `game-asset-director` — it owns AI-mesh routing, retopo/bake, mobile polycount and texture budgets, and asset validation, and calls back into this skill for the geometry and export steps.
 
 ## Object creation: bpy.ops vs bpy.data/bmesh
 
