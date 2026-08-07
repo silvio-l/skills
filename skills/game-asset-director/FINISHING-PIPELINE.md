@@ -1,20 +1,26 @@
 # Finishing Pipeline (3D)
 
-What turns a raw AI mesh into a shippable mobile asset. Every mesh from
-[AI-MESH-SERVICES.md](AI-MESH-SERVICES.md) goes through this; so does any `blender-scripting` output
-that has to hit a polycount budget.
+What turns a raw AI mesh into a shippable mobile asset. Every **category B (hero-tier)** mesh from
+[AI-MESH-SERVICES.md](AI-MESH-SERVICES.md) goes through this in full, as does any `blender-scripting`
+output that has to hit a polycount budget. A simple, non-ornate **category C** prop may take the
+shorter route in "When a bare Decimate is enough (category C only)" instead.
 
-## Why a bare Decimate fails
+## Why a bare Decimate fails on a hero asset
 
 The obvious move — import the AI mesh, add a Decimate modifier, drop it to the target triangle count,
-ship it — **corrupts the texture**, and does so worse the closer you get to real mobile polycounts.
-Decimate collapses edges without regard for the UV layout: the seams move, shells distort, and the
-texture that was mapped to the dense mesh smears across the simplified one. The geometry looks
-acceptable in a wireframe view and the material looks broken in the render, which is exactly the
-failure mode that gets shipped because nobody re-checked the textured view.
+ship it — **corrupts the texture** on a hero asset, and does so worse the closer you get to real
+mobile polycounts. Decimate collapses edges without regard for the UV layout: the seams move, shells
+distort, and the texture that was mapped to the dense mesh smears across the simplified one. The
+geometry looks acceptable in a wireframe view and the material looks broken in the render, which is
+exactly the failure mode that gets shipped because nobody re-checked the textured view.
 
 This was confirmed in real production testing, not derived from theory: naive Decimate at production
 polycounts was the failure; the fix below was what actually worked.
+
+This is a scoped claim, not an absolute one. It holds where texture fidelity after simplification
+carries the asset — hero assets, and anything with complex or organic topology where naive Decimate
+visibly breaks the UVs. It does **not** hold for every asset class: see "When a bare Decimate is
+enough (category C only)" below, where a bare Decimate pass is a sanctioned, faster path.
 
 ## The fix: retopo → bake
 
@@ -57,6 +63,23 @@ source already known to be a single clean manifold mesh. Four parameters carry m
 — too small and adjacent islands bleed into each other at lower mip levels, showing up as seams
 on-device but not in the editor), and the cleanup pass (`--weld-distance`, `--hole-fill-sides`).
 
+### Manual escalation when the automated retopo is not good enough
+
+`retopo_bake.py`'s duplicate → Decimate → Smart UV Project → bake technique is automated and headless,
+which is what makes it the default — not a claim that it produces the best possible topology. On a
+hero asset carrying a lot of fine ornamental geometry it can come back with topology that is simply
+unsatisfactory, and the automated knobs above will not rescue it. The escalation path is manual, GUI,
+and real-world proven; name it rather than treating the automated route as the only option:
+
+- **[RetopoFlow](https://github.com/CGCookie/retopoflow)** — free Blender addon for hand-guided
+  retopology. This is the route practitioners take for highly optimized or handcrafted topology,
+  particularly on mobile targets, instead of relying purely on automated remesh.
+- **"Game Ready Modeling Tools" (G-Ready)**, on Superhive / Blender Market — a paid bake addon:
+  one-click cage bake, "Smart Matrix Bake", roughly 10–15× faster baking, and built-in LOD generation.
+
+Both are outside this skill's headless path: they need a human in the Blender GUI. Escalate to them
+deliberately and say so, rather than shipping topology the automated pass got wrong.
+
 ### Why UV shell count explodes — and why margin does not fix it
 
 The intuitive read of a badly fragmented bake (huge amount of black dead space around thousands of
@@ -91,6 +114,27 @@ This is exactly why step 2 (weld + fill-holes) exists as a pipeline step rather 
   `smart_project` above. `fill_holes(sides=0)` closes boundary loops of any size — including a
   legitimate open bottom on a prop that was modeled that way on purpose. Pass `--hole-fill-sides` with
   a finite limit, or `--skip-cleanup`, when that matters for a given asset.
+
+## When a bare Decimate is enough (category C only)
+
+For a **simple, non-ornate background prop** — a chair, a crate, a table — a Decimate modifier applied
+directly to the already-textured AI mesh is a legitimate and much faster path. No retopology, no
+re-UV, no rebake. This is documented practice, not a shortcut invented here: a real shipped game asset
+(a Meshy-generated chair, taken into the Eon Editor with collision) was finished exactly this way, in
+two Decimate passes — ratio 1 → 0.1, then a later pass → 0.5 — with the file going 64 MB → 11 MB →
+~2 MB after a manual 2K → 512 texture resize → 1.1 MB final.
+
+The gate is the same render-and-look-at-it discipline this skill requires everywhere else (SKILL.md,
+"Validation is necessary, not sufficient"): **spot-check the textured render before applying each
+Decimate pass.** If the material still looks right, apply and continue; the moment UVs visibly break,
+stop and fall back to the retopo → bake technique above. The validator still runs afterwards, with the
+correct `--class`, exactly as on any other route.
+
+Do not extend this to:
+
+- **Category B hero assets.** Texture fidelity after simplification is precisely what carries a hero
+  asset — retopo → bake stays mandatory there.
+- **Complex or organic topology**, at any category, where naive Decimate visibly breaks the UVs.
 
 ## Mobile budgets
 

@@ -39,17 +39,46 @@ which is noise against what a visibly bad hero asset costs. Every AI tier below 
 | Category | Signal | Route |
 |---|---|---|
 | **A. Procedural hard-surface** | rock, terrain, modular building/kit, generic prop, GN tree, "N variants of X" | Hand off entirely to `blender-scripting`, then run `scripts/validate_asset.py` — it does not self-validate against mobile budgets. |
-| **B. Hero / character / organic / building** | character, creature, boss, hero prop, unique named asset, a single hero building/structure | `fal-ai/hyper3d/rodin` with **HighPack** (quad topology + PBR + 4K, ~$1.20). Alternate: `fal-ai/meshy/v6-preview/image-to-3d` where its style fits better. → `scripts/retopo_bake.py` → LOD chain → validate **with `--class building` for a structure, not `--class character`** — see FINISHING-PIPELINE.md's budget table. |
-| **C. Complex background prop** | one-off statue, furniture, "barrel with graffiti" — visible but not hero-tier | `tripo3d/tripo/v2.5/image-to-3d` with HD textures. Drop to `fal-ai/hunyuan3d/v2/turbo` or `fal-ai/trellis` **only** for high-volume far-background filler where the user signals volume over per-asset fidelity. → same finishing pipeline as B. |
+| **B. Hero / character / organic / building** | character, creature, boss, hero prop, unique named asset, a structure that genuinely needs free-camera rotation — **read the fixed-camera rule below before sending a building here** | `fal-ai/hyper3d/rodin` with **HighPack** (quad topology + PBR + 4K, ~$1.20). Alternate: `fal-ai/meshy/v6-preview/image-to-3d` where its style fits better. → `scripts/retopo_bake.py` → LOD chain → validate **with `--class building` for a structure, not `--class character`** — see FINISHING-PIPELINE.md's budget table. **Budget manual Blender retouch as part of this route:** image-to-3D cannot guarantee occluded geometry (dormer interiors, balcony undersides, similar detail on ornate one-off architecture) comes back defect-free — see AI-MESH-SERVICES.md's "Known limitation". |
+| **C. Complex background prop** | one-off statue, furniture, "barrel with graffiti" — visible but not hero-tier | `tripo3d/tripo/v2.5/image-to-3d` with HD textures. Drop to `fal-ai/hunyuan3d/v2/turbo` or `fal-ai/trellis` **only** for high-volume far-background filler where the user signals volume over per-asset fidelity. → finishing pipeline as B, except that a simple, non-ornate prop may take the cheaper naive-Decimate path with a visual spot-check instead of the full retopo/bake — see FINISHING-PIPELINE.md's "When a bare Decimate is enough (category C only)". |
 | **D. Asset pack** | "enemy pack", "matching set", any request for visual consistency across several assets | Generate a consistent **reference-image set first** via `fal-ai/nano-banana/edit` (or `fal-ai/flux-pro/kontext`), then convert each image through B or C by its own hero-vs-background status. Not Meshy's web-only "3D agent" — see [AI-MESH-SERVICES.md](AI-MESH-SERVICES.md). |
 | **E. PBR texture / material only** | "make this look like rusted iron", no new mesh | Procedural Principled-BSDF graph via `blender-scripting`. AI photo-to-PBR only when the user supplies an actual reference photo. |
 | **F. App icon** | a platform app icon specifically | Delegate entirely to `app-icon-director`. Nothing from this skill applies. |
 | **G. LOD-only on an existing mesh** | "add LODs to this" | Chained Decimate per [FINISHING-PIPELINE.md](FINISHING-PIPELINE.md), executed headlessly through `blender-scripting`'s conventions, then re-validate. |
 | **H. 2D game asset** | sprite, item/UI icon, portrait, tile art — anything flat that is not an app icon | `fal-ai/nano-banana/edit` (or `fal-ai/flux-pro/kontext`) → `fal-ai/birefnet` where transparency is needed → `fal-ai/esrgan` to the target in-engine resolution → `scripts/validate_2d_asset.py`. See [SPRITE-PIPELINE.md](SPRITE-PIPELINE.md). |
 
-Ambiguity rule: when a request sits between two categories, pick the higher-quality tier and say so in
-the announcement. An over-specified background prop is a small cost; an under-specified hero asset is
-a visible defect.
+### Fixed-camera structures go to category H (2D), not category B (3D)
+
+Before routing any building or structure to category B, establish what the camera actually does. If
+the asset is only ever seen from a **fixed or stepped isometric camera** — the common case for
+city-builder and strategy mobile games, and what real Anno 1800 itself does (stepped rotation around a
+fixed elevation, never free orbit) — **route it through category H by default.** Use category B only
+when the asset genuinely needs free-camera rotation or in-engine 3D interaction: collision meshes,
+physics, a rotatable inspect view.
+
+This is a requirements question, not an ambiguity call — the ambiguity rule below does not override
+it. Three reasons, in order of weight:
+
+1. **No reconstruction step means no unseen-geometry defect.** Category B reconstructs a 3D shape from
+   images and therefore has to invent everything the camera never saw; category H never leaves 2D, so
+   the defect class documented in AI-MESH-SERVICES.md's "Known limitation" cannot occur at all.
+2. **Cheaper.** A single `fal-ai/flux-pro/v1.1-ultra` reference at ~$0.06 versus ~$1.20 for a Rodin
+   HighPack generation, before any Blender time.
+3. **Faster.** No retopo, no bake, no LOD chain, no two-angle render check.
+
+Measured on the ornate hero town hall (dormers, wrought-iron balconies, clock tower, corner turret)
+this rule came out of: the isometric reference image alone already cleared the AAA bar — clean
+dormers, correct wrought-iron balcony detail, sharp facade trim — while three separate 3D
+reconstructions of that same subject, across two vendors, all came back with a hollow roof cavity and
+warped balconies.
+
+### Ambiguity rule
+
+When a request sits between two categories, pick the higher-quality tier and say so in the
+announcement. An over-specified background prop is a small cost; an under-specified hero asset is a
+visible defect. This resolves *which tier*; it never overrides the fixed-camera rule above, which
+resolves *which dimension* — a hero building on a fixed camera is a 2D asset at the highest quality
+tier, not a 3D one.
 
 ## Delegation contract with `blender-scripting`
 
@@ -104,6 +133,18 @@ validator's PASS with your own read of the mesh. The validator's word is still f
 does check — this does not reopen "trust your own judgment over the script" for topology, budgets, or
 UV correctness; it only means the checked set can be incomplete, and a render is how that gets found.
 
+The two-angle render is also how category B's unseen-geometry defects get caught (see
+AI-MESH-SERVICES.md's "Known limitation"). When one shows up, repairing it is part of the route, not a
+pipeline failure to report:
+
+- **A sealed cavity no camera will ever reach in the finished game** — a roof interior, a closed
+  underside — gets **capped/patched in Blender**. That is a correct fix, not a workaround, and it is
+  not an end-run around the validator: capping closes real non-manifold geometry, so the `manifold`
+  check passes afterwards because the mesh has actually become manifold.
+- **A genuinely visible defect** — warped balconies, torn facade trim — needs manual retouch in
+  Blender, or a fresh generation from adjusted reference imagery (a paid retry: stop and ask first,
+  per "On failure" below). Treat this as expected category B effort, not as a broken pipeline.
+
 ```bash
 blender --background asset.blend --python skills/game-asset-director/scripts/validate_asset.py
 python3 skills/game-asset-director/scripts/validate_2d_asset.py --image sprite.png --target 512x512
@@ -117,6 +158,30 @@ python3 skills/game-asset-director/scripts/validate_2d_asset.py --image sprite.p
   immediately and reports to the user before spending again. Same discipline as
   `~/.claude/infrastructure/fal-ai.md`'s "Exhausted balance" rule: stop and ask, never retry-loop
   against a paid endpoint.
+
+## Output location and cleanup
+
+Every route produces two kinds of files, and they do not belong in the same place:
+
+- **Deliverables** — the finished, validated asset (exported GLB/FBX/OBJ, baked textures, 2D
+  sprites/icons) — go into the calling project's actual asset directory, never a scratch/temp path.
+  If the project's asset-directory convention is not obvious from context (Unity's `Assets/`,
+  Godot's project tree, a repo's own `art/`/`assets/` folder), ask once before the first export
+  rather than guessing or leaving the result sitting in a scratchpad.
+- **Working files** — raw AI-mesh downloads, the untouched high-poly `.blend`, unbaked duplicate
+  meshes, reference-image experiments, diagnostic scripts and their intermediate renders — stay in
+  a scratch location (the harness's scratchpad directory, or a repo-local gitignored `.tmp/`) for
+  the duration of the pipeline and never get copied into the deliverable directory alongside the
+  finished asset.
+
+**Clean up working files once the finished asset is validated and copied to its destination.** This
+pipeline is disk-heavy — a single hero-building run produces a 50+MB high-poly `.blend`, a 50+MB
+baked `.blend`, a raw GLB of similar size, and several multi-megabyte PNG bake textures — and running
+it more than once without cleanup silently fills a disk with hundreds of MB nobody will ever reopen.
+Delete the working files after the deliverable is confirmed in place; do not keep them "just in
+case." The only exception is an explicitly open diagnostic (e.g. comparing a raw render against the
+finished one to investigate a defect) — say so out loud when that is why something is being kept.
+Otherwise, cleanup is part of the task, not an optional finishing touch.
 
 ## Files
 

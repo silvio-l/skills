@@ -64,10 +64,10 @@ use the harness's background-execution/notification mechanism instead of a block
 | Endpoint | Vendor / lineage | Price | Output | Use for |
 |---|---|---|---|---|
 | `fal-ai/hyper3d/rodin` | Hyper3D / Deemos, proprietary latent-diffusion transformer, 4B+ params | **$0.40**/gen; **HighPack add-on = 3× (~$1.20)** for 4K textures + high-poly | GLB / USDZ / FBX / OBJ / STL, **quad topology + PBR** | **Category B default.** Quality tiers `high`/`medium`/`low`/`extra-low`; marketed as production-ready for Unity/Unreal/Maya. |
-| `tripo3d/tripo/v2.5/image-to-3d` | Tripo (VAST); TripoSR foundation was open-sourced with Stability AI, 2.5/3.0 are proprietary | $0.20 no texture / **$0.30 standard** / $0.40 HD textures; +$0.05 each for style or quad options | GLB | **Category C default** (HD textures). Cleanest topology per research; auto-size to real-world units available. `.../multiview-to-3d` for multiple reference angles. |
+| `tripo3d/tripo/v2.5/image-to-3d` | Tripo (VAST); TripoSR foundation was open-sourced with Stability AI, 2.5/3.0 are proprietary | $0.20 no texture / **$0.30 standard** / $0.40 HD textures; +$0.05 each for style or quad options | GLB | **Category C default** (HD textures). Cleanest topology per research; auto-size to real-world units available. `.../multiview-to-3d` takes multiple reference angles — but read "Known limitation" below before treating that as a fix for reconstruction defects. |
 | `fal-ai/meshy/v6-preview/image-to-3d` | Meshy, fully proprietary (Meshy-6, GA Jan 2026) | Not published in fal's announcement blog — **read the live model page before spending** | GLB | Category B alternate where Meshy's style suits the art direction better. |
 | `fal-ai/meshy/v6-preview/text-to-3d` | Meshy | as above | GLB | Text-only prompt with no reference image. Prefer image-to-3D — a controlled reference gives a controlled mesh. |
-| `fal-ai/meshy/v5/multi-image-to-3d` | Meshy | as above | GLB | Several reference angles of the same subject. |
+| `fal-ai/meshy/v5/multi-image-to-3d` | Meshy | as above | GLB | Several reference angles of the same subject. Only worth paying for when the angles are **genuinely independent viewpoints** — see "Known limitation" below. |
 | `fal-ai/hunyuan3d/v2/turbo` | Tencent Hunyuan3D, open weights | **$0.14**/gen | GLB | Volume background filler when the user signals cost/volume over per-asset fidelity. |
 | `fal-ai/trellis` | Microsoft TRELLIS, open weights | **~$0.02**/gen — cheapest | GLB | Cheapest baseline; far-background filler, throwaway blockouts, sanity-checking a reference image before paying for a flagship pass. |
 
@@ -98,28 +98,98 @@ reference with it, then hand that image to the normal Category B/C/D image-to-3D
 
 Raw AI mesh output is **never** shippable as-is: expect dense triangulated geometry, arbitrary UV
 layout, and baked-in lighting. Everything that arrives from these endpoints goes through
-[FINISHING-PIPELINE.md](FINISHING-PIPELINE.md) before it counts as an asset. Static hard-surface
-subjects survive the raw output better than organic/character ones — which is exactly backwards from
-where you want the quality, hence the retopo/bake step being mandatory rather than optional.
+[FINISHING-PIPELINE.md](FINISHING-PIPELINE.md) before it counts as an asset. *Simple* static
+hard-surface subjects survive the raw output better than organic/character ones — which is exactly
+backwards from where you want the quality, hence the retopo/bake step being mandatory rather than
+optional. Do not extend that to ornate architecture: a hero building is static hard-surface and still
+reconstructs badly, for a different reason (occlusion, not topology) — see the next section.
 
-### Known limitation: single-image reconstruction quality
+### Known limitation: image-to-3D cannot reconstruct geometry it never saw
 
-Confirmed on a real showcase asset, not theoretical: a single reference photo only constrains the
-surfaces it actually shows. Two failure modes follow directly from that, at any quality tier:
+This is a **structural limit of current (2026) image-to-3D technology** — not a tuning problem, not a
+Blender-pipeline bug, and not a vendor worth switching away from. It is load-bearing for every AI-mesh
+route in categories B and C. State it to the user up front; do not let them find it in a render.
 
-- **Unseen geometry reconstructs poorly or not at all.** A roof interior, an underside, anything not
-  visible from the one reference angle came back as an open/hollow cavity with torn-looking mesh
-  fragments — not a rendering artifact, confirmed from multiple render angles and from raw non-manifold
-  edge counts on the mesh itself (see FINISHING-PIPELINE.md's cleanup-pass rationale).
-- **Thin, lattice-like detail reconstructs as flat, warped blobs.** Wrought-iron balconies and railings
-  came back unrecognizable even on facades directly visible in the reference image — a known weak point
-  of image-to-3D diffusion models for fine appendage geometry, not something the cleanup pass or a
-  higher quality tier fixes.
+**Evidence.** One ornate hero building (Anno-1800-style town hall: dormers, wrought-iron balconies,
+clock tower, corner turret), three generations, two vendors, one defect class:
 
-Multi-view input (Rodin's `input_image_urls` accepts more than one image; `tripo3d/tripo/v2.5/
-multiview-to-3d` and `fal-ai/meshy/v5/multi-image-to-3d` are built for it) is a plausible mitigation
-for hero architectural assets, but this is **an untested hypothesis, not a verified fix** — record it
-as a follow-up experiment before spending on it, do not assume it resolves either failure mode above.
+| Run | Endpoint | Result |
+|---|---|---|
+| 1 | `fal-ai/hyper3d/rodin`, single image, HighPack | open/hollow cavity where the dormer/roof-interior geometry belongs; warped, blob-like balconies |
+| 2 | `fal-ai/hyper3d/rodin`, multi-image | same defect class |
+| 3 | `fal-ai/meshy/v5/multi-image-to-3d`, native quad remesh, **zero Blender involvement** | same defect class |
+
+Run 3 is the decisive one: a different vendor, its own quad remesher, and not a single line of this
+skill's Blender code in the path — same defects. All three were confirmed by rendering the
+**completely untouched raw AI mesh** before any Blender processing ran, so the defects are in the
+vendors' output, not introduced downstream.
+
+**Cause.** A reference image only constrains the surfaces it actually shows. Roof undersides, dormer
+interiors, the far side of a balcony — the model invents them, and on one-off ornate architecture the
+invention is visibly wrong. No quality tier, vendor, or Blender script recovers information that was
+never in the input.
+
+Two defect classes follow, with different prospects:
+
+- **Thin, lattice-like detail reads as flat, warped blobs.** Wrought-iron balconies and railings came
+  back unrecognizable even on facades directly visible in the reference. Genuinely independent extra
+  viewpoints might plausibly help here — untested, see below.
+- **Sealed interior volume comes back as an open cavity.** The roof interior behind the dormers, with
+  torn mesh fragments and raw non-manifold edges (see FINISHING-PIPELINE.md's cleanup-pass rationale).
+  **No multi-view route can fix this at any tier or price**: no external orbit camera gets inside a
+  sealed roof cavity, so no set of orbit images carries the missing information. Cap it in Blender
+  (SKILL.md, "Validation is necessary, not sufficient") or keep the asset out of category B entirely
+  (SKILL.md's fixed-camera rule).
+
+#### Multi-view input: what is settled, what is not
+
+Three claims, deliberately kept apart — collapsing them either writes off multi-view or oversells it:
+
+1. **Near-duplicate multi-image input is tested and does not fix it.** Runs 2 and 3 above. Handing a
+   mesh service several images that are all close variants of one viewpoint buys nothing; the missing
+   information is still missing.
+2. **Genuinely independent multi-view input is untested, and plausible for the thin-lattice defect
+   only.** `fal-ai/era3d` — confirmed live via
+   `https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/era3d` (HTTP 200, full schema) —
+   takes a single `image_url` and returns `images[]` **and** `normal_images[]`. It is real multiview
+   diffusion (arXiv 2405.11616: row-wise attention, canonical camera space), not a repaint. Its output
+   feeds the consumers that actually want distinct viewpoints: `fal-ai/hunyuan3d/v2/multi-view`
+   (explicit `front_image_url` / `back_image_url` / `left_image_url`),
+   `tripo3d/tripo/v2.5/multiview-to-3d`, `fal-ai/meshy/v5/multi-image-to-3d`. **Nothing has been spent
+   on era3d yet.** It is the concrete next experiment for closing the balcony/thin-lattice defect — not
+   a documented fix — and it cannot help the sealed-cavity defect.
+3. **Image-editing "rotation" is a proven dead end for producing reference views.**
+   `fal-ai/nano-banana/edit` was tested for exactly that (asking an edit model to show the subject from
+   another angle) and does not synthesize a genuinely new viewpoint; it repaints the view it was given,
+   and the resulting
+   "multi-view" set is just case 1 again. Do not use edit/conditioning endpoints to manufacture
+   reference angles. They stay correct for pack consistency — see the Meshy caveat below.
+
+### Considered and rejected: moving hero buildings to procedural generation
+
+Tested this session so nobody re-runs it. Given the limitation above, the obvious pivot is to drop
+category B for hero buildings and let category A (`blender-scripting`, procedural `bpy`) build them
+instead. A crude parametric blockout of the same reference building was written and rendered from the
+same camera angle as the AI-mesh renders, to test exactly that. **Verdict: no routing-table change.
+Category A stays what the table says it is — procedural hard-surface: rocks, terrain, modular kits,
+generic props.**
+
+What the blockout got right is real and worth recording: massing and composition (hip roof, dormer
+rhythm along the ridge, central clock tower with bell stage, corner turret, balcony rows), and it is
+manifold-clean and fully rotatable **by construction** — every face is authored, nothing is
+reconstructed from a photo, so the unseen-side problem does not exist at all. What it lacks is the
+ornamental detail density that makes the reference AAA-grade: scrolled/stepped gable pediments,
+wrought-iron lattice railings, window framing and mullions, cornice moldings, arched openings with
+keystones, roof-tile texture. It reads as a generic parametric building.
+
+The gap is not a dead end, it is an unbuilt asset. Genuine AAA ornamental detail out of procedural
+rules is proven production practice — CityEngine/CGA shape grammars, used on Blade Runner 2049 and
+Zootopia; Blender-native equivalents are Buildify, `building_tools`, and `bcga`/`prokitektura-blender`.
+Getting there means authoring a real trim/ornament kit with parametrized gable, railing, and window
+generators. That is a legitimate, scoped engineering project — **not** something a quick script
+achieves, and not to be reported as done or as a cheap pivot. Until that kit exists, hero buildings
+route per SKILL.md: category H when a fixed/stepped camera suffices, category B when free rotation is
+genuinely required.
 
 ## Caveat: Meshy's "3D agent" is not an API feature
 
