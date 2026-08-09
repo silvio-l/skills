@@ -74,7 +74,7 @@ The roundtrip's final step, `npx skills@latest update -g -y`, only refreshes ski
 - `name` — required. Lowercase, hyphens only. MUST match the directory name.
 - `description` — required, one paragraph, **≤ 250 characters (hard cap)**. It *is* the auto-invoke router, so it must carry the core trigger phrases and nothing more — but not so short the model can't tell when to load the skill; aim for ~200–250 chars. Count before committing (`python3 -c 'print(len(open("…").read()))'` on the extracted value).
 - `metadata.*` — optional. Used for extra hints.
-- `disable-model-invocation: true` — optional. Makes the skill **user-invoked only** (a procedure), dropping its `description` from the model's ambient context entirely. Set it when the answer to *"would the model ever usefully load this without the user typing the slash command?"* is no (argument-driven controllers, heavyweight/stateful pipelines). Leave unset when auto-discovery via natural-language triggers is the point — that's carve-out #1 in "Authoring language" below.
+- `disable-model-invocation: true` — **the default for every new skill**, not an afterthought: it drops the `description` from the model's ambient context entirely, so a skill that carries it costs zero tokens on sessions that never use it. Leave it unset only when the answer to *"would the model ever usefully load this without the user typing the slash command?"* is genuinely yes — auto-discovery via natural-language triggers is then the whole point, and that's carve-out #1 in "Authoring language" below. When in doubt, set it; a missed auto-trigger is recoverable (the user just types the slash command), a silently bloated context on every unrelated session is not.
 
 Frontmatter is currently checked by hand. If the skill count grows, add a small lint script and a CI job.
 
@@ -82,7 +82,7 @@ Frontmatter is currently checked by hand. If the skill count grows, add a small 
 
 Every model-invoked skill pre-loads its `description` into the system prompt at startup ([Anthropic — Agent Skills](https://www.anthropic.com/engineering/equipping-agents-for-the-real-world-with-agent-skills)); a large always-on skill set is real context cost and degrades routing ("context rot"). Two ongoing practices keep the harness lean:
 
-1. **Invocation-type discipline** — classify every new skill as a *procedure* (user-invoked; prefer `disable-model-invocation: true`) or an *ability* (model-invoked; description stays in context). Default to procedure unless auto-discovery is the point. See the `disable-model-invocation` rule above.
+1. **Invocation-type discipline** — classify every new skill as a *procedure* (user-invoked, `disable-model-invocation: true` — the default) or an *ability* (model-invoked, description stays in context — only when auto-discovery is genuinely the point). See the `disable-model-invocation` rule above.
 2. **Scope discipline** — global vs project-local, per "Skill scope" above. This is the bigger lever: a project-local skill installed globally by mistake costs its full description on *every* session forever, not just this repo's.
 3. **Periodic blank-slate audit** — periodically review the loaded skill/agent/MCP surface **in a fresh session** (not at the tail of a long one — a polluted context mismeasures the baseline) to catch description leak, redundant globally-installed skill clusters (including duplicates from other install paths, e.g. a skill loaded both via the `skills` CLI and via a Claude Code plugin under a prefixed name), and stale lock entries pointing at skills deleted upstream.
 
