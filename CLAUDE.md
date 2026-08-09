@@ -2,6 +2,36 @@
 
 This repo is the source of truth for my personal Claude Code skills. It is maintained by AI agents (mostly Claude Code itself) — that is who this guide is for.
 
+## Skill scope: global vs project-local
+
+Most skills in this repo are **project-local by design** — they belong only in the specific project(s) that need them, never on every machine-wide session. Only a skill that is genuinely useful *regardless of what repo you're in* (or with no repo open at all) earns global status. This table is the single source of truth; update it whenever a skill is added, removed, or its scope changes — and mirror the same marker in `README.md`.
+
+| Skill | Scope | Why |
+|---|---|---|
+| `apple-notes` | global | macOS system utility, not tied to any codebase |
+| `brainstorming` | global | generic ideation, works on any topic |
+| `deep-monograph` | global | generic long-form writing, not code-tied |
+| `escalate` | global | meta-routing skill, useful in every project |
+| `fetch-open-chat-tab` | global | generic macOS/Safari utility |
+| `fetch-shared-chat` | global | generic URL fetcher |
+| `name-clearance-red-team` | global | ad hoc naming/trademark research, not code-tied |
+| `owasp-bsi-audit` | global | explicit standing exception, see the global `~/.claude/CLAUDE.md` |
+| `app-icon-director` | project-local | only relevant to app projects shipping an icon |
+| `blender-scripting` | project-local | only relevant to 3D/game projects |
+| `game-asset-director` | project-local | only relevant to game projects |
+| `godot-cli` | project-local | only relevant to Godot projects |
+| `marketing-video-automation` | project-local | only relevant to app projects producing marketing videos |
+| `seo-aso-optimizer` | project-local | only relevant to web/app projects doing SEO/ASO |
+
+**Global provisioning is `update`-only — never `add -g`.** Running `npx skills@latest add silvio-l/skills -g` for a *project-local* skill is exactly how machine-wide skill bloat happens: every future project pays its ambient context cost even when it never uses it. `add -g` is therefore never part of any automated or standing-authorized sequence in this repo — it is a deliberate, individual, human-made decision, and only ever for a skill this table marks **global**.
+
+To use a **project-local** skill in a project that needs it, install it there (never with `-g`), from *outside* this repo's working directory:
+
+```bash
+cd <target-project-root>   # never inside this skills/ repo — see the cwd warning below
+npx skills@latest add silvio-l/skills -s <skill-name> -y
+```
+
 ## Workflow
 
 ```
@@ -10,25 +40,26 @@ edit here → commit on dev → push dev → merge dev into main (ff-only) → p
 
 **The skills CLI sources global skills from the `main` branch on GitHub (`origin/main`).** A skill edit is therefore not "live" globally until it is committed on `dev`, merged to `main`, and **both branches are pushed** — only then does `update -g` pick it up. Skipping the merge/push is the #1 reason a freshly-edited skill does not refresh: `update` pulls a stale `main`, so you either see no change or fall back to a local-path `add`. **Every** skill change goes through the full `dev` → `main` roundtrip below, no exceptions.
 
+The roundtrip's final step, `npx skills@latest update -g -y`, only refreshes skills **already tracked** in the global lock (`~/.agents/.skill-lock.json`) — it never installs a skill that isn't already there. That is exactly the intended effect: editing a project-local skill in this repo and running the roundtrip updates it for any project that has separately opted in via `add -s <skill-name>` (no `-g`), without ever pushing it onto every machine-wide session.
+
 1. Edit skill files in this working copy (`~/Documents/Projekte/skills/`).
 2. **Work on `dev`, never commit directly on `main`** (solo-dev branch guard — see the global `~/.claude/CLAUDE.md`; a `pre-commit` hook blocks commits on `main`/`master` once `dev` exists). Before any commit, confirm `HEAD` is on `dev`; if a `dev` branch does not yet exist, create it from `main` (`git switch -c dev`).
 3. Commit with [Conventional Commits](https://www.conventionalcommits.org/) — `feat(skill-name): …`, `fix(skill-name): …`, `docs: …`, `chore: …`. No `Co-Authored-By` trailer (enforced by `commit-msg`).
 4. **Publish both branches, in this order:**
    - `git push origin dev` — publish the work.
    - `git switch main && git merge --ff-only dev && git push origin main && git switch dev` — fast-forward `main` to match `dev` and publish it. `--ff-only` creates no merge commit; this ff-merge of `dev` into `main` is the only merge this repo ever does.
-5. **Then** refresh the global installation with **`update`**, not `add`:
-   - `npx skills@latest update -g -y` — refresh all global skills (auto-detects the source repo per skill, pulls only what changed).
-   - `npx skills@latest update <skill-name> -g -y` — refresh a single skill, e.g. `update apple-notes -g -y`.
+5. **Then** refresh with **`update`**, never `add`, and never for a skill this repo doesn't already have installed somewhere:
+   - `npx skills@latest update -g -y` — refresh every **global**-scope skill already tracked (see the scope table above). Auto-detects the source repo per skill, pulls only what changed, installs nothing new.
+   - `npx skills@latest update <skill-name> -g -y` — refresh one global skill, e.g. `update apple-notes -g -y`.
+   - A **project-local** skill you edited here refreshes the same way, but scoped to whichever project(s) installed it: run `update <skill-name> -y` (no `-g`) from that project's root.
 
    Run this only **after step 4** (both branches pushed, `main` current) — otherwise `update` pulls a stale `main` and the edit silently does not land.
 
-   **Do not use `add` to refresh** — it's for a *first-time* install of a brand-new skill only (`update` has no path to add a skill it doesn't already know about). Once a skill is installed, `update` is the only working refresh path.
-
-   **First-time install: run `add` with `-g`, and from *outside* this repo's working directory — never from inside it.** `npx skills@latest add silvio-l/skills -g -s <skill-name> -y`. The `-g` failure this used to note (`PromptScript: PromptScript does not support global skill installation`) is real but harmless — it only affects the unrelated "PromptScript" agent target; every other agent (including Claude Code) installs fine, verify via `ls ~/.agents/skills/<skill-name>`. The actual danger is `cwd`: run `add` (with or without `-g`) while `cwd` is inside this repo, and its project-scope auto-detection **replaces `skills/<skill-name>/` with a symlink into a newly created `.agents/skills/<skill-name>/`**, and drops `.agents/`, `.claude/`, `skills-lock.json` into the repo tree — a destructive clobber of the source directory this file governs. `cd ~` (or any directory outside the repo) before running `add`, every time.
+   **`add` is only for a first-time install, never a refresh**, and its scope (`-g` or not) follows the scope table — see "Skill scope" above for the exact command and the `cwd` danger (running `add` from inside this repo clobbers `skills/<skill-name>/` with a symlink; always `cd` outside the repo first). The `-g` failure this used to note (`PromptScript: PromptScript does not support global skill installation`) is real but harmless — it only affects the unrelated "PromptScript" agent target; every other agent (including Claude Code) installs fine, verify via `ls ~/.agents/skills/<skill-name>`.
 
 **Never edit `~/.claude/skills/<skill-name>/` directly.** Those paths are CLI-managed symlinks into `~/.agents/skills/<skill-name>/`. Any edit there is overwritten on the next install.
 
-**Standing authorization for this exact roundtrip.** The operator has pre-authorized the literal sequence above (`git push origin dev` → `git switch main && git merge --ff-only dev && git push origin main && git switch dev` → `npx skills@latest update … -g -y`) as the default close-out of any skill edit in this repo — run it without pausing to ask each time. This is a narrow carve-out for this specific sequence in this specific repo, per the global `~/.claude/CLAUDE.md` note that durable CLAUDE.md instructions are a valid advance-authorization mechanism. It does **not** extend to anything else that repo's global rules still gate on confirmation — force-push, `git reset --hard`, history rewrites, or any operation outside this exact roundtrip.
+**Standing authorization for this exact roundtrip.** The operator has pre-authorized the literal sequence above (`git push origin dev` → `git switch main && git merge --ff-only dev && git push origin main && git switch dev` → `npx skills@latest update … -g -y`) as the default close-out of any skill edit in this repo — run it without pausing to ask each time. This is a narrow carve-out for this specific sequence in this specific repo, per the global `~/.claude/CLAUDE.md` note that durable CLAUDE.md instructions are a valid advance-authorization mechanism. It does **not** extend to anything else that repo's global rules still gate on confirmation — force-push, `git reset --hard`, history rewrites, or any operation outside this exact roundtrip. It especially does **not** cover `add -g`: installing a skill globally for the first time is always a separate, explicit, individual decision (see "Skill scope" above), never something this close-out performs on its own.
 
 ## Repo layout
 
@@ -78,8 +109,9 @@ edit here → commit on dev → push dev → merge dev into main (ff-only) → p
    ```
 
 3. Add supporting files as needed (`REFERENCE.md`, `scripts/`, additional phase `.md` files). Everything in the skill's directory is bundled as-is by the `skills` CLI.
-4. **Update `README.md`** — add a `### <skill-name>` block in the "The skills" section using the same *Problem/Fix* shape as the existing entries. The README is the public surface; a skill that is not in it is invisible to anyone browsing the repo.
-5. Commit, push, roundtrip.
+4. **Decide global vs project-local and add a row to the scope table** in "Skill scope" above. Default to project-local — a skill earns global only if it's useful regardless of which repo (or no repo) is open; see that table's existing rows for the bar. Mirror the same scope marker in the new `README.md` entry (next step).
+5. **Update `README.md`** — add a `### <skill-name>` block in the "The skills" section using the same *Problem/Fix* shape as the existing entries, tagged with its scope. The README is the public surface; a skill that is not in it is invisible to anyone browsing the repo.
+6. Commit, push, roundtrip. If the new skill is project-local, it is *not* installed anywhere by the roundtrip — install it into the specific project(s) that need it via the `add -s <skill-name>` command in "Skill scope" above.
 
 ## Frontmatter rules (enforced by the `skills` CLI)
 
@@ -95,7 +127,8 @@ Frontmatter is currently checked by hand. If the skill count grows, add a small 
 Every model-invoked skill pre-loads its `description` into the system prompt at startup ([Anthropic — Agent Skills](https://www.anthropic.com/engineering/equipping-agents-for-the-real-world-with-agent-skills)); a large always-on skill set is real context cost and degrades routing ("context rot"). Two ongoing practices keep the harness lean:
 
 1. **Invocation-type discipline** — classify every new skill as a *procedure* (user-invoked; prefer `disable-model-invocation: true`) or an *ability* (model-invoked; description stays in context). Default to procedure unless auto-discovery is the point. See the `disable-model-invocation` rule above.
-2. **Periodic blank-slate audit** — periodically review the loaded skill/agent/MCP surface **in a fresh session** (not at the tail of a long one — a polluted context mismeasures the baseline) to catch description leak, redundant globally-installed skill clusters, and stale instructions. Prefer project-scoped installs over global (`-g`) for skills only relevant to one project type.
+2. **Scope discipline** — global vs project-local, per the "Skill scope" table above. This is the bigger lever: a project-local skill installed globally by mistake costs its full description on *every* session forever, not just this repo's.
+3. **Periodic blank-slate audit** — periodically review the loaded skill/agent/MCP surface **in a fresh session** (not at the tail of a long one — a polluted context mismeasures the baseline) to catch description leak, redundant globally-installed skill clusters (including duplicates from other install paths, e.g. a skill loaded both via the `skills` CLI and via a Claude Code plugin under a prefixed name), and stale lock entries pointing at skills deleted upstream.
 
 ## Authoring language (HARD RULE)
 
