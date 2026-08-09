@@ -38,7 +38,9 @@ Response fields: `id`, `name`, `purpose`, `interfaceIds`, `vlanType`, `vlan`, `a
 "ipSetting": {"useFixedAddr": true, "netId": "...", "ip": "192.168.0.171", "serverType": "gateway", "serverMac": "..."}
 ```
 
-`PATCH /clients/{mac}` with body `{"ipSetting": {...}}` — **verified working**, full walkthrough in `SKILL.md`'s "Recipe: read or change a DHCP reservation".
+`PATCH /clients/{mac}` with body `{"ipSetting": {...}}` — **the write itself is verified working** (controller DB accepts it and echoes it back), full walkthrough in `SKILL.md`'s "Recipe: read or change a DHCP reservation". **But a successful write does not by itself prove the gateway enforces it** — see the pool-range caveat below, discovered via a real end-to-end test that a DB-only check would have missed.
+
+**Verified 2026-08-09 against firmware 6.2.14.12: a reservation for an address inside the network's dynamic DHCP pool (`dhcpSettings.ipaddrStart`–`ipaddrEnd`) is silently ignored by the gateway.** The client keeps getting handed a normal pool address on every DHCP negotiation, forever — no error, and the controller's own `GET` of that client's `ipSetting` still shows the (unenforced) reservation, making the bug invisible unless you check the client's actual live IP. Evidence: of 25 reservations found on a live controller, all 23 outside the pool worked (live IP matched the reservation); the 2 inside the pool did not. This matches reports of the same behavior on other Omada gateway models/firmware in the community forum — treat it as a standing risk on any Omada gateway, not a one-off. **Always place a new reservation's IP outside the target network's configured pool range**, and confirm the address isn't already someone else's live dynamic lease (check `ip` in `insight/clients`/OpenAPI `clients`, not just `ipSetting`).
 
 ---
 

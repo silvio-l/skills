@@ -88,16 +88,17 @@ DHCP reservations ("Fixed Address" in the UI) are not a separate list — they a
 "ipSetting": {"useFixedAddr": true, "netId": "...", "ip": "192.168.0.171", "serverType": "gateway", "serverMac": "..."}
 ```
 
+0. **`GET /setting/lan/networks` first and read `dhcpSettings.ipaddrStart`/`ipaddrEnd`.** The reserved IP must be **outside** that dynamic pool range. On at least some gateway firmware, a reservation for an address *inside* the pool is silently ignored — the gateway keeps handing that client a normal pool address instead, with no error anywhere. This is not a hypothetical: verified 2026-08-09 against firmware 6.2.14.12 — of 25 existing reservations, every one outside the pool worked, and the only two inside the pool were both silently ignored. Pick an unused address below `ipaddrStart` or above `ipaddrEnd`, and confirm it's actually free (see step 5).
 1. Find the client's MAC. `GET /insight/clients` lists every client the controller has ever seen (including offline ones) — prefer it over OpenAPI's `clients`, which only returns currently-active clients and will silently miss an offline reservation target.
 2. `GET /clients/{mac}` to read the current `ipSetting` (get the right `netId`/`serverMac` for that network).
 3. `PATCH /clients/{mac}` with body `{"ipSetting": {...}}`, keeping `netId`/`serverType`/`serverMac` from step 2 and changing only what needs to change.
-4. `GET /clients/{mac}` again to confirm the controller-side reservation took.
+4. **A `PATCH` returning `errorCode: 0`, or a subsequent `GET` echoing the new `ipSetting`, only proves the controller's database accepted the write — not that the gateway enforces it.** Both silently succeed even when the reservation (step 0's bug) never takes effect. The only real verification is checking the client's actual live-leased IP after a fresh DHCP negotiation (reboot the client's network stack, or wait for a lease renewal, then read the live IP from the device itself or from `GET /clients/{mac}`'s top-level `ip` field — not `ipSetting`).
 
 **A device with two NICs (e.g. Wi-Fi + Ethernet) needs two separate identifications** — the controller has no "same physical host" grouping, so a shared hostname on one interface doesn't imply the other reports one too. Match by connection type (`wireless: true/false`), MAC vendor prefix (OUI), and whether it's currently `active`, rather than guessing.
 
-**Swapping a reserved IP between two clients:** change the *old holder's* reservation away from the IP first, then assign it to the *new holder* — never have both hold the same IP at once, even briefly.
+**Swapping a reserved IP between two clients:** change the *old holder's* reservation away from the IP first, then assign it to the *new holder* — never have both hold the same IP at once, even briefly. Also double-check the target IP isn't some unrelated device's *current dynamic* lease (`GET /insight/clients` or the OpenAPI `clients` list, both include the live `ip`) — a reservation doesn't reserve anything against a device that's already holding that address dynamically.
 
-**The reservation change is controller-side only.** It takes effect on the client's *next* DHCP lease renewal, not retroactively on an already-running lease — the controller cannot force this without a reconnect/port action that would interrupt the client. If continuous reachability matters, renew the client's interfaces one at a time (never all at once), so at least one path stays up throughout.
+**The reservation change only takes effect on the client's *next* DHCP negotiation**, not retroactively on an already-running lease. A plain lease *renewal* (unicast REQUEST for the same IP the client already holds) is often not enough to pick up a changed reservation — it may need a full new negotiation (release + discover), e.g. by cycling the client's interface down/up. If continuous reachability matters, do this one interface at a time (never all at once), so at least one path stays up throughout — and be ready to fall back to whatever IP the interface ends up with if the reservation still doesn't apply, rather than assuming the target address.
 
 ## Hard rules
 
@@ -108,3 +109,5 @@ DHCP reservations ("Fixed Address" in the UI) are not a separate list — they a
 - **Trunk profiles need `nativeNetworkId`** — profiles without it cannot be assigned to ports.
 - **Channel is set via `freq` (MHz), not `channel`** — see the frequency table in the reference.
 - **Re-authenticate on `-1`/`-44116`** — the token/session invalidates after a site copy/import or a permission change.
+- **A DHCP reservation inside the network's dynamic pool range is silently ignored by the gateway** — the write succeeds and reads back fine, but is never enforced. Always reserve an address outside `dhcpSettings.ipaddrStart`–`ipaddrEnd`. See the recipe above.
+- **`PATCH /setting/lan/networks/{id}` can reject a full GET-then-PATCH round-trip with `-1001` for a field absent from the GET response** (e.g. `proto`) — the network-settings schema isn't fully self-describing on read. Treat network-level (not client-level) DHCP/pool edits as unverified; a failed attempt here left the pool untouched, which is the safe outcome.
