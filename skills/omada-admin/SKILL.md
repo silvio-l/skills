@@ -1,6 +1,6 @@
 ---
 name: omada-admin
-description: Manage a TP-Link Omada SDN Controller via its API — devices, clients, DHCP reservations, VLANs, SSIDs, firewall rules, switch ports. Triggers: "Omada", "OC200", "SSID", "VLAN", "DHCP-Reservierung", "AP konfigurieren".
+description: 'Manage a TP-Link Omada SDN Controller via its API — devices, clients, DHCP reservations, VLANs, SSIDs, firewall rules, switch ports. Triggers: "Omada", "OC200", "SSID", "VLAN", "DHCP-Reservierung", "AP konfigurieren".'
 ---
 
 # Omada Admin
