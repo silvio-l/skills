@@ -1,0 +1,23 @@
+{
+  "skill_name": "prompt-compressor",
+  "evals": [
+    {
+      "id": 0,
+      "prompt": "Ich habe eine aufgeblähte CLAUDE.md-Datei mit viel erzählender Prosa, Begrüßungen und allgemeinen Best-Practices. Nutz den prompt-compressor Skill, um sie zu optimieren. Erstelle auch .compressed-Kopien zur Kontrolle.",
+      "expected_output": "Der Skill findet die CLAUDE.md, komprimiert sie durch Delta-Refactoring, erstellt Kopien und gibt einen Markdown-Report mit Token-Ersparnis.",
+      "files": []
+    },
+    {
+      "id": 1,
+      "prompt": "Im meinem Projekt-Root habe ich mehrere .cursorrules und .instructions.md-Dateien mit redundanten Erklärungen. Der prompt-compressor soll alle automatisch finden und komprimieren.",
+      "expected_output": "Skill findet alle Instruktionsdateien im Projekt und global, komprimiert sie alle parallel, erstellt Report mit prozentualen Einsparungen pro Datei.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Ich habe globale ~/.claude/CLAUDE.md und ~/.cursorrules. Starten Sie eine vollständige Token-Optimierung auf allen Instruktionsdateien im System.",
+      "expected_output": "Kompression findet sowohl projektlokale als auch globale Dateien, komprimiert sie alle, erstellt Backups (.compressed) und gibt detaillierten Report mit Gesamtersparnis.",
+      "files": []
+    }
+  ]
+}
