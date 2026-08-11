@@ -1,6 +1,6 @@
 ---
 name: instructions-optimizer
-description: Compresses AI instruction files (CLAUDE.md, .cursorrules, copilot-instructions.md) by cutting general knowledge, keeping project rules/commands. Trigger: 'CLAUDE.md komprimieren', 'Instruktionsdatei optimieren', 'aufgeblähte .cursorrules'.
+description: "Compresses AI instruction files (CLAUDE.md, .cursorrules, copilot-instructions.md) by cutting general knowledge, keeping project rules/commands. Trigger: 'CLAUDE.md komprimieren', 'Instruktionsdatei optimieren', 'aufgeblähte .cursorrules'."
 disable-model-invocation: true
 ---
 
