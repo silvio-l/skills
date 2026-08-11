@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Helper for the prompt-compressor skill.
+"""Helper for the instructions-optimizer skill.
 
 This script only handles the mechanical parts: finding candidate instruction
 files, estimating their token count, and rendering the savings report. It
@@ -119,7 +119,7 @@ def cmd_report(args) -> None:
     with open(args.manifest, encoding='utf-8') as f:
         rows = json.load(f)
 
-    lines = ["# Prompt Compression Report", ""]
+    lines = ["# Instructions Optimization Report", ""]
     lines.append("| File | Path | Original (tokens) | Compressed (tokens) | Savings | Status |")
     lines.append("|------|------|-------------------|----------------------|---------|--------|")
 
