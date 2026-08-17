@@ -150,6 +150,12 @@ fix-plan.
 
 **The Fix.** Split the work by what each side is actually good at: `scripts/compress.py` handles the mechanical parts — discovering candidate files (deduped by inode, so a case-insensitive filesystem can't return the same file twice, and never touching `.claude.json`/`.claude.yaml`), estimating tokens, and rendering the savings report — while the agent does the actual delta-refactoring by reading each file and applying the keep/cut rules itself. The script never writes to an instruction file; only the agent does, and only into a `<file>.compressed` sibling first. The original is never overwritten in place without the user reviewing that copy and explicitly approving — global files (`~/.claude/CLAUDE.md`) get that gate applied with extra weight, since a mistake there affects every future session, not just one project.
 
+### `youtube-transcript` — project-local
+
+**The Problem.** YouTube's auto-generated caption files use "rolling captions" — every line of text appears twice in a row (once as a preview of the next block, once as the finalized block) wrapped in inline word-timing tags like `<00:00:00.320><c>word</c>`. An agent reading a `.vtt` file directly gets a transcript with every sentence duplicated or tripled, and has no standing guidance on the right `yt-dlp` flags for metadata, manual-vs-auto subtitle fallback, or comment extraction — so each session reinvents (and sometimes gets wrong) the same handful of commands.
+
+**The Fix.** A thin, deterministic workflow: pull metadata first (`--dump-json`) to decide whether manual subtitles exist before falling back to auto-captions, fetch the transcript, then always pipe the resulting `.vtt` through a bundled stdlib-only script (`scripts/clean_vtt.py`) that strips the timing tags and drops consecutive duplicate lines rather than ever reading the raw file — verified against a real video end-to-end, including its error paths (missing file, empty file). A short pitfalls section covers the harmless `impersonation` warning, `--skip-download` still fetching a tiny metadata format, and mapping common `yt-dlp` failures (private/deleted/region-locked video, no captions available) to a clear message instead of a raw traceback.
+
 ## License
 
 [MIT](./LICENSE).
