@@ -61,9 +61,25 @@ Before writing any Artifact, load `artifact-design` (`Skill` tool, `skill: artif
 - A process, sequence, or relationship → load `artifact-diagramming`.
 - A pure statement/quote treatment → plain `artifact-design` typography guidance is enough on its own.
 
-Every graphic must pull its type and color choices from `MOTION-DESIGN.md` (step 2) — that consistency is what makes a set of graphics read as one system instead of N independent AI outputs. Publish each one with the `Artifact` tool, using a title/description that ties it back to the source moment.
+Every graphic must pull its type and color choices from `MOTION-DESIGN.md` (step 2) — that consistency is what makes a set of graphics read as one system instead of N independent AI outputs.
 
-### 6. Report
+**Before publishing, check each graphic against these concrete tells of generated-rather-than-designed output** (beyond the "never fall back to Inter" rule in step 2 — this is the same quality gate, applied per-graphic):
+
+- **Decorative grid-line backgrounds** — a hairline hatch behind ordinary content, not earning its keep as an actual chart/measurement surface.
+- **Purple gradient on a light/cream background** as the reflexive "modern AI" default.
+- **Numbered markers (01 / 02 / 03)** used as decoration where the content isn't actually an ordered sequence.
+- **One accent color used everywhere** instead of a deliberate dominant + sharp-accent pairing.
+- **Uniform, scattered micro-animation on every element** instead of one orchestrated moment (the number counting up, the bar growing, the comparison resolving) plus restraint everywhere else — this is the single most common tell in animated graphics specifically, more so than in static design.
+- **Decorative strokes/borders by default** — an outline plus a fill on the same shape, a divider that isn't separating anything that needs separating.
+- **Hierarchy drift** — a label, badge, or secondary number sized or timed so it competes with the actual stat/claim for attention.
+
+Save each graphic as a local HTML file first — don't publish yet, verification (step 6) happens before that.
+
+### 6. Verify before publishing
+
+Don't approve a graphic from having written it — actually render it and watch it. Open the local HTML file with the `claude-in-chrome` tools (announce the automation first, per this environment's automation-announcement rule) and watch the animation play through, not just the first frame. Check `prefers-reduced-motion` is respected (toggle it in Chrome's rendering emulation, or check the CSS handles it). Once it looks right, publish it with the `Artifact` tool, using a title/description that ties it back to the source moment — a graphic that looks right in the markup but reads as generic or breaks on replay isn't done, and doesn't get published as-is.
+
+### 7. Report
 
 Once every selected moment has a graphic, give the user a short table: timestamp → the spoken line → the Artifact link (and local file path, if you also saved a standalone copy). This is the thing the user actually asked for — the individual research and generation steps above are how you get there, not the deliverable itself.
 
