@@ -53,17 +53,32 @@ For every selected moment, verify the actual number or fact behind what's spoken
 
 This is a hard rule, not a preference: **if a moment's claim can't be backed by a real, checkable source, do not put a fabricated or estimated number in the graphic.** Either drop that moment, or build the graphic around the claim itself (the words, not an invented statistic) and label it as illustrative rather than data-backed. A wrong number in a confident-looking animated chart is worse than no chart.
 
-### 5. Generate one Artifact per moment
+### 5. Build one graphic per moment
 
-Before writing any Artifact, load `artifact-design` (`Skill` tool, `skill: artifact-design`) — it's a required step for any Artifact, not specific to this skill. Then, depending on what the moment needs:
+Fable is this skill's default UI model for the creative build: dispatch the actual
+design and build of each graphic through the `Agent` tool with `model: "fable"` set
+explicitly. Write a self-contained brief per moment, since the subagent has not seen
+this conversation:
 
-- A data comparison, ranking, or trend → load `dataviz` and follow its chart/mark guidance.
-- A process, sequence, or relationship → load `artifact-diagramming`.
-- A pure statement/quote treatment → plain `artifact-design` typography guidance is enough on its own.
+- The spoken line and timestamp.
+- The verified data from step 4.
+- The full `MOTION-DESIGN.md` contract (step 2), so it doesn't invent type or color
+  choices — that consistency is what makes a set of graphics read as one system instead
+  of N independent AI outputs.
+- An instruction to load `artifact-design` first (`Skill` tool, `skill: artifact-design`)
+  — required for any Artifact, not specific to this skill — then, depending on what the
+  moment needs, `dataviz` for a data comparison/ranking/trend, `artifact-diagramming`
+  for a process/sequence/relationship, or nothing further for a pure statement/quote
+  treatment.
+- The anti-slop checklist below, verbatim, with instructions to self-critique the
+  graphic against it before returning — catching these inline is far cheaper than a
+  rework round-trip after the fact.
+- An instruction to save the result as a local HTML file rather than publish it —
+  verification (step 6) happens before publishing, on the orchestrating session, not
+  inside the subagent call.
 
-Every graphic must pull its type and color choices from `MOTION-DESIGN.md` (step 2) — that consistency is what makes a set of graphics read as one system instead of N independent AI outputs.
-
-**Before publishing, check each graphic against these concrete tells of generated-rather-than-designed output** (beyond the "never fall back to Inter" rule in step 2 — this is the same quality gate, applied per-graphic):
+**Anti-slop checklist** — concrete tells of generated-rather-than-designed output
+(beyond the "never fall back to Inter" rule in step 2 — this is the same quality gate):
 
 - **Decorative grid-line backgrounds** — a hairline hatch behind ordinary content, not earning its keep as an actual chart/measurement surface.
 - **Purple gradient on a light/cream background** as the reflexive "modern AI" default.
@@ -73,7 +88,10 @@ Every graphic must pull its type and color choices from `MOTION-DESIGN.md` (step
 - **Decorative strokes/borders by default** — an outline plus a fill on the same shape, a divider that isn't separating anything that needs separating.
 - **Hierarchy drift** — a label, badge, or secondary number sized or timed so it competes with the actual stat/claim for attention.
 
-Save each graphic as a local HTML file first — don't publish yet, verification (step 6) happens before that.
+The orchestrating session still checks the same list independently in step 6 — the
+brief instruction reduces round-trips, it doesn't replace the check. If a graphic trips
+one of these anyway, send it back to the same subagent with the specific defect named
+rather than patching it inline yourself.
 
 ### 6. Verify before publishing
 

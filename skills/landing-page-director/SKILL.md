@@ -29,14 +29,13 @@ restraint, and the brainstorm → critique → build → critique-again loop. Th
 not restate it — it adds what that skill doesn't cover: brand-fact grounding, brief
 structure, and a landing-page-specific anti-slop checklist.
 
-## 2. Model tier: escalated for the creative passes, current tier for mechanical edits
+## 2. Model tier: Fable for the creative passes, current tier for mechanical edits
 
-This is visual design/creative-direction work. Default to dispatching the actual
-structural and creative passes — token system, layout, copy direction — through the
-`Agent` tool with `model: "opus"` set explicitly, rather than building the page inline
-on the current tier; use `fable` only when the user names it explicitly for this task,
-never as a standing default (cost, not capability). Write the prompt as a self-contained
-brief per §4 — the subagent has not seen this conversation.
+Fable is this skill's default UI model for the creative build. Dispatch the actual
+structural and creative passes (token system, layout, copy direction) through the
+`Agent` tool with `model: "fable"` set explicitly, rather than building the page inline
+on the current tier. Write the prompt as a self-contained brief per §4 — the subagent
+has not seen this conversation.
 
 If the brief is large (a full multi-section site, not one hero), consider asking for
 extended/max effort in that one dispatch rather than splitting it into many small
@@ -50,10 +49,10 @@ pre-committing to a plan.
 
 Once the creative direction is locked, drop back to the current tier for small
 mechanical edits — nudging a spacing value, deleting a stray divider, adjusting one font
-size. Paying premium-tier cost for that kind of edit is waste. (This is this skill's own
-tiering call, not a blanket rule from the `escalate` skill's general table — that table
-intentionally does not auto-route all UI/design work to `opus` any more; check it if
-unsure, but don't expect it to make this decision for you.)
+size. Paying premium-tier cost for that kind of edit is waste. (This Fable default is
+this skill's own choice, not a rule inherited from the `escalate` skill's general table
+— that table routes to `opus` for stakes/difficulty and doesn't cover model choice for
+creative-direction work like this. Don't expect it to make this decision for you.)
 
 ## 3. Ground it in the product's actual brand facts, every time
 
