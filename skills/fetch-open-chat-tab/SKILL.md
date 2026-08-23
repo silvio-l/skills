@@ -46,6 +46,10 @@ Site detection is by hostname (`chatgpt.com`/`chat.openai.com`, `claude.ai`, `ge
 
 On success (exit `0` or `3`), read the saved file and give the user what they asked for. On `3`, say plainly that the structure wasn't recognized and this is a raw page-text dump. On `2`, relay the failure reason and stop — do not guess at what the conversation might have contained.
 
+## Distilling into a knowledge base
+
+If the user wants this preserved as a structured, reusable knowledge base rather than a quick answer — same triggers as `fetch-shared-chat`: "Wissensbasis erstellen", "diesen Chat aufbereiten", wanting to continue the work later without re-reading the chat — follow `fetch-shared-chat`'s **Knowledge-base mode** section (what to capture, ground rules, output structure, and where to save the result) against the transcript you just saved here. The distillation method is independent of how the text was fetched.
+
 ## Known limitation
 
 Two genuinely identical consecutive messages with no distinguishing id (Claude.ai's `aria-posinset` and ChatGPT's `data-message-id` both make this a non-issue on those two sites; only a scenario with neither would hit it) can collapse into a single entry during dedup. Rare in practice, disclosed rather than silently wrong.
