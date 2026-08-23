@@ -6,7 +6,7 @@ This repo is the source of truth for my personal Claude Code skills. It is maint
 
 Default every skill to **project-local**: global status is earned only by being useful *regardless of which repo (or none) is open* (an OS-level utility, generic writing/ideation, a meta-routing skill) — anything tied to a project type (a game engine, an app's icon/marketing/SEO pipeline) stays project-local so it doesn't tax every session's context on every machine. Keep this list current, and mirror it in `README.md`'s per-skill tags:
 
-- **global:** `apple-notes`, `brainstorming`, `deep-monograph`, `escalate`, `fetch-open-chat-tab`, `fetch-shared-chat`, `instructions-optimizer`, `name-clearance-red-team`, `omada-admin`, `owasp-bsi-audit` (the last is an explicit standing exception, see the global `~/.claude/CLAUDE.md`)
+- **global:** `apple-notes`, `brainstorming`, `deep-monograph`, `escalate`, `fetch-open-chat-tab`, `fetch-shared-chat`, `gh-full-fix`, `instructions-optimizer`, `name-clearance-red-team`, `omada-admin`, `owasp-bsi-audit` (the last is an explicit standing exception, see the global `~/.claude/CLAUDE.md`)
 - **project-local:** everything else in `skills/`
 
 **Global provisioning is `update`-only, never `add -g`.** `add -g` installs a skill onto every future session's ambient context, so it is never part of an automated or standing-authorized sequence — always a deliberate, individual decision, and only for a skill on the global list above. To use a project-local skill in a project that needs it, install it there (no `-g`) from *outside* this repo's working directory:
