@@ -1,6 +1,6 @@
 ---
 name: fetch-shared-chat
-description: Fetch a shared AI chat link (chatgpt.com/share, gemini.google.com/share, claude.ai/share) without a browser; answer/summarize it, or distill it into a structured knowledge base. Use for share links, 'Wissensbasis erstellen', 'Chat aufbereiten'.
+description: Fetch a shared AI chat link (chatgpt.com/share, gemini.google.com/share, claude.ai/share) without a browser and distill it into a structured knowledge base by default. Use for share links, 'Wissensbasis erstellen', 'Chat aufbereiten'.
 ---
 
 # Fetch Shared Chat
@@ -34,12 +34,12 @@ Exit code `1` means the URL's host wasn't recognized — check the URL against t
 
 ## Step 3: Pick the response mode
 
-Two different jobs share the same fetch, and they call for different amounts of work — don't default to the heavy one when the user just wants a quick answer, and don't shortchange them with a quick answer when they actually want the work preserved.
+**Default to knowledge-base mode.** Someone reaching for this skill at all is almost always trying to preserve or continue work, not just satisfy a one-off curiosity — and a quick answer that turns out to be the wrong call is expensive: the user has to notice something's missing, re-ask, and wait for a second full read of the transcript. Go to **Knowledge-base mode** below unless one of these clearly applies:
 
-- **Quick mode** — the user asked a specific question ("what did they conclude about X", "summarize this"), or wants the raw text. Go to **Quick mode** below.
-- **Knowledge-base mode** — the user wants to continue the work later without re-reading the chat: "turn this into a knowledge base", "Wissensbasis erstellen", "diesen Chat aufbereiten/auswerten", "fasse mir das strukturiert zusammen, damit ich weiterarbeiten kann", or any request for the decisions/requirements/open questions to be preserved in reusable form. Go to **Knowledge-base mode** below.
+- **Quick mode** — the user asked a narrow, specific question ("what did they conclude about X", "did they land on Y or Z") where a direct answer *is* the whole ask, not a partial one; or they explicitly want the raw text verbatim. Go to **Quick mode** below.
+- The user explicitly asks for "just a summary" / "just give me the gist" with no indication they want to keep working from it.
 
-If it's genuinely ambiguous, ask which one before spending the effort — the two modes produce very different amounts of output.
+If it's genuinely ambiguous, default to knowledge-base mode rather than asking — the cost of an unwanted file is low (they can ignore it), the cost of a missing one is a second round trip through the whole transcript.
 
 ## Quick mode
 
@@ -101,12 +101,10 @@ Before delivering, check the draft against the checklist that made it necessary 
 
 ### Delivering the result
 
-This is a keep-forever artifact, not a working file — it must never end up in a scratch/temp directory (including this session's own scratchpad, which exists for intermediate files, not deliverables). Where it belongs depends on what's actually open:
+This is a keep-forever artifact, not a working file — it must never end up in a scratch/temp directory (including this session's own scratchpad, which exists for intermediate files, not deliverables). Where it belongs depends on what the conversation is *about*, not which directory happens to be open right now — a chat about some other project must not land inside whatever repo the current session happens to be sitting in. Pick the location, save there, and announce the path when you deliver the file — don't pause mid-task to check it in first; knowledge-base mode is now the default response, so stopping to confirm a save location on every run would defeat the point of not interrupting the user.
 
-The discriminator is what the conversation is *about*, not which directory happens to be open — a chat about some other project must not land inside whatever repo the current session happens to be sitting in.
-
-- **The conversation is clearly about a specific project/repo you can locate** (it names the project, or the user is actively working in that exact project right now): look for that project's existing documentation home first — a `docs/` folder, `CONTEXT.md` + `docs/adr/`, a `notes/` directory, whatever it already has — and file the knowledge base there, following its existing naming pattern. If nothing like that exists yet, create one sensible, clearly-named location under that project's root (e.g. `docs/knowledge-base/<topic-slug>.md`) and say so explicitly before creating it — a new directory is a structural choice the user may want to weigh in on, not something to spring on them silently.
-- **No specific project applies, or it's ambiguous which one does**: ask the user where they want it filed rather than guessing or defaulting to whatever directory happens to be current.
+- **The conversation is clearly about a specific project/repo you can locate** (it names the project, or the user is actively working in that exact project right now): look for that project's existing documentation home first — a `docs/` folder, `CONTEXT.md` + `docs/adr/`, a `notes/` directory, whatever it already has — and file the knowledge base there, following its existing naming pattern. If nothing like that exists yet, create one sensible, clearly-named location under that project's root (e.g. `docs/knowledge-base/<topic-slug>.md`).
+- **No specific project applies, or it's ambiguous which one does**: save to a fixed personal location instead, `~/Documents/Chat-Wissensbasen/<topic-slug>.md` (create the folder if it doesn't exist yet).
 
 Name the file with a descriptive kebab-case slug of the chat's subject — that alone already avoids the collision a generic `knowledge-base.md` would hit the moment this runs a second time. Then send it to the user with `SendUserFile` pointing at that real path — this is the deliverable, not a summary of it. A short inline note (what it covers, roughly how long) is enough alongside the file; don't also paste the full document into the chat.
 

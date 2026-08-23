@@ -42,13 +42,13 @@ Site detection is by hostname (`chatgpt.com`/`chat.openai.com`, `claude.ai`, `ge
 - `3` — the page's host/structure wasn't recognized, but a generic unstructured text fallback (cleaned `body.innerText`) was captured and saved instead. **Relay to the user that this is unstructured** (the saved file also carries a banner saying so) — treat it as raw material, not a clean transcript. Pass `--no-fallback` to disable this and get a hard `2` failure instead.
 - `2` — hard failure, nothing usable extracted. The `reason` on stderr is concrete (e.g. the Apple-Events permission, Safari not running, no messages found) — relay it verbatim, same "never fabricate a summary of content that could not be retrieved" discipline as `fetch-shared-chat`.
 
-## Step 3: Read and synthesize
+## Step 3: Pick the response mode, then read and synthesize
 
-On success (exit `0` or `3`), read the saved file and give the user what they asked for. On `3`, say plainly that the structure wasn't recognized and this is a raw page-text dump. On `2`, relay the failure reason and stop — do not guess at what the conversation might have contained.
+On success (exit `0` or `3`), read the saved file. On `3`, say plainly that the structure wasn't recognized and this is a raw page-text dump before doing anything else with it. On `2`, relay the failure reason and stop — do not guess at what the conversation might have contained.
 
-## Distilling into a knowledge base
+**On exit `0` (structured extraction), default to distilling into a knowledge base** — same reasoning and same method as `fetch-shared-chat`'s **Knowledge-base mode** section (what to capture, ground rules, output structure, where to save the result): someone pulling a whole conversation out of a Safari tab is almost always trying to preserve or continue the work, not satisfy a one-off curiosity, and the distillation method doesn't depend on how the text was fetched. Only skip it — answering inline instead — when the user asked a narrow, specific question or explicitly wants just a quick summary.
 
-If the user wants this preserved as a structured, reusable knowledge base rather than a quick answer — same triggers as `fetch-shared-chat`: "Wissensbasis erstellen", "diesen Chat aufbereiten", wanting to continue the work later without re-reading the chat — follow `fetch-shared-chat`'s **Knowledge-base mode** section (what to capture, ground rules, output structure, and where to save the result) against the transcript you just saved here. The distillation method is independent of how the text was fetched.
+**On exit `3` (unstructured fallback), don't default to it.** The KB's ground rules require tagging every claim's epistemic status — who said it, whether it's verified, an assumption, or a proposal — and a flat `body.innerText` dump with no role markers gives you no reliable way to know who said what. Guessing role attribution from tone or content and presenting it in the tagged KB format would fabricate exactly the grounding that format promises. Default to a plain quick-mode answer instead; only build a knowledge base from this transcript if the user explicitly asks for one after being told it's unstructured, and if you do, state upfront that speaker attribution isn't derivable and either omit epistemic tagging or mark it as unattributed rather than inferring a role.
 
 ## Known limitation
 
