@@ -1,6 +1,6 @@
 ---
 name: gh-full-fix
-description: Autonomously resolve open GitHub bug issues, PRs, and failing Actions workflows in this repo, cross-checked against Sentry — merges/closes PRs and fixes real defects, never new features. Triggers: "Bugs und PRs abarbeiten", "Repo aufräumen".
+description: 'Autonomously resolve open GitHub bug issues, PRs, and failing Actions workflows in this repo, cross-checked against Sentry — merges/closes PRs and fixes real defects, never new features. Triggers: "Bugs und PRs abarbeiten", "Repo aufräumen".'
 disable-model-invocation: true
 ---
 
