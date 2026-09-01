@@ -53,6 +53,29 @@ Say this plainly to the user rather than presenting a volume-flavored number tha
 
 No free, reliable, programmatic backlink source exists (see "tested and rejected" above). The free web UIs some tools offer (Ahrefs' capped backlink checker, Moz's limited free tier) are manual, one-off lookups a human runs in a browser — not something to script into this workflow.
 
+A paid, programmatic option now exists via Step 4 (OpenSEO/DataForSEO's backlinks overview/profile endpoints) — real referring-domain and anchor-text data, at DataForSEO's per-call cost. Use it when Step 4 is available; keep treating backlinks as "not checked" (not "zero backlinks") when it isn't, rather than silently omitting the finding.
+
+### Analytics: prefer what the site already has over adding Google Analytics
+
+OpenSEO's own dashboard offers an optional Google Analytics integration, but don't default to setting it up. If the site already has a working, privacy-conscious analytics setup (a self-hosted tool like Matomo running cookieless/anonymized, Plausible, Fathom, etc.), adding GA is a net *downgrade*, not an upgrade: GA sets cookies and transfers data to a US-based third party, which typically forces a consent banner and a rewritten privacy policy where the existing tool needed neither (e.g. a cookieless, IP-anonymized Matomo setup can rely on legitimate interest under GDPR Art. 6(1)(f) with no consent requirement under german § 25 TDDDG). Ask what analytics the site already runs before touching Step 4's optional integrations, and only propose GA when there's genuinely no existing traffic-data source and the user is fine with the added compliance surface.
+
+A self-hosted Matomo instance's Reporting API (`<matomo-url>/index.php?module=API&method=<Method>&idSite=<id>&period=<period>&date=<date>&format=json&token_auth=<token>`) is a free, no-OpenSEO-dependency way to pull real traffic/referrer/goal data alongside GSC's ranking data — useful methods: `VisitsSummary.get` (visits/pageviews), `Referrers.getReferrerType` (traffic-source mix), `Actions.getPageUrls` (per-page traffic, cross-checks Step 2's thin-content findings against real usage). Needs a `token_auth` from the Matomo instance's own admin area (Personal → API) — a config requirement to ask the user for, same as `DATAFORSEO_API_KEY`, never invented.
+
+## AI Search / GEO / LLM visibility (Step 4, optional, paid)
+
+Whether an AI answer engine actually *cites* this site is not observable from any free source — there is no analogue to GSC for ChatGPT/Gemini/Perplexity. The only reliable way to check is a real LLM call with live web search enabled, then reading whether the response cites this site's URL. See `OPENSEO-SETUP.md` for what provides this (a self-hosted [OpenSEO](https://github.com/every-app/open-seo) instance calling [DataForSEO](https://dataforseo.com)'s AI Optimization API) and its cost.
+
+| DataForSEO AI Optimization endpoint family | Gives you | Notes |
+|---|---|---|
+| `llm_responses` (`chat_gpt`, `claude`, `gemini`, `perplexity`) with `web_search: true` | A real LLM answer to a chosen prompt, plus `annotations` — the cited source URLs and the exact quoted excerpt | This is the direct GEO check: "is this page cited when a real user asks this question". `user_prompt` max 500 chars. Cheap per call (a few cents, scales with `max_output_tokens`) |
+| `llm_mentions` | Brand/domain/keyword mention tracking across LLM answers at scale (top mentioned pages/domains/brands, historical trend) | Live-only, no task batching. Useful for an ongoing/scheduled GEO check, overkill for a one-off audit — prefer `llm_responses` for a single audit run |
+| `ai_keyword_data` (`keywords_search_volume`) | Search-volume estimate for keyword usage *inside* AI tools (not classic Google search) | Complements — doesn't replace — GSC impressions and `keyword_expand.py`'s autocomplete signal |
+| `llm_scraper` (ChatGPT, Gemini) | Actual scraped product-UI search results (not a raw API model call) | Closer to what a real user sees in the ChatGPT/Gemini search UI; heavier/pricier than `llm_responses` — reach for it only if a UI-level discrepancy needs confirming |
+
+Auth for all of the above: HTTP Basic, `Authorization: Basic <base64(login:password)>` from `https://app.dataforseo.com/api-access` — identical to the rest of the DataForSEO stack. A sandbox mode exists for testing request shapes (no real data, no cost); real calls are pay-as-you-go with no free-tier quota. **Never invent an API key or assume one is configured** — check `OPENSEO-SETUP.md`'s health-check step first, and skip Step 4 cleanly (with a stated reason) if it isn't there.
+
+Report AI-citation findings as plain facts, separated from interpretation: "asked `<platform>` `<exact prompt>`; cited: `<this-site's URL>` / `<competitor's URL instead>` / not cited" — not "AI visibility looks weak," which isn't falsifiable or actionable.
+
 ## Meta-length thresholds
 
 Match the constants in `scripts/audit_site.py`; if you tighten one, tighten both.
@@ -79,6 +102,10 @@ Distinguish the two failure modes before prescribing a fix:
 Rewriting the snippet does not cost reach — ranking position drives impressions, not the title text, so nobody who currently sees the listing stops seeing it. The only question is which of those impressions become clicks. That means there's no real tension between "I want more visitors" and "fix the snippet": a clearer snippet keeps the same audience and converts more of it, it doesn't narrow who's reached.
 
 When the striking-distance query collides with a competitor's product name (someone else's tool ranks for the literal words, and this site's page is being served instead or alongside it), don't assume the audience is simply "the same, just needs convincing" — check what that competitor's product actually is (its own site or repo usually says platform, category, pricing in the first paragraph) before writing the fix. If it turns out to solve a genuinely different problem (a batch file-processing tool vs. a live-input tool, a Windows-only tool vs. a cross-platform one), an honest snippet that names the difference outperforms a vague one that lets the searcher assume a match: it correctly draws the click from whoever actually wants what this page offers, instead of wasting the impression on a click that bounces in three seconds either way.
+
+### Guardrail: understand why a page ranks/is cited before "fixing" it
+
+A documented real failure (from the OpenSEO project's own site, reviewed while building this skill's Step 4): a page ranked strongly for "backlink checker" — around 200,000 impressions/week — but converted almost nothing. The SERP was dominated by actual free backlink-checker *tools*; the page itself was an article. The obvious-looking fix — rewrite the article into a fake "tool" page to match the SERP pattern — collapsed the ranking instead of raising conversions, because the original relevance was earned for the article intent, not the tool intent the rewrite chased. The lesson generalizes beyond this one query: never prescribe a fix by pattern-matching the SERP or a competitor's copy alone. Read what's *actually* driving the current ranking or AI citation (the real competing pages/citations, not an assumption from the query text), and only then decide whether the fix is a snippet rewrite, a content rewrite, or leaving it alone. This applies equally to Step 4's AI-citation findings — a competitor being cited instead of this site doesn't automatically mean "copy what they did."
 
 ## Short-tail vs. long-tail
 

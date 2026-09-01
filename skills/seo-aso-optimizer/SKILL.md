@@ -1,6 +1,6 @@
 ---
 name: seo-aso-optimizer
-description: "Audit and optimize a website for SEO, AEO/GEO (AI search), and ASO — crawl checks, Search Console striking-distance keywords, page fixes, or an app's companion site. Use for 'SEO', 'ASO', 'bei Google ranken', 'Suchmaschinenoptimierung', 'GSC'."
+description: "Audit and optimize a website for SEO, AEO/GEO (AI search/LLM visibility), and ASO — crawl checks, Search Console striking-distance keywords, backlinks, AI-citation checks (ChatGPT/Gemini/Perplexity/AI Overviews), page fixes, or an app's companion site. Use for 'SEO', 'ASO', 'GEO', 'AI search visibility', 'bei Google ranken', 'Suchmaschinenoptimierung', 'GSC', 'werde ich von ChatGPT zitiert'."
 ---
 
 # SEO / AEO / ASO Optimizer
@@ -44,7 +44,7 @@ If the GSC MCP tools are connected, call them in this order:
 3. `mcp__gsc__get_sitemaps` — cross-check against what Step 2 found on disk.
 4. `mcp__gsc__check_indexing_issues` for any URL Step 2 flagged as orphaned or broken.
 
-From the query,page rows, find **striking-distance** queries: position roughly 5–15, with real impressions (not 1–2 flukes), and CTR below what that position normally earns. These are the site's highest-ROI targets — a small push moves them onto page 1. If GSC isn't connected yet, tell the user it would sharpen targeting, and continue with Step 4 using AI-suggested keywords only.
+From the query,page rows, find **striking-distance** queries: position roughly 5–15, with real impressions (not 1–2 flukes), and CTR below what that position normally earns. These are the site's highest-ROI targets — a small push moves them onto page 1. If GSC isn't connected yet, tell the user it would sharpen targeting, and continue with Step 5 using AI-suggested keywords only.
 
 For each one, classify it per `REFERENCE.md`'s two failure modes — but classify from evidence, not from the query text alone: fetch the owning page's actual current content (not just the audit script's title/meta/word-count fields) and run one `WebSearch` for the literal query to see what's really competing for it, before deciding why it under-converts. A "ranks OK, converts badly" query needs the actual replacement title/meta text and a one-sentence reason each change earns the click, grounded in what Steps 3 actually found on the page and in the SERP — see `REFERENCE.md`'s "Writing the fix". Never hand back "improve the title" as the answer, and never diagnose a mismatch you haven't confirmed by reading the page.
 
@@ -54,43 +54,96 @@ For competitor analysis: `audit_site.py` is domain-agnostic — run it against a
 
 **Done when:** every striking-distance query is mapped to an owning page (or explicitly declined with a reason), every "converts badly" diagnosis cites the actual page content and SERP context that support it, and every one carries real replacement copy, not a description of what the copy should do.
 
-## Step 4 — Keyword-to-page map
+## Step 4 — AI Search / GEO visibility and backlinks (optional, paid)
 
-Merge three inputs into one map — each target keyword owned by exactly one page (existing or "to create"):
+Steps 1–3 cover classic Google/Bing ranking. This step covers whether the site is actually
+**cited** by AI answer engines, and its backlink profile — neither is observable from free
+tooling (see `REFERENCE.md`'s "Backlinks" and "Search volume, honestly" sections for why).
+It requires a self-hosted [OpenSEO](https://github.com/every-app/open-seo) instance wired
+to a paid [DataForSEO](https://dataforseo.com) account via MCP — see `OPENSEO-SETUP.md`
+for what it is, exact cost, and how to stand it up (a ready instance may already exist on
+the user's own infrastructure; ask before assuming one needs to be built).
+
+**Check availability first, don't assume:** is an `mcp__openseo__*`-style MCP connection
+present in this session? If not, or if `GET <openseo-url>/api/health` shows
+`checks.dataforseo.status` other than `ok`, tell the user plainly what's missing (no
+connection, or no `DATAFORSEO_API_KEY` configured) and skip straight to Step 5 using only
+Steps 1–3's findings — never fabricate a citation or backlink number to fill the gap.
+
+If available:
+1. **Backlinks** — the domain's backlink overview/profile (referring domains, anchor
+   text spread, one flagged toxic/spammy pattern if present). Compare against the same
+   competitor domain used in Step 3, if one was already identified there.
+2. **AI-citation check** — for each of the site's 2–3 core offerings (from Step 1) and
+   its top 2–3 striking-distance queries (from Step 3), run a real prompt a user would
+   plausibly type against an LLM with live web search enabled (DataForSEO's
+   `llm_responses` endpoints, `web_search: true`, across `chat_gpt`/`gemini`/`perplexity`
+   at minimum). Read the response's citation annotations: is this site's URL among the
+   cited sources, or does a competitor own the citation instead? Record exactly what was
+   asked, which platform(s) answered, and whether this site was cited — a plain yes/no per
+   platform per prompt, not a vague impression.
+3. **Rank tracking** (only if the user wants ongoing monitoring, not a one-off audit) —
+   register the striking-distance queries from Step 3 as a tracked set for future runs.
+
+**The SERP-intent guardrail (read before writing anything from this step into the action
+plan):** ranking or being cited is not the goal by itself — matching what the searcher/
+prompter actually wants is. A real, documented failure: a page ranked strongly for
+"backlink checker" (~200k impressions/week) but converted almost nothing, because the SERP
+was dominated by actual free tools while the page was an article; rewriting the article
+into a fake "tool" page to chase the SERP pattern collapsed the ranking instead of fixing
+it, because the original relevance was for the article intent, not the tool intent. Before
+prescribing any fix based on this step's findings, confirm *why* the page currently ranks
+or gets cited (read the actual competing results/citations, don't infer from the query
+text alone) — this sharpens, and shares the evidence bar of, Step 3's "ranks OK, converts
+badly" diagnosis in `REFERENCE.md`.
+
+**Done when:** either this step is explicitly marked skipped with a stated reason (no
+OpenSEO/DataForSEO configured), or every core offering and top striking-distance query has
+a recorded backlink/citation finding with real evidence (platform names, cited URLs,
+competitor comparison) — never a guess standing in for a real check.
+
+## Step 5 — Keyword-to-page map
+
+Merge four inputs into one map — each target keyword owned by exactly one page (existing or "to create"):
 - Step 3's striking-distance queries.
 - Step 2's thin-content and orphan pages (they may just need a clearer keyword target).
 - A harvested candidate list from `scripts/keyword_expand.py <seed>` — real Google/YouTube autocomplete completions, not an invented brainstorm. Run it against 1–3 seed phrases central to the site, then sort what it returns by intent (emergency/transactional/informational/local) and favor long-tail over short-tail — a specific, low-competition phrase beats a generic, saturated one. Expect real noise in the output (autocomplete pulls in unrelated senses of ambiguous words); discard it rather than force-fitting it. See `REFERENCE.md` for the short-tail/long-tail split, page templates for new pages, and what "search volume" honestly means for a free workflow.
+- If Step 4 ran with OpenSEO/DataForSEO available: its AI Keyword Data (real AI-tool-usage search volume) and any prompts from the citation check that surfaced a phrasing not already covered.
 
 **Done when:** no target keyword is unmapped, and no single page is asked to own more than one primary keyword.
 
-## Step 5 — Action plan (mandatory output)
+## Step 6 — Action plan (mandatory output)
 
-Steps 2–4 produced findings scattered across `findings.md`, GSC query data, and the keyword-to-page map. Before touching anything, consolidate all of it into one document: `<workdir>/action-plan.md`, using the fixed template in `REFERENCE.md`'s "Action plan template" — three priority tiers, and every item stating the finding, the one-sentence reason grounded in real data, and the literal action (the actual replacement text, the actual FAQ question and answer, the actual file to create — never a verb like "improve" or "optimize" standing alone). `REFERENCE.md` has a fully worked example built from this skill's own whispaste.de test run; match that level of concreteness, not the abstract description of it.
+Steps 2–5 produced findings scattered across `findings.md`, GSC query data, Step 4's backlink/citation findings (if run), and the keyword-to-page map. Before touching anything, consolidate all of it into one document: `<workdir>/action-plan.md`, using the fixed template in `REFERENCE.md`'s "Action plan template" — three priority tiers, and every item stating the finding, the one-sentence reason grounded in real data, and the literal action (the actual replacement text, the actual FAQ question and answer, the actual file to create — never a verb like "improve" or "optimize" standing alone). `REFERENCE.md` has a fully worked example built from this skill's own whispaste.de test run; match that level of concreteness, not the abstract description of it.
 
 This is the step most likely to get rushed past — writing individual fixes feels like progress, writing the plan first feels like paperwork. It isn't: skipping straight to fixes is exactly how a "rewrite the title" or "add more content" non-answer sneaks back in.
 
-**Done when:** every technical FAIL from Step 2, every striking-distance query from Step 3, and every entry in Step 4's keyword-to-page map appears in `action-plan.md` under a priority tier — nothing silently dropped — and every action is concrete enough that someone with no SEO background could execute it without asking what it means.
+**Done when:** every technical FAIL from Step 2, every striking-distance query from Step 3, every Step 4 finding (or its explicit skip reason), and every entry in Step 5's keyword-to-page map appears in `action-plan.md` under a priority tier — nothing silently dropped — and every action is concrete enough that someone with no SEO background could execute it without asking what it means.
 
-## Step 6 — Fix (gated on human sign-off)
+## Step 7 — Fix (gated on human sign-off)
 
 Execute `action-plan.md`'s P0 and P1 items in order. Show each diff to the user before applying — never auto-publish. This is exactly the point where an unsupervised agent produces confident, wrong content; don't skip the gate even when the fix looks mechanical.
 
 **Done when:** every P0/P1 item in `action-plan.md` is either applied or carries an explicit "declined: reason" note next to it.
 
-## Step 7 — Content
+## Step 8 — Content
 
 Execute `action-plan.md`'s content items (new pages, new FAQ/guide entries, rewritten copy): lead with the answer to the target query in the first paragraph (this is what gets an AI answer engine to quote the page), then go deeper — real specifics, not generic filler. Phrase FAQ/guide headings as the actual question a searcher would type ("How does X work?", not "Functionality") — it's what gets pulled into featured snippets and AI answers. Run drafts through the `avoid-ai-writing` skill before finalizing; don't restate its rules here. Add structured data per `REFERENCE.md`'s schema-type table and confirm it parses (re-run Step 2's script, or check `https://validator.schema.org`).
 
+**Never generate pages programmatically at scale** (thousands of templated location/variant pages from a data table) to chase more indexed surface area — this reads as spam to Google and risks a manual action or algorithmic demotion across the whole site, not just the thin pages. Depth on genuinely distinct pages beats breadth of near-duplicates; see `REFERENCE.md`'s "Service × location depth" template for how to do location/variant pages without tripping this.
+
 **Done when:** every content item in `action-plan.md` has been written or explicitly skipped, and every new/changed page's structured data validates.
 
-## Step 8 — Ship and verify
+## Step 9 — Ship and verify
 
-If Step 2/3 found no sitemap in Search Console, or a stale one, submit it with `mcp__gsc__submit_sitemap`. For Bing (which Google's own sitemap-submit API doesn't reach): if the site already hosts an IndexNow key file, `GET https://api.indexnow.org/indexnow?url=<changed-url>&key=<key>` for each URL touched in Steps 6–7 — free, no signup, instant rather than waiting for the next crawl. If no key file exists yet, tell the user it needs a one-time setup (generate a key, host it at `/<key>.txt`) rather than skipping Bing silently — see `REFERENCE.md`. Re-run the Step 2 script and confirm the finding groups touched in Step 6 are gone (or still explicitly declined). For a recurring check (e.g. fortnightly striking-distance refresh), the `schedule` skill can run this workflow on a cron cadence.
+If Step 2/3 found no sitemap in Search Console, or a stale one, submit it with `mcp__gsc__submit_sitemap`. For Bing (which Google's own sitemap-submit API doesn't reach): if the site already hosts an IndexNow key file, `GET https://api.indexnow.org/indexnow?url=<changed-url>&key=<key>` for each URL touched in Steps 7–8 — free, no signup, instant rather than waiting for the next crawl. If no key file exists yet, tell the user it needs a one-time setup (generate a key, host it at `/<key>.txt`) rather than skipping Bing silently — see `REFERENCE.md`. Re-run the Step 2 script and confirm the finding groups touched in Step 7 are gone (or still explicitly declined). For a recurring check (e.g. fortnightly striking-distance refresh), the `schedule` skill can run this workflow on a cron cadence.
 
-**Done when:** the re-audit's `findings.md` shows no new regressions against Step 6's fixes, and `action-plan.md`'s P2 tier is left as the next run's starting point.
+**Done when:** the re-audit's `findings.md` shows no new regressions against Step 7's fixes, and `action-plan.md`'s P2 tier is left as the next run's starting point.
 
 ## Reference
 
-`REFERENCE.md` — meta-length thresholds, striking-distance thresholds in detail, the schema.org type table, GSC dimension combinations, page templates, and the action-plan template with a worked example. Load it at Step 4 onward, not before — it's detail those steps need, not orientation.
+`REFERENCE.md` — meta-length thresholds, striking-distance thresholds in detail (including the SERP-intent guardrail), the schema.org type table, GSC dimension combinations, page templates, the AI Search/GEO and backlinks tool table, and the action-plan template with a worked example. Load it at Step 3 onward, not before — it's detail those steps need, not orientation.
 
 `APP-TO-WEBSITE.md` — the branch for apps without a marketing site: pulling keywords from a store listing and the hero/guides/FAQ structure that turns them into indexable pages.
+
+`OPENSEO-SETUP.md` — what OpenSEO/DataForSEO is, real cost, and how to stand up a self-hosted instance for Step 4. Load it only when Step 4 is actually being enabled for the first time in an environment.
