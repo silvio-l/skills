@@ -37,11 +37,8 @@ taken by other services on this NAS).
 
 ```
 mkdir -p ~/docker/open-seo
-# compose.yaml — from https://github.com/every-app/open-seo/blob/main/compose.yaml,
-# with one deliberate change: ports bound to 0.0.0.0 instead of 127.0.0.1, because this
-# NAS has no public interface (LAN-only) and AUTH_MODE=local_noauth needs LAN reachability
-# from other machines to be useful at all. Never do this on an internet-facing host.
-# .env — cp .env.example .env, then set:
+# compose.yaml — from https://github.com/every-app/open-seo/blob/main/compose.yaml.
+# .env — cp .env.example .env, then set at minimum:
 #   DATAFORSEO_API_KEY=<base64 of "login:password" from https://app.dataforseo.com/api-access>
 #   PORT=3001
 #   OPENSEO_TELEMETRY_DISABLED=1
@@ -50,9 +47,22 @@ curl http://192.168.0.222:3001/api/health   # {"status":"ok", "checks": {"datafo
 ```
 
 First start builds the app in-container (~1–2 min); later starts reuse a cached build
-unless `VITE_*`/auth env values change. `AUTH_MODE=local_noauth` means **no login** —
-this is only acceptable because the NAS sits entirely inside the trusted home LAN with no
-port-forwarding; never expose this port to the internet as configured here.
+unless `VITE_*`/auth env values change.
+
+**Auth model (since 2026-09-01): `AUTH_MODE=cloudflare_access`, not `local_noauth`.** The
+container sits behind the existing Cloudflare Tunnel (`ugreen_nas`) and a Cloudflare
+Access application at `https://openseo.silvio-lindstedt.de`, with Access's Managed OAuth
+enabled so MCP clients (Claude Code) can authenticate via Dynamic Client Registration —
+the same public hostname works both from the LAN and from anywhere else, always behind
+Access login (email allowlist: `silvio-lindstedt@outlook.com`,
+`lindstedt.online@gmail.com`). No unauthenticated LAN-only mode is running anymore. Full
+setup (tunnel ingress, Access app/policy, Managed OAuth config, propagation-delay gotcha):
+`~/.claude/infrastructure/cloudflare.md` → „Zero Trust Access — App OpenSEO".
+
+`.env` additionally carries `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`/
+`BETTER_AUTH_SECRET` for OpenSEO's built-in Google Search Console integration (Connect
+under the dashboard's Integrations tab) — OAuth client details in
+`~/.claude/infrastructure/google-cloud-silvio-infra-tools.md`.
 
 Verified end-to-end: `docker compose up -d` → healthy → a real
 `serp/google/organic/live/advanced` call against the configured DataForSEO account
@@ -61,22 +71,25 @@ returned real ranked results for $0.002.
 ## Wiring the MCP server into an agent session
 
 ```
-claude mcp add --transport http --scope user openseo http://192.168.0.222:3001/mcp
+claude mcp add --transport http --scope user openseo https://openseo.silvio-lindstedt.de/mcp
+claude mcp login openseo   # opens a browser for the Cloudflare Access (OTP) login
 ```
 
 Takes effect in new sessions (an already-running session doesn't pick up newly
-registered MCP tools). No API key/header needed for the request itself — the container's
-`local_noauth` mode trusts anything that reaches it on the LAN, and the DataForSEO key
-lives server-side in the container's `.env`.
+registered MCP tools). The login step is required once per machine/credential-store —
+`claude mcp list` shows `Needs authentication` until then. If `claude mcp login` runs
+non-interactively (no TTY), wrap it: `script -q /dev/null claude mcp login openseo` in
+the background, then open the printed authorization URL in a browser to complete it.
 
 ## Reusing this for another project/NAS
 
 The container and `DATAFORSEO_API_KEY` are shared infrastructure, not per-project — one
-running instance serves every project on the LAN. A new project just needs
-`claude mcp add ... openseo http://<nas-ip>:3001/mcp` (or `claude mcp add --scope
-project` to commit that wiring into the project's own `.mcp.json` instead of the user's
-global config) — the OpenSEO container/DataForSEO account never need to be duplicated per
-project.
+running instance serves every project. A new project just needs `claude mcp add
+--transport http openseo https://openseo.silvio-lindstedt.de/mcp` (`--scope user` for
+global, `--scope project` to commit that wiring into the project's own `.mcp.json`)
+followed by `claude mcp login openseo` — the OpenSEO container/DataForSEO account never
+need to be duplicated per project. A genuinely separate deployment (different NAS/account)
+would need its own Cloudflare Access app + Managed OAuth setup following the same pattern.
 
 ## If OpenSEO/DataForSEO isn't configured
 
