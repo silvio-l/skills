@@ -64,6 +64,13 @@ to a paid [DataForSEO](https://dataforseo.com) account via MCP — see `OPENSEO-
 for what it is, exact cost, and how to stand it up (a ready instance may already exist on
 the user's own infrastructure; ask before assuming one needs to be built).
 
+Before reaching for the paid path, check whether the connected `mcp__gsc__*` tools already
+expose Search Console's native generative-search reports (AI Overviews/AI Mode impressions,
+rolled out globally since August 31, 2026) — see `REFERENCE.md`'s "GSC's native
+generative-search visibility reports". That's free and first-party, but it only shows
+impressions in generative surfaces, not whether this site was the cited source for a given
+prompt — Step 4's `llm_responses` check below is still the only way to answer that.
+
 **Check availability first, don't assume:** is an `mcp__openseo__*`-style MCP connection
 present in this session? If not, or if `GET <openseo-url>/api/health` shows
 `checks.dataforseo.status` other than `ok`, tell the user plainly what's missing (no
@@ -110,7 +117,9 @@ Merge four inputs into one map — each target keyword owned by exactly one page
 - A harvested candidate list from `scripts/keyword_expand.py <seed>` — real Google/YouTube autocomplete completions, not an invented brainstorm. Run it against 1–3 seed phrases central to the site, then sort what it returns by intent (emergency/transactional/informational/local) and favor long-tail over short-tail — a specific, low-competition phrase beats a generic, saturated one. Expect real noise in the output (autocomplete pulls in unrelated senses of ambiguous words); discard it rather than force-fitting it. See `REFERENCE.md` for the short-tail/long-tail split, page templates for new pages, and what "search volume" honestly means for a free workflow.
 - If Step 4 ran with OpenSEO/DataForSEO available: its AI Keyword Data (real AI-tool-usage search volume) and any prompts from the citation check that surfaced a phrasing not already covered.
 
-**Done when:** no target keyword is unmapped, and no single page is asked to own more than one primary keyword.
+For every page proposed for **creation** (not an existing page just getting a clearer target), answer the "Reason to Exist" question from `REFERENCE.md`'s "Google's 2026 guidance on AI-assisted content" before adding it to the map: what does this page offer that the current top results or a single generic LLM prompt don't already? No convincing answer → don't map the keyword to a new page; look for an existing page to strengthen or fold it into instead.
+
+**Done when:** no target keyword is unmapped, no single page is asked to own more than one primary keyword, and every proposed new page carries a recorded Reason-to-Exist answer.
 
 ## Step 6 — Action plan (mandatory output)
 
@@ -128,11 +137,15 @@ Execute `action-plan.md`'s P0 and P1 items in order. Show each diff to the user 
 
 ## Step 8 — Content
 
-Execute `action-plan.md`'s content items (new pages, new FAQ/guide entries, rewritten copy): lead with the answer to the target query in the first paragraph (this is what gets an AI answer engine to quote the page), then go deeper — real specifics, not generic filler. Phrase FAQ/guide headings as the actual question a searcher would type ("How does X work?", not "Functionality") — it's what gets pulled into featured snippets and AI answers. Run drafts through the `avoid-ai-writing` skill before finalizing; don't restate its rules here. Add structured data per `REFERENCE.md`'s schema-type table and confirm it parses (re-run Step 2's script, or check `https://validator.schema.org`).
+Before writing anything, re-check every new-page content item against the Reason-to-Exist answer recorded for it in Step 5 (and `REFERENCE.md`'s "Google's 2026 guidance on AI-assisted content") — if the draft ends up being something any capable LLM could produce unprompted from the target keyword alone, it fails the gate regardless of how well-written it is; strengthen it with real evidence (own data, own testing, own screenshots, genuine expertise) or fold it into an existing page instead of publishing it as-is. Run the informal publish-gate checklist in `REFERENCE.md` (Commodity, Original Evidence, Template Similarity, Query Fan-out, Intent Satisfaction, Source Quality, Topical Fit) on anything that feels close to the line.
 
-**Never generate pages programmatically at scale** (thousands of templated location/variant pages from a data table) to chase more indexed surface area — this reads as spam to Google and risks a manual action or algorithmic demotion across the whole site, not just the thin pages. Depth on genuinely distinct pages beats breadth of near-duplicates; see `REFERENCE.md`'s "Service × location depth" template for how to do location/variant pages without tripping this.
+Execute `action-plan.md`'s content items (new pages, new FAQ/guide entries, rewritten copy): lead with the answer to the target query in the first paragraph (this is what gets an AI answer engine to quote the page), then go deeper — real specifics, not generic filler. Phrase FAQ/guide headings as the actual question a searcher would type ("How does X work?", not "Functionality") — it's what gets pulled into featured snippets and AI answers. Run drafts through the `avoid-ai-writing` skill before finalizing for genuine prose-quality reasons only — never as an AI-detection-evasion pass; see `REFERENCE.md`'s explicit note on why "humanizing" text doesn't address what Google's policy actually targets. Add structured data per `REFERENCE.md`'s schema-type table and confirm it parses (re-run Step 2's script, or check `https://validator.schema.org`).
 
-**Done when:** every content item in `action-plan.md` has been written or explicitly skipped, and every new/changed page's structured data validates.
+**Never generate pages programmatically at scale** (thousands of templated location/variant pages from a data table) to chase more indexed surface area — this reads as spam to Google and risks a manual action or algorithmic demotion across the whole site, not just the thin pages. This includes **query fan-out**: don't create a separate page per phrasing variant of the same query (swapping a profession, city, or synonym into an otherwise-identical template) — Google's ranking systems already understand semantic equivalence and treat this pattern as low-value regardless of how the pages were produced. Depth on genuinely distinct pages beats breadth of near-duplicates; see `REFERENCE.md`'s "Query fan-out and thin programmatic pages" and "Service × location depth" template for how to do location/variant pages without tripping this — the difference is whether each page carries genuinely distinct information (real availability, pricing, measurements, local detail), not the page count itself.
+
+If Step 2's audit surfaced a large volume of thin/near-duplicate/low-value pages (Content Debt, see `REFERENCE.md`), add or confirm a dedicated action-plan item for consolidating, `noindex`-ing, or removing that bulk — don't treat it as covered just because the individually-flagged pages got fixed.
+
+**Done when:** every content item in `action-plan.md` has been written or explicitly skipped, every new page has a recorded Reason-to-Exist answer that survives the publish-gate checklist, every new/changed page's structured data validates, and any Content Debt finding from Step 2 has its own action-plan item.
 
 ## Step 9 — Ship and verify
 
@@ -142,7 +155,7 @@ If Step 2/3 found no sitemap in Search Console, or a stale one, submit it with `
 
 ## Reference
 
-`REFERENCE.md` — meta-length thresholds, striking-distance thresholds in detail (including the SERP-intent guardrail), the schema.org type table, GSC dimension combinations, page templates, the AI Search/GEO and backlinks tool table, and the action-plan template with a worked example. Load it at Step 3 onward, not before — it's detail those steps need, not orientation.
+`REFERENCE.md` — Google's 2026 guidance on AI-assisted/scaled content (the Reason-to-Exist gate, query fan-out, the publish-gate checklist, Content Debt), meta-length thresholds, striking-distance thresholds in detail (including the SERP-intent guardrail), the schema.org type table, GSC dimension combinations, page templates, the AI Search/GEO and backlinks tool table, and the action-plan template with a worked example. Load it at Step 3 onward, not before — it's detail those steps need, not orientation.
 
 `APP-TO-WEBSITE.md` — the branch for apps without a marketing site: pulling keywords from a store listing and the hero/guides/FAQ structure that turns them into indexable pages.
 

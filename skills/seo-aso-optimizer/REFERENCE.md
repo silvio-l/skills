@@ -2,6 +2,152 @@
 
 Consulted on demand from `SKILL.md` Step 2 onward — not needed for orientation.
 
+## Google's 2026 guidance on AI-assisted content ("scaled content abuse")
+
+Google ran a global spam update August 18–21, 2026. Google itself called it a normal spam
+update and named no specific AI-content filter as its target — third-party reports that
+heavily automated AI-SEO sites lost the most are plausible field observations, **not**
+a confirmed cause. Don't repeat "Google penalizes AI content" as if Google said it — that
+claim is false and gets the actual policy backwards.
+
+What Google *has* said, in its Spam Policies under **Scaled Content Abuse**: creating many
+pages whose main purpose is manipulating rankings rather than helping users is the
+violation, and Google explicitly names "using generative AI to produce many pages with no
+added value for users" as one example of *how* that happens — but the policy applies
+regardless of how the content was produced. Human-written SEO filler is exactly as much a
+violation as AI-written filler; well-researched, genuinely original content produced with
+AI assistance is not a violation at all. The axis that matters is **volume × low
+originality × low user value × ranking-manipulation intent**, not "was an LLM involved."
+
+Google's current guidance for generative-search optimization goes further and names the bar
+directly: **"valuable, unique, non-commodity content."** Concretely, that means content
+carrying at least one of: a genuine own perspective or experience, real expertise, original
+information or data, original images/video, or insight that goes beyond what's already
+generally available — and *not* simply restating what's already on the web or what a generic
+LLM could produce unprompted from a single request. Apply this as the actual quality bar
+for every page this skill helps create, not just a nice-to-have.
+
+### The "Reason to Exist" gate
+
+Before adding any page to Step 5's keyword-to-page map, or writing any content item in Step
+8, answer this question and record the answer:
+
+> Which information, experience, function, or perspective does this page offer that a user
+> could not already get just as easily from the current top search results, or from a
+> single generic LLM prompt?
+
+No convincing answer → don't create the page (or don't keep an existing one that has no
+answer either — feed it into the Content Debt note below instead). A convincing answer is
+concrete and checkable (real test data, a real screenshot, a real measured number, a
+genuinely distinct local/service detail), not a restatement of the keyword ("this page is
+about X, which users search for"). Carry the answer into the action plan as (part of) that
+item's "Why" — see the action-plan template below.
+
+### Query fan-out and thin programmatic pages
+
+Google explicitly warns against creating a separate page for every phrasing variant of a
+query just because users type it differently, or because a "fan-out" of related queries
+exists — its ranking systems already understand semantic equivalence and don't need a page
+that repeats the query's literal words. Concretely:
+
+- **Problematic:** `/beste-ki-fuer-rechtsanwaelte`, `/beste-ki-fuer-steuerberater`,
+  `/beste-ki-fuer-architekten`, … — or `/matomo-hamburg`, `/matomo-berlin`,
+  `/matomo-muenchen` — when every page behind the swapped word carries practically the same
+  generated text.
+- **Legitimate:** hundreds or thousands of product/location/data pages are entirely fine
+  when each one genuinely differs — real availability, real pricing, real measurements,
+  real local detail. See "Service × location depth" below for the pattern that keeps this
+  legitimate.
+
+This sharpens, and doesn't replace, `SKILL.md` Step 8's existing scale warning — a large
+page count is not itself the problem; a large count of near-duplicate pages is.
+
+### Publish-gate checklist (informal, not a computed score)
+
+Before publishing a page produced with meaningful AI assistance, walk it through these
+questions. This is a discipline aid to reason through by hand — no tool here computes an
+actual numeric score, so don't present one to the user as if it were measured:
+
+| Axis | Question |
+|---|---|
+| Commodity | Could any capable LLM produce essentially this same page from one prompt? |
+| Original evidence | Does the page contain real data, tests, screenshots, or experience nothing else already has? |
+| Template similarity | How closely does this page's structure/content match other pages already on this site? |
+| Query fan-out | Does this page exist mainly because of a slightly different keyword phrasing of an already-covered topic? |
+| Intent satisfaction | Does it fully answer what the searcher/prompter actually wants, not just what the target keyword implies? |
+| Source quality | Are factual claims backed by primary sources, not "according to various sources"? |
+| Topical fit | Does this genuinely match the site's actual expertise and purpose? |
+
+A page that scores badly on Commodity/Template Similarity and has no answer for Original
+Evidence or the Reason-to-Exist gate above should not be published as-is — strengthen it
+with real evidence, consolidate it into a page that already covers the ground better, or
+drop it from the plan.
+
+### Do not chase "AI Humanizer" / detection-evasion as the fix
+
+Making AI-written prose read as more human (varied sentence length, fewer em dashes, fewer
+"AI-sounding" words) does not address what Google's policy actually targets: genericness,
+redundancy, and lack of originality survive a humanizing pass completely intact. This skill
+never recommends AI-humanizer tools or detection-evasion techniques. The `avoid-ai-writing`
+skill referenced in Step 8 is used here strictly for genuine prose-quality/naturalness
+reasons — clearer, less repetitive writing — never framed as evading AI-content detection.
+
+### Content Debt: audited at the whole-site level, not per URL
+
+Google's own guidance on recovering from quality-related ranking drops says the evaluation
+happens at the site level, and recovery after a real quality problem can take months even
+after fixes ship. Practically: a site with 50 excellent pages and 2,000 mediocre AI-SEO
+pages should not assume the 50 good pages will carry the site — the mediocre bulk is itself
+a liability. When Step 2's audit surfaces a large volume of thin/near-duplicate/low-value
+pages, the recommendation belongs in the action plan as its own P0/P1 item: consolidate
+them into fewer, stronger pages; `noindex` the ones with no real Reason-to-Exist answer; or
+delete them outright. Don't just patch the individually-flagged pages and leave the bulk in
+place.
+
+*(A separate, unrelated August 28, 2026 enforcement change concerns Site Reputation Abuse /
+"parasite SEO" — third-party content hosted on a strong domain mainly to exploit its
+authority. That's a different policy with nothing to do with AI content; don't conflate the
+two if a user brings up "Google's recent update" — ask which one they mean if it's
+ambiguous.)*
+
+### GEO/AEO: no special tricks, same discipline
+
+Google's own guidance for showing up in AI Overviews/AI Mode is explicit that none of the
+following are needed or wanted: a special AI-specific schema type beyond the table below,
+dedicated "AI text files", splitting content into artificial fragments to court citation, or
+a dedicated page per anticipated fan-out prompt. The GEO strategy is the same discipline as
+the rest of this skill — genuinely valuable, unique content, plus the structural basics
+(clear headings phrased as real questions, structured data, fast/clean pages) already
+covered in Steps 2 and 8.
+
+### GSC's native generative-search visibility reports
+
+Since August 31, 2026, Search Console reports impressions specifically for AI Overviews, AI
+Mode, and other generative search surfaces, rolled out globally, alongside classic web
+results. Before assuming Step 4's paid OpenSEO/DataForSEO path is the only way to see AI
+Search visibility, check whether the connected `mcp__gsc__*` tools already expose a
+search-appearance/type filter for this — if so, it's a free, first-party complement to
+Step 4's citation checks (it shows *impressions* in generative surfaces, not *whether this
+site was the cited source* for a specific prompt, which is what Step 4 answers).
+
+### A mental model for the value formula (heuristic, not literal)
+
+Useful shorthand for what actually earns ranking and AI citation now, replacing an older
+"more keywords, more words, more pages" mental model:
+
+```
+Search Intent × Information Gain × First-hand/Expert Evidence
+× Topical Relevance × Trust/Accuracy × UX × Technical SEO
+```
+
+not:
+
+```
+Keyword × Word Count × Keyword Density × Content Volume
+```
+
+Treat this as a way to sanity-check a plan, not a formula to compute.
+
 ## Core Web Vitals thresholds
 
 Google's official "good" bar (web.dev/vitals) — what `scripts/pagespeed_check.py` checks each metric against:
@@ -170,6 +316,8 @@ One JSON-LD block per page is normal; a page can combine types (e.g. `WebSite` +
 ```
 
 A P0 item without literal replacement text, or a "why" that just restates the finding instead of citing the number/quote behind it, fails Step 5's completion criterion — send it back through Steps 2–4's evidence, don't paraphrase around the gap.
+
+For any item that creates a **new page** (not editing/expanding an existing one), the "Why" must also carry its Reason-to-Exist answer from "Google's 2026 guidance on AI-assisted content" above — what this page offers that the current top results or a generic LLM prompt don't already. No answer there means the item doesn't belong in the plan yet.
 
 ### Worked example (from this skill's own whispaste.de test run)
 
