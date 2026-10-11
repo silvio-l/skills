@@ -180,7 +180,6 @@ power-up-laden generic one:
 - **`escalate`** owns general task-difficulty routing; this skill's §2 tiering is its
   own creative-direction call, not derived from `escalate`'s table.
 - **`app-icon-director`** is for app icons specifically, not full pages.
-- **`impeccable`** (if installed) is for app/product UI, not marketing/landing pages.
 - **`dataviz`** / **`artifact-design`** / **`artifact-diagramming`** own chart, Artifact,
   and diagram fundamentals if the page (or a section of it) is published as an Artifact.
 - **`motion-graphics-director`** is for standalone animated graphics from video content,

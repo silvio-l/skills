@@ -106,7 +106,7 @@ Once every selected moment has a graphic, give the user a short table: timestamp
 - **`marketing-video-automation`** automates *driving and recording an app* (Maestro/Playwright/AppleScript) for demo videos — a completely different mechanism from generating standalone animated graphics. The only thing worth borrowing from it is `post-production.md`'s `ffmpeg` export conventions, and only if you're doing the video-compositing extension described below.
 - **`dataviz`** owns chart/color methodology — load it, don't reimplement palette logic here.
 - **`artifact-design`** / **`artifact-diagramming`** own Artifact fundamentals and diagram mechanics — load them, don't re-derive.
-- **`frontend-design`** / **`impeccable`** are for app and product UI, not marketing/content motion graphics — not applicable here even though both are about visual quality.
+- **`frontend-design`** is for app and product UI, not marketing/content motion graphics — not applicable here even though it is about visual quality.
 
 ## Deliberately out of scope (v1)
 
