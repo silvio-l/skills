@@ -40,6 +40,9 @@ def frontmatter(text):
         km = re.match(r"^([a-z][a-z0-9_-]*):\s*(.*)$", line)
         if km:
             fields[km.group(1)] = km.group(2).strip()
+            raw = fields[km.group(1)]
+            if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in "\"'":
+                fields[km.group(1)] = raw[1:-1]
     return fields
 
 
@@ -51,6 +54,17 @@ class SkillStructureTests(unittest.TestCase):
 
     def test_name_matches_directory(self):
         self.assertEqual(self.fm.get("name"), SKILL_DIR.name)
+
+    def test_frontmatter_plain_scalars_are_valid_yaml(self):
+        # The skills CLI skips a skill whose frontmatter fails to parse; an
+        # unquoted ": " or " #" inside a plain scalar is the usual cause.
+        block = re.match(r"^---\n(.*?)\n---\n", self.text, re.S).group(1)
+        for line in block.splitlines():
+            km = re.match(r"^\s*[a-z][a-z0-9_-]*:\s*(.*)$", line)
+            if not km or not km.group(1) or km.group(1)[0] in "\"'":
+                continue
+            self.assertNotIn(": ", km.group(1), f"unquoted ': ' in: {line}")
+            self.assertNotIn(" #", km.group(1), f"unquoted ' #' in: {line}")
 
     def test_description_within_cap(self):
         desc = self.fm.get("description", "")

@@ -1,6 +1,6 @@
 ---
 name: motion-video-planner
-description: Plan a shareable motion-graphics video (social reel, explainer, promo, logo sting): three concepts and a self-contained HyperFrames production prompt, no rendering. Use for 'video concept', 'video idea', 'Videokonzept', 'Videoidee', 'Video planen'.
+description: "Plan a shareable motion-graphics video (social reel, explainer, promo, logo sting): three concepts and a self-contained HyperFrames production prompt, no rendering. Use for 'video concept', 'video idea', 'Videokonzept', 'Videoidee', 'Video planen'."
 metadata:
   argument-hint: "[what the video is about, or a path to a briefing]"
 ---
