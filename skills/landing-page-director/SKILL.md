@@ -182,6 +182,3 @@ power-up-laden generic one:
 - **`app-icon-director`** is for app icons specifically, not full pages.
 - **`dataviz`** / **`artifact-design`** / **`artifact-diagramming`** own chart, Artifact,
   and diagram fundamentals if the page (or a section of it) is published as an Artifact.
-- **`motion-graphics-director`** is for standalone animated graphics from video content,
-  not landing pages — a different output entirely, though it shares this skill's
-  anti-slop instinct.

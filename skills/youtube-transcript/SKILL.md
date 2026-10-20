@@ -44,7 +44,7 @@ python3 <skill_dir>/scripts/clean_vtt.py transcript.en.vtt > transcript.txt
 
 This strips the tags, drops lines already emitted by a recent cue (windowed, not just "equals the immediately preceding line" — a cue can carry over more than one prior line unchanged), and joins the rest into plain running text. The script has no dependencies beyond the Python standard library and exits with a clear error message for missing/empty/malformed files instead of crashing.
 
-Add `--timestamps` to get `[mm:ss] text` per surviving line instead of a flat paragraph — needed whenever the task requires locating a specific moment in the video (e.g. finding a moment to build a graphic for), not just reading the gist:
+Add `--timestamps` to get `[mm:ss] text` per surviving line instead of a flat paragraph — needed whenever the task requires locating a specific moment in the video (e.g. quoting or citing a specific passage), not just reading the gist:
 
 ```bash
 python3 <skill_dir>/scripts/clean_vtt.py transcript.en.vtt --timestamps > transcript_timed.txt
