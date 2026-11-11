@@ -46,6 +46,17 @@ Each skill is tagged **global** (installed with `-g`, available in every session
 
 **The Fix.** A model-invoked skill that drives the user's own Safari tab directly via `do JavaScript` (through a small JXA driver), reading the real DOM — never a screenshot or OCR. Built against three live conversations (one per site) rather than assumed selectors, which surfaced two real bugs a naive implementation would have shipped silently: Claude.ai's `[data-test-render-count]` looked assistant-specific but actually tags *every* turn's markdown rendering, so an early version double-counted each user message as a duplicate "assistant" entry — fixed by keying off `[role="article"][aria-posinset]` instead, a stable per-turn position that also fixes collection order once claude.ai's (and likely gemini.google.com's) DOM virtualization is accounted for: long conversations un-mount off-screen messages, so a single DOM snapshot silently misses most of a long chat, requiring a scroll-to-top-then-sweep collection loop instead. A second bug — JXA's Standard Additions `read` command silently mangling non-ASCII text into mojibake — was caught the same way and fixed via the Foundation/NSString bridge for guaranteed UTF-8. An unstructured `body.innerText` fallback (clearly labeled, distinct exit code) covers any site without a dedicated extractor rather than failing outright.
 
+### `lan-computer-use` — global
+
+**The Problem.** Agents that drive a desktop through screenshots are slow, token-hungry and guess at pixels. Remote machines in the LAN, such as a Windows test PC or a second Mac, are usually out of reach entirely. When the agent controls the machine you are sitting at, you cannot tell what it is doing or when it will stop.
+
+**The Fix.** `scripts/cu.py` controls this Mac or LAN Macs and Windows PCs through a tiny agent: a single Swift or C# file that is compiled on the target on first use and runs in the logged-on desktop session. It is reached through an SSH tunnel with a per-session token, so each command costs only a local round trip.
+
+- **Reading the UI.** `snapshot -i` returns a flat list of actionable accessibility elements with refs (`[e7] button "Save"`). The agent clicks, presses, focuses or sets values by ref instead of by coordinates. Every input answers with the resulting foreground window and focus, which saves follow-up screenshots.
+- **When pixels are needed.** Screenshots, OCR on macOS and `click --img` cover UIs without an accessibility tree.
+- **Overlay.** A compact yellow warning panel on the target shows the task, the current action and a countdown. It is excluded from screen capture.
+- **Safety.** Password fields are refused. `down` removes the agent without a trace.
+
 ### `omada-admin` — global
 
 **The Problem.** A TP-Link Omada SDN controller exposes two different HTTP API surfaces (OpenAPI v1 and Web API v2) with different auth flows, and its actual base paths and resource names don't match the patterns a naive read of the web UI or older documentation would suggest — a base path with a subtly wrong path segment (singular vs. plural) returns a generic "unsupported path" error indistinguishable from a genuinely missing feature, and DHCP reservations aren't a listed resource at all but a field buried on each client.
