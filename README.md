@@ -52,6 +52,12 @@ Each skill is tagged **global** (installed with `-g`, available in every session
 
 **The Fix.** A model-invoked skill documenting both API surfaces from paths verified against a live controller rather than guessed from the UI, including the corrected site-scoped base path, the confirmed working DHCP-reservation read/write recipe (`clients/{mac}.ipSetting`, verified end-to-end including a real two-NIC reservation swap), and an honest split between confirmed-working endpoints and unverified-but-documented payload shapes rather than presenting both with equal confidence. Deliberately excludes browser-DevTools-based endpoint discovery, since a future agent instance typically has no browser access to fall back on.
 
+### `seitenredaktion` — global
+
+**The Problem.** Asked to "improve the copy", an agent produces German marketing filler: two-beat slogans ("Dein Team. Eine kleine App."), interchangeable audience lists, unverifiable numbers and CTAs that never say what the click does. Competitor pages get skimmed via search snippets — or worse, imitated wholesale.
+
+**The Fix.** A user-invoked procedure (`/seitenredaktion [route] [focus]`) bundling a German editorial taste guide (`TASTE.md`): where the voice comes from, how to pick an entry point, how headlines carry the reading flow, sentence pairs as the yardstick, and a calibration against a real rejected page. It reads the page's components and locale files, verifies claims against the implementation, fetches the real home-page text of the three largest competitors (documented with URL, language and date; inspiration only), edits the copy in place and reports with concrete checks and open proof points. A project's own `TASTE.md` takes precedence.
+
 ### `youtube-transcript` — project-local
 
 **The Problem.** YouTube's auto-generated caption files use "rolling captions" — every line of text appears twice in a row (once as a preview of the next block, once as the finalized block) wrapped in inline word-timing tags like `<00:00:00.320><c>word</c>`. An agent reading a `.vtt` file directly gets a transcript with every sentence duplicated or tripled, and has no standing guidance on the right `yt-dlp` flags for metadata, manual-vs-auto subtitle fallback, or comment extraction — so each session reinvents (and sometimes gets wrong) the same handful of commands.
