@@ -755,13 +755,21 @@ func post() -> Dict { var r = ok(); r["post"] = postState(); return r }
 // ---------- snapshot / find / wait ----------
 func snapshot(_ a: Dict) throws -> Dict {
     let w = try pickWindow(a)
-    let maxNodes = int(a, "max", 250), maxDepth = int(a, "depth", 60)
+    let maxNodes = int(a, "max", 250), maxDepth = int(a, "depth", 150)
     let all = bool(a, "all"), interactive = bool(a, "interactive")
-    refs.removeAll(); refCounter = 0
     var nodes: [Dict] = []
     var truncated = false
-    walk(axRoot(for: w), depth: 0, level: 0, maxDepth: maxDepth, maxNodes: maxNodes, clipRect: all ? nil : w.rect,
-         interactive: interactive, nodes: &nodes, truncated: &truncated)
+    // WebKit (WKWebView, Tauri) and Chromium build their AX tree lazily: the first walk can see an empty web area
+    // or only the window buttons while `find` a moment later sees everything. Walk again briefly in that case.
+    let chrome = Set(windowButtonNames.values)
+    for attempt in 0..<5 {
+        refs.removeAll(); refCounter = 0; nodes = []; truncated = false; emptyWebArea = false
+        walk(axRoot(for: w), depth: 0, level: 0, maxDepth: maxDepth, maxNodes: maxNodes, clipRect: all ? nil : w.rect,
+             interactive: interactive, nodes: &nodes, truncated: &truncated)
+        let content = nodes.contains { !chrome.contains($0["name"] as? String ?? "") }
+        if (content && !emptyWebArea) || attempt == 4 { break }
+        sleepMs(150)
+    }
     var r = ok()
     r["window"] = winInfo(w)
     r["nodes"] = nodes
@@ -770,6 +778,7 @@ func snapshot(_ a: Dict) throws -> Dict {
 }
 
 // interactive mode (-i): only what can be clicked or typed into, as a flat list - far fewer tokens
+var emptyWebArea = false // set by walk when a web area has no children yet (lazy AX tree)
 let interactiveExtra: Set<String> = ["row", "treeitem", "listitem", "cell"]
 
 // label of a nameless row/cell/button: its descendant texts (Finder, Mail and most tables put it there)
@@ -798,6 +807,7 @@ func walk(_ e: AXUIElement, depth: Int, level: Int, maxDepth: Int, maxNodes: Int
     if nodes.count >= maxNodes { truncated = true; return }
     let n = nodeData(e)
     if let c = clipRect, let f = n.frame, !f.intersects(c) { return } // scrolled out of the window
+    if n.role == "document" && n.children.isEmpty && axString(e, "AXRole") == "AXWebArea" { emptyWebArea = true }
     if interactive && n.role == "scrollbar" { return } // use the scroll command instead
     var childDepth = depth
     var rowEmitted = inRow

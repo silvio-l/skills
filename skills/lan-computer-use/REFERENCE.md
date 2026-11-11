@@ -1,6 +1,6 @@
 # lan-computer-use — Reference
 
-`python3 scripts/cu.py [-t TARGET] [--json] <command> …`. It needs Python 3.8 or newer and the stdlib only. Exit codes: `0` ok, `1` the agent reported an error, `2` a usage, config or connection error.
+`scripts/cu [-t TARGET] [--json] <command> …` (a POSIX `sh` wrapper around `cu.py`, safe in zsh and bash). It needs Python 3.8 or newer and the stdlib only. Exit codes: `0` ok, `1` the agent reported an error, `2` a usage, config or connection error.
 
 ## How it works
 
@@ -34,7 +34,7 @@ The built-in target `local` is this Mac and needs no SSH. LAN targets live in `~
 | `idle_minutes` | agent auto-stop (default 30) |
 | `announce` | print and `say` a notice on the controlling Mac before the first input of a session (default on for `local`) |
 
-Select a target with `-t NAME`, `LCU_TARGET`, or the config `default`. `targets` lists them; `status` shows the client session without secrets. `LCU_TIMING=1` prints the round trip per command to stderr.
+Select a target with `-t NAME`, `LCU_TARGET`, or the config `default`. A name that is not in `targets.json` is tried as an SSH host or `~/.ssh/config` alias: the client runs `uname -s` there once (`Darwin` = macOS, no `uname` = Windows), caches the result in `~/.cache/lan-computer-use/ssh-aliases.json` and takes user, key and port from the SSH config. Add an entry to pin the OS or a host key. `targets` lists them; `status` shows the client session without secrets. `LCU_TIMING=1` prints the round trip per command to stderr.
 
 ### Preparing a target
 
@@ -127,5 +127,6 @@ A change of the input desktop (lock screen, UAC) is reported as `desktop …`.
   - A UAC prompt runs on the secure desktop; `hello` reports `(secure desktop)` there, and the agent cannot act on it.
 - **macOS:**
   - System Settings panes can be slow; use `wait`.
+  - WebKit (WKWebView, Tauri) and Chromium apps build their accessibility tree lazily. `snapshot` walks again for up to about 0.6 s while the window shows only its title bar buttons or an empty web area.
 - **Both:**
   - Windows that are minimized or on other Spaces/desktops are not in `snapshot`; `activate` them first.

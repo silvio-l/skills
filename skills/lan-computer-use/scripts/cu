@@ -1,0 +1,3 @@
+#!/bin/sh
+# Stable entry point: works in zsh and bash, from any working directory.
+exec python3 "$(dirname "$0")/cu.py" "$@"

@@ -56,6 +56,52 @@ def load_targets():
     return targets, default
 
 
+ALIASES = os.path.join(CACHE, "ssh-aliases.json")
+
+
+def detect_os(rc, out):
+    """OS of an SSH host from `uname -s`: Darwin is a Mac; Windows has no uname (cmd/PowerShell fail)."""
+    if rc == 255:
+        return None
+    first = out.strip().splitlines()[0].strip() if out.strip() else ""
+    if rc == 0 and first == "Darwin":
+        return "macos"
+    if rc == 0 and (first in ("Linux", "FreeBSD", "OpenBSD", "NetBSD", "SunOS") or first.startswith(("CYGWIN", "MINGW", "MSYS"))):
+        return "unsupported"
+    return "windows"
+
+
+def alias_target(name):
+    """A target name that is no targets.json entry but an SSH host (alias): detect its OS once and cache it."""
+    hint = (f"unknown target '{name}'. Add it to {CONFIG}, e.g. "
+            f'"{name}": {{"os": "windows", "host": "{name}", "user": "me"}} (see REFERENCE.md, cu.py targets)')
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", name) or name.startswith("-"):
+        raise CuError(hint)
+    try:
+        with open(ALIASES, encoding="utf-8") as f:
+            known = json.load(f)
+    except (OSError, ValueError):
+        known = {}
+    if known.get(name) in ("windows", "macos"):
+        return {"os": known[name], "host": name}
+    try:
+        p = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", name, "uname -s"],
+                           stdin=subprocess.DEVNULL, capture_output=True, text=True, errors="replace", timeout=20)
+        osname = detect_os(p.returncode, p.stdout)
+    except (OSError, subprocess.TimeoutExpired):
+        osname = None
+    if osname is None:
+        raise CuError(hint + f"; no SSH connection to '{name}' either")
+    if osname == "unsupported":
+        raise CuError(f"target '{name}' answers over SSH but is neither macOS nor Windows")
+    os.makedirs(CACHE, mode=0o700, exist_ok=True)
+    known[name] = osname
+    with open(ALIASES, "w", encoding="utf-8") as f:
+        json.dump(known, f)
+    print(f"target '{name}': SSH host, detected {osname} (pin it in {CONFIG} to skip detection)", file=sys.stderr)
+    return {"os": osname, "host": name}
+
+
 def validate_target(name, t):
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", name):
         raise CuError(f"invalid target name '{name}'")
@@ -912,9 +958,7 @@ def main(argv=None):
                 print(f"{n}{mark}: {t.get('os')} · {where}")
             return 0
         name = ns.target or os.environ.get("LCU_TARGET") or default
-        if name not in targets:
-            raise CuError(f"unknown target '{name}' (cu.py targets)")
-        t = targets[name]
+        t = targets[name] if name in targets else alias_target(name)
         validate_target(name, t)
         osname = "macos" if t.get("local") else t["os"]
         if ns.cmd == "down":
