@@ -159,18 +159,75 @@ def merge(folder, parts):
         print("note: replaced rows overwrite earlier results; make sure that was intended")
 
 
+def _cpu_idle():
+    """Measured CPU idle in percent over about one second, or None where it cannot be read."""
+    import subprocess
+    try:
+        if sys.platform == "darwin":
+            out = subprocess.run(["top", "-l", "2", "-n", "0", "-s", "1"], capture_output=True, text=True, timeout=10).stdout
+            lines = [l for l in out.splitlines() if l.startswith("CPU usage")]
+            return float(re.search(r"([0-9.]+)% idle", lines[-1]).group(1))
+        if Path("/proc/stat").exists():
+            def sample():
+                v = [int(x) for x in Path("/proc/stat").read_text().splitlines()[0].split()[1:]]
+                return v[3] + v[4], sum(v)
+            import time
+            i1, t1 = sample(); time.sleep(1); i2, t2 = sample()
+            return 100.0 * (i2 - i1) / max(1, t2 - t1)
+    except (OSError, ValueError, IndexError, AttributeError, subprocess.SubprocessError):
+        pass
+    return None
+
+
+def _mem_pressure():
+    """'normal', 'warn' or 'critical' from the OS memory pressure signal, or None if unknown."""
+    import subprocess
+    try:
+        if sys.platform == "darwin":
+            level = subprocess.run(["sysctl", "-n", "kern.memorystatus_vm_pressure_level"],
+                                   capture_output=True, text=True, timeout=5).stdout.strip()
+            return {"1": "normal", "2": "warn", "4": "critical"}.get(level)
+        info = dict(l.split(":", 1) for l in Path("/proc/meminfo").read_text().splitlines() if ":" in l)
+        free = int(info["MemAvailable"].split()[0]) / int(info["MemTotal"].split()[0])
+        return "critical" if free < 0.05 else "warn" if free < 0.10 else "normal"
+    except (OSError, ValueError, KeyError, ZeroDivisionError, subprocess.SubprocessError):
+        return None
+
+
+def decide_slots(cpus, load1, load5, idle, pressure):
+    """Base is a fixed HARD_CAP; throttle only on a real shortage.
+    The subagents themselves are light, and builds, test runs and app instances already run one at a time.
+    A short spike (load1 alone, e.g. one agent's lint + test + build burst) never throttles: CPU only counts
+    when the load has stayed high for minutes (min of load1 and load5) and the measured CPU idle is low too.
+    Load from the coordinator's own agents sits inside the fixed base, so it is not treated as foreign load."""
+    slots, why = HARD_CAP, []
+    if pressure in ("critical", "warn"):
+        slots = 1 if pressure == "critical" else 2
+        why.append(f"memory pressure {pressure}")
+    sustained = min(load1, load5) / max(1, cpus)
+    if sustained >= 2.0 and (idle is None or idle < 5):
+        slots = 1
+        why.append("sustained CPU overload")
+    elif sustained >= 1.0 and (idle is None or idle < 15):
+        slots = min(slots, 2)
+        why.append("sustained CPU load")
+    return slots, why
+
+
 def capacity(cap):
-    """Suggest a parallel subagent count from the 1-minute load per core.
-    Subagents themselves are light; builds, test runs and app instances they start are not."""
+    """Suggest a parallel subagent count; see decide_slots for the policy."""
     cpus = os.cpu_count() or 1
     try:
-        load1 = os.getloadavg()[0]
+        load1, load5, _ = os.getloadavg()
     except (AttributeError, OSError):
-        load1 = 0.0
-    per_core = load1 / cpus
-    slots = 3 if per_core < 0.5 else 2 if per_core < 0.8 else 1
+        load1 = load5 = 0.0
+    idle, pressure = _cpu_idle(), _mem_pressure()
+    slots, why = decide_slots(cpus, load1, load5, idle, pressure)
     slots = max(1, min(slots, cap, HARD_CAP))
-    print(f"slots={slots} load1={load1:.1f} cpus={cpus} load_per_core={per_core:.2f}")
+    idle_s = "cpu idle ?" if idle is None else f"cpu idle {idle:.0f}%"
+    reason = "; ".join(why) or "no shortage"
+    print(f"slots={slots} ({reason}: {idle_s}, mem pressure {pressure or '?'}, "
+          f"load1/5 per core {load1 / cpus:.2f}/{load5 / cpus:.2f}, cpus={cpus})")
     return slots
 
 

@@ -43,7 +43,7 @@ The audit is deep, the machine is shared. These limits hold for the whole run:
 
 | Resource | Limit |
 | --- | --- |
-| Parallel subagents | `python3 "$A" capacity` before every dispatch round → `slots=N`, never above **3** |
+| Parallel subagents | `python3 "$A" capacity` before every dispatch round → `slots=N (reason)`: **3** unless memory pressure or CPU overload has lasted for minutes; short load spikes do not count |
 | GUI / running app | exactly **one** subagent drives the app at a time (one screen, one keyboard focus) |
 | Builds, test suites, app instances | **one** at a time; the coordinator builds, workers reuse the build |
 | Code changes in the target repo | **one** implementer at a time (no parallel edits on the same tree) |
