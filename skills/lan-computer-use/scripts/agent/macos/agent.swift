@@ -11,7 +11,7 @@ import ImageIO
 import UniformTypeIdentifiers
 import Vision
 
-let VERSION = "2" // bump with every behaviour change; setup refuses to replace a newer agent
+let VERSION = "3" // bump with every behaviour change; setup refuses to replace a newer agent
 typealias Dict = [String: Any]
 
 struct AgentError: Error { let msg: String; init(_ m: String) { msg = m } }
@@ -173,6 +173,7 @@ func serve(_ c: Int32) -> Bool {
             let line = buf.subdata(in: buf.startIndex..<nl)
             buf.removeSubrange(buf.startIndex...nl)
             if line.allSatisfy({ $0 == 0x20 || $0 == 0x0D || $0 == 0x09 }) { continue }
+            let prevRequest = lastRequest
             lastRequest = Date()
             var resp: Dict
             var quit = false, badToken = false
@@ -181,6 +182,7 @@ func serve(_ c: Int32) -> Bool {
                 if !tokenOk(str(req, "token")) { resp = fail("bad token"); badToken = true }
                 else {
                     let cmd = str(req, "cmd")
+                    if cmd == "note" { lastRequest = prevRequest } // the activity feed alone does not count as use
                     if cmd == "quit" { quit = true; resp = ok() } else { resp = try dispatch(cmd, req) }
                 }
             } catch let e as AgentError { resp = fail(e.msg) } catch { resp = fail("\(error)") }
@@ -197,6 +199,8 @@ func serve(_ c: Int32) -> Bool {
 func dispatch(_ cmd: String, _ a: Dict) throws -> Dict {
     _ = CFRunLoopRunInMode(CFRunLoopMode.defaultMode, 0, true)
     if cmd == "task" { return taskCmd(a) }
+    if cmd == "note" { return noteCmd(a) }
+    if cmd == "hide" { return hideCmd(a) }
     if let label = actionLabel(cmd, a) {
         actionText = label; actionAt = Date()
         if !overlayOn { overlayOn = true; overlayStart = Date() }
@@ -242,6 +246,12 @@ var taskEnd: Date? = nil
 var actionText = ""
 var actionAt = Date()
 var keyText = ""
+var feedLines: [String] = []
+// hide: announced in the panel until hideAt, hidden until hideUntil; overlayLeft: the panel sits top-left
+var hideAt = Date.distantPast, hideUntil = Date.distantPast
+var overlayLeft = false
+let hideNotice = 1.5, hideMax = 60.0, hideAfterStart = 5.0
+func overlayHidden(_ now: Date = Date()) -> Bool { now >= hideAt && now < hideUntil }
 var keyAt = Date.distantPast
 var textAt = Date.distantPast
 let keySymbols: [String: String] = [
@@ -296,13 +306,17 @@ func overlayText() -> NSAttributedString {
     let now = Date()
     let white = NSColor(white: 0.96, alpha: 1), dim = NSColor(white: 0.72, alpha: 1)
     let out = NSMutableAttributedString()
+    let shade = textShadow(1.5)
     func add(_ t: String, _ size: CGFloat, _ w: NSFont.Weight, _ c: NSColor) {
-        out.append(NSAttributedString(string: t, attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: size, weight: w), .foregroundColor: c]))
+        out.append(NSAttributedString(string: t, attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: size, weight: w),
+                                                              .foregroundColor: c, .shadow: shade]))
     }
     add(tr("Claude steuert diesen Rechner", "Claude is controlling this computer"), 13, .semibold, white)
     if !sessionName.isEmpty { add("\nSession " + clip(sessionName, 40), 11, .regular, dim) }
     if !taskText.isEmpty { add("\n" + clip(taskText, 60), 12, .regular, white) }
-    if !actionText.isEmpty {
+    if now < hideAt && hideUntil > now {
+        add("\n▸ " + tr("blendet sich für ", "hiding for ") + mmss(hideUntil.timeIntervalSince(hideAt)) + tr(" aus", ""), 12, .semibold, .systemYellow)
+    } else if !actionText.isEmpty {
         add("\n▸ " + clip(actionText, 40) + " · " + tr("vor ", "") + mmss(now.timeIntervalSince(actionAt)) + tr("", " ago"), 12, .regular, white)
     }
     // the last keys or typed text, large and yellow, for a few seconds
@@ -321,7 +335,33 @@ func overlayText() -> NSAttributedString {
     return out
 }
 
+// a dark glow behind light text keeps it readable over any background, without a blurred plate
+func textShadow(_ blur: CGFloat) -> NSShadow {
+    let s = NSShadow()
+    s.shadowColor = NSColor(white: 0, alpha: 0.9)
+    s.shadowBlurRadius = blur
+    s.shadowOffset = NSSize(width: 0, height: -1)
+    return s
+}
+
+// the controlling session's latest activity, below the plate and without one of its own
+func feedText() -> NSAttributedString {
+    let out = NSMutableAttributedString()
+    let para = NSMutableParagraphStyle()
+    para.lineBreakMode = .byWordWrapping
+    para.paragraphSpacing = 3
+    for (i, line) in feedLines.enumerated() {
+        let last = i == feedLines.count - 1
+        out.append(NSAttributedString(string: (i > 0 ? "\n" : "") + line, attributes: [
+            .font: NSFont.systemFont(ofSize: 11.5, weight: last ? .medium : .regular),
+            .foregroundColor: NSColor(white: last ? 1 : 0.86, alpha: 1), .shadow: textShadow(3), .paragraphStyle: para]))
+    }
+    return out
+}
+
 var overlayIcon: NSImageView? = nil
+var overlayBox: NSView? = nil
+var overlayFeed: NSTextField? = nil
 var overlayDrawn = Date.distantPast
 
 // a yellow ring around the mouse pointer while the computer is controlled, so the person can follow it
@@ -379,20 +419,20 @@ func makeOverlay() {
     p.level = .screenSaver
     p.isOpaque = false
     p.backgroundColor = .clear
-    p.hasShadow = true
+    p.hasShadow = false
     p.ignoresMouseEvents = true
     p.hidesOnDeactivate = false
     p.isReleasedWhenClosed = false
     p.sharingType = .none
     p.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
-    // fixed dark plate with a yellow rim: reads as a warning on light and dark desktops alike
-    let bg = NSView(frame: p.contentView!.bounds)
+    let root = NSView(frame: p.contentView!.bounds)
+    // see-through dark plate (no blur) with a yellow rim: the desktop behind stays visible, the rim still reads as a warning
+    let bg = NSView(frame: root.bounds)
     bg.wantsLayer = true
-    bg.layer?.backgroundColor = NSColor(white: 0.11, alpha: 0.94).cgColor
+    bg.layer?.backgroundColor = NSColor(white: 0.08, alpha: 0.45).cgColor
     bg.layer?.cornerRadius = 9
     bg.layer?.borderWidth = 1.5
     bg.layer?.borderColor = NSColor.systemYellow.cgColor
-    bg.autoresizingMask = [.width, .height]
     let icon = NSImageView(frame: .zero)
     if let img = NSImage(systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: nil) {
         let cfg = NSImage.SymbolConfiguration(pointSize: 20, weight: .semibold).applying(.init(paletteColors: [.black, .systemYellow]))
@@ -403,8 +443,15 @@ func makeOverlay() {
     l.maximumNumberOfLines = 0
     l.lineBreakMode = .byTruncatingTail
     bg.addSubview(l)
-    p.contentView = bg
+    root.addSubview(bg)
+    let f = NSTextField(labelWithString: "")
+    f.maximumNumberOfLines = 0
+    f.lineBreakMode = .byWordWrapping
+    root.addSubview(f)
+    p.contentView = root
     overlayPanel = p
+    overlayBox = bg
+    overlayFeed = f
     overlayLabel = l
     overlayIcon = icon
 }
@@ -416,6 +463,9 @@ func overlayTick() {
     ringAtCocoa(NSEvent.mouseLocation)
     if overlayPanel == nil { makeOverlay() }
     guard let p = overlayPanel, let l = overlayLabel else { return }
+    if overlayHidden() { if p.isVisible { p.orderOut(nil); CATransaction.flush() }; return }
+    // the announcement must be on screen while it runs
+    if Date() < hideAt && hideUntil > Date() { overlayDrawn = .distantPast }
     // the text only needs a few redraws a second; the ring above follows the mouse at the tick rate
     if p.isVisible && Date().timeIntervalSince(overlayDrawn) < 0.25 && Date().timeIntervalSince(actionAt) > 0.3
         && Date().timeIntervalSince(keyAt) > 0.3 { return }
@@ -424,11 +474,19 @@ func overlayTick() {
     let width: CGFloat = 300, pad: CGFloat = 9, iconW: CGFloat = 26
     let textW = width - 2 * pad - iconW - 8
     let th = ceil(l.sizeThatFits(NSSize(width: textW, height: 400)).height)
-    let h = th + 2 * pad
+    let boxH = th + 2 * pad
+    var fh: CGFloat = 0
+    if let f = overlayFeed {
+        f.attributedStringValue = feedText()
+        fh = feedLines.isEmpty ? 0 : ceil(f.sizeThatFits(NSSize(width: width - 2 * pad, height: 200)).height) + 2
+    }
+    let h = boxH + (fh > 0 ? 6 + fh : 0)
     let vf = (NSScreen.screens.first ?? NSScreen.main)?.visibleFrame ?? NSRect(x: 0, y: 0, width: 800, height: 600)
-    p.setFrame(NSRect(x: vf.maxX - width - 10, y: vf.maxY - h - 10, width: width, height: h), display: false)
+    p.setFrame(NSRect(x: overlayLeft ? vf.minX + 10 : vf.maxX - width - 10, y: vf.maxY - h - 10, width: width, height: h), display: false)
+    overlayBox?.frame = NSRect(x: 0, y: h - boxH, width: width, height: boxH)
+    overlayFeed?.frame = NSRect(x: pad, y: 0, width: width - 2 * pad, height: fh)
     l.frame = NSRect(x: pad + iconW + 8, y: pad, width: textW, height: th)
-    overlayIcon?.frame = NSRect(x: pad, y: h - pad - iconW, width: iconW, height: iconW)
+    overlayIcon?.frame = NSRect(x: pad, y: boxH - pad - iconW, width: iconW, height: iconW)
     if !p.isVisible { p.orderFrontRegardless() }
     p.displayIfNeeded()
     CATransaction.flush()
@@ -442,7 +500,8 @@ func overlayHide() {
 
 func taskCmd(_ a: Dict) -> Dict {
     if bool(a, "done") {
-        taskText = ""; taskEnd = nil; actionText = ""; sessionName = ""; keyText = ""; ownerPid = 0
+        taskText = ""; taskEnd = nil; actionText = ""; sessionName = ""; keyText = ""; feedLines = []; ownerPid = 0
+        hideUntil = .distantPast
         overlayOn = false
         overlayHide()
         return ["ok": true, "overlay": "hidden"]
@@ -453,11 +512,59 @@ func taskCmd(_ a: Dict) -> Dict {
     // a lease is at most 5 min; a longer job renews it with another task call
     if has(a, "eta") { let e = min(num(a, "eta", 0), leaseMax); taskEnd = e > 0 ? Date().addingTimeInterval(e) : nil }
     if !overlayOn { overlayOn = true; overlayStart = Date() }
+    hideUntil = .distantPast // a renewed lease is shown again
     overlayDrawn = .distantPast
     overlayTick()
     var r: Dict = ["ok": true, "overlay": "shown"]
     if let end = taskEnd { r["lease_left"] = Int(end.timeIntervalSinceNow.rounded()) }
     return r
+}
+
+// the controlling session's last chat lines and tool steps; each entry wraps to at most two lines
+func noteCmd(_ a: Dict) -> Dict {
+    guard overlayOn else { return ["ok": true, "shown": false] }
+    let raw = (a["lines"] as? [Any]) ?? []
+    let lines = raw.map { "\($0)".split(whereSeparator: { $0.isWhitespace }).joined(separator: " ") }
+        .filter { !$0.isEmpty }.map { clip($0, 100) } // about two lines at this width
+    feedLines = Array(lines.suffix(2))
+    overlayDrawn = .distantPast
+    overlayTick()
+    return ["ok": true, "shown": true]
+}
+
+// hide the panel for a while (the ring stays), announced in the panel first; never right at the start of a task
+func hideCmd(_ a: Dict) -> Dict {
+    var secs = num(a, "secs", 0)
+    let now = Date()
+    if secs <= 0 {
+        hideUntil = .distantPast
+        overlayDrawn = .distantPast
+        overlayTick()
+        return ["ok": true, "overlay": "shown"]
+    }
+    guard overlayOn else { return fail("no task is shown: announce the work with task first") }
+    let since = now.timeIntervalSince(overlayStart)
+    if since < hideAfterStart {
+        return fail("the overlay must stay visible for the first \(Int(hideAfterStart)) s of a task, retry in \(Int((hideAfterStart - since).rounded(.up))) s")
+    }
+    secs = min(secs, hideMax)
+    if let end = taskEnd { secs = min(secs, max(0, end.timeIntervalSince(now) - hideNotice)) }
+    if secs <= 0 { return fail("the lease ends too soon to hide the overlay: renew it with task --eta first") }
+    hideAt = now.addingTimeInterval(hideNotice); hideUntil = hideAt.addingTimeInterval(secs)
+    overlayDrawn = .distantPast
+    overlayTick()
+    return ["ok": true, "notice": hideNotice, "hidden_for": Int(secs.rounded())]
+}
+
+// the next pointer target (CoreGraphics coordinates) lies under or right next to the panel: move it to the other top corner
+func overlayAvoid(_ q: CGPoint) {
+    guard overlayOn, let p = overlayPanel, p.isVisible else { return }
+    let h = NSScreen.screens.first?.frame.height ?? mainDisplayRect().height
+    if p.frame.insetBy(dx: -40, dy: -40).contains(NSPoint(x: q.x, y: h - q.y)) {
+        overlayLeft.toggle()
+        overlayDrawn = .distantPast
+        overlayTick()
+    }
 }
 
 // ---------- session state ----------
@@ -1184,6 +1291,7 @@ func mouseEvent(_ type: CGEventType, _ p: CGPoint, _ btn: CGMouseButton, clicks:
 
 // a short glide (at most ~0.1 s) instead of a jump, so the person can follow where the pointer goes
 func moveMouse(_ p: CGPoint) {
+    overlayAvoid(p)
     let from = CGEvent(source: nil)?.location ?? p
     let d = hypot(p.x - from.x, p.y - from.y)
     let steps = d < 8 ? 1 : min(10, max(4, Int(d / 80)))
@@ -1232,6 +1340,7 @@ func moveCmd(_ a: Dict) throws -> Dict {
 func drag(_ a: Dict) throws -> Dict {
     try requireInput()
     let p1 = try point(a, "x", "y"), p2 = try point(a, "x2", "y2")
+    overlayAvoid(p2)
     moveMouse(p1)
     mouseEvent(.leftMouseDown, p1, .left)
     sleepMs(60)

@@ -23,7 +23,7 @@ class AgentError : Exception { public AgentError(string m) : base(m) { } }
 
 static class Agent
 {
-    const string Version = "2"; // bump with every behaviour change; setup refuses to replace a newer agent
+    const string Version = "3"; // bump with every behaviour change; setup refuses to replace a newer agent
     static string token, build = "", dir, stateFile;
     static int idleMinutes = 3;
     // control lease: input needs an announced slot of at most 5 min; after it ends plus a short grace the agent quits
@@ -108,6 +108,7 @@ static class Agent
             try { line = reader.ReadLine(); } catch (IOException) { return false; }
             if (line == null) return false;
             if (line.Trim().Length == 0) continue;
+            DateTime prevRequest = lastRequest;
             lastRequest = DateTime.UtcNow;
             Dictionary<string, object> resp; bool quit = false;
             try
@@ -115,6 +116,7 @@ static class Agent
                 var req = Json.Deserialize<Dictionary<string, object>>(line);
                 if (!TokenOk(Str(req, "token", ""))) { resp = Fail("bad token"); writer.WriteLine(Json.Serialize(resp)); writer.Flush(); return false; }
                 string cmd = Str(req, "cmd", "");
+                if (cmd == "note") lastRequest = prevRequest; // the activity feed alone does not count as use
                 if (cmd == "quit") { quit = true; resp = Ok(); }
                 else resp = Dispatch(cmd, req);
             }
@@ -141,6 +143,8 @@ static class Agent
     static Dictionary<string, object> Dispatch(string cmd, Dictionary<string, object> a)
     {
         if (cmd == "task") return Overlay.Task(a);
+        if (cmd == "note") return Overlay.Note(a);
+        if (cmd == "hide") return Overlay.Hide(a);
         string label = Overlay.Label(cmd, a);
         if (label != null) Overlay.Action(label);
         switch (cmd)
@@ -175,6 +179,11 @@ static class Agent
         static readonly object gate = new object();
         static readonly bool de = System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "de";
         static bool on; static DateTime start, actionAt; static DateTime? end; static string task = "", action = "", session = "", keys = "";
+        static string[] feed = new string[0];
+        // hide: announced from hideAt-HideNotice until hideAt, hidden until hideUntil; left: panel sits top-left
+        static DateTime hideAt = DateTime.MinValue, hideUntil = DateTime.MinValue;
+        static bool left; static Rectangle panelRect;
+        const double HideNotice = 1.5, HideMax = 60, HideAfterStart = 5;
         static DateTime keysAt = DateTime.MinValue;
         internal static volatile bool warn;
         static Panel form; static Ring ring; static Thread thread;
@@ -228,7 +237,7 @@ static class Agent
             var r = Ok();
             lock (gate)
             {
-                if (Bool(a, "done")) { on = false; task = ""; action = ""; session = ""; keys = ""; end = null; r["overlay"] = "hidden"; }
+                if (Bool(a, "done")) { on = false; task = ""; action = ""; session = ""; keys = ""; feed = new string[0]; end = null; hideUntil = DateTime.MinValue; r["overlay"] = "hidden"; }
                 else
                 {
                     if (Has(a, "text")) task = Str(a, "text", "");
@@ -236,6 +245,7 @@ static class Agent
                     // a lease is at most 5 min; a longer job renews it with another task call
                     if (Has(a, "eta")) { double e = Math.Min(Dbl(a, "eta", 0), LeaseMax); end = e > 0 ? DateTime.UtcNow.AddSeconds(e) : (DateTime?)null; }
                     if (!on) { on = true; start = DateTime.UtcNow; }
+                    hideUntil = DateTime.MinValue; // a renewed lease is shown again
                     r["overlay"] = "shown";
                     if (end.HasValue) r["lease_left"] = (int)Math.Round((end.Value - DateTime.UtcNow).TotalSeconds);
                 }
@@ -244,17 +254,80 @@ static class Agent
             return r;
         }
 
+        // the controlling session's latest activity (its last chat lines and tool steps), shown below the panel
+        internal static Dictionary<string, object> Note(Dictionary<string, object> a)
+        {
+            var l = new List<string>();
+            object v;
+            var items = a.TryGetValue("lines", out v) ? v as IEnumerable : null;
+            if (items != null)
+                foreach (object o in items)
+                {
+                    string s = Convert.ToString(o) ?? "";
+                    s = string.Join(" ", s.Split((char[])null, StringSplitOptions.RemoveEmptyEntries));
+                    if (s.Length > 0) l.Add(Clip(s, 160));
+                }
+            if (l.Count > 2) l = l.GetRange(l.Count - 2, 2);
+            bool shown;
+            lock (gate) { shown = on; if (on) feed = l.ToArray(); }
+            if (shown) Refresh();
+            var r = Ok(); r["shown"] = shown; return r;
+        }
+
+        // hide the panel for a while, announced in the panel first; never right at the start of a task
+        internal static Dictionary<string, object> Hide(Dictionary<string, object> a)
+        {
+            double secs = Dbl(a, "secs", 0);
+            lock (gate)
+            {
+                var now = DateTime.UtcNow;
+                if (secs <= 0) { hideUntil = DateTime.MinValue; }
+                else
+                {
+                    if (!on) return Fail("no task is shown: announce the work with task first");
+                    double since = (now - start).TotalSeconds;
+                    if (since < HideAfterStart)
+                        return Fail("the overlay must stay visible for the first " + (int)HideAfterStart + " s of a task, retry in " + Math.Ceiling(HideAfterStart - since) + " s");
+                    secs = Math.Min(secs, HideMax);
+                    if (end.HasValue) secs = Math.Min(secs, Math.Max(0, (end.Value - now).TotalSeconds - HideNotice));
+                    if (secs <= 0) return Fail("the lease ends too soon to hide the overlay: renew it with task --eta first");
+                    hideAt = now.AddSeconds(HideNotice); hideUntil = hideAt.AddSeconds(secs);
+                }
+            }
+            Refresh();
+            var r = Ok();
+            if (secs > 0) { r["notice"] = HideNotice; r["hidden_for"] = (int)Math.Round(secs); } else r["overlay"] = "shown";
+            return r;
+        }
+
+        // the next pointer target lies under (or right next to) the panel: move the panel to the other top corner
+        internal static void Avoid(int x, int y)
+        {
+            bool moved = false;
+            lock (gate)
+            {
+                if (!on || panelRect.IsEmpty) return;
+                var r = panelRect; r.Inflate(40, 40);
+                if (r.Contains(x, y)) { left = !left; moved = true; }
+            }
+            if (moved) Refresh();
+        }
+
+        internal static string[] Feed() { lock (gate) return on ? feed : new string[0]; }
+
         // lines: bold header, optional session (small), optional task, current action, keys (large), small meta line
         internal static string[] Lines(out bool visible)
         {
             lock (gate)
             {
-                visible = on;
                 var now = DateTime.UtcNow;
+                visible = on && !(now >= hideAt && now < hideUntil);
                 var l = new List<string> { T("Claude steuert diesen Rechner", "Claude is controlling this computer") };
                 l.Add(session.Length > 0 ? "Session " + Clip(session, 40) : null);
                 l.Add(task.Length > 0 ? Clip(task, 60) : null);
-                l.Add(action.Length > 0 ? "▸ " + Clip(action, 40) + " · " + T("vor ", "") + Mmss((now - actionAt).TotalSeconds) + T("", " ago") : null);
+                if (now < hideAt && hideUntil > now)
+                    l.Add("▸ " + T("blendet sich für ", "hiding for ") + Mmss((hideUntil - hideAt).TotalSeconds) + T(" aus", ""));
+                else l.Add(action.Length > 0 ? "▸ " + Clip(action, 40) + " · " + T("vor ", "") + Mmss((now - actionAt).TotalSeconds) + T("", " ago") : null);
                 l.Add(keys.Length > 0 && (now - keysAt).TotalSeconds < 4 ? "⌨ " + Clip(keys, 34) : null);
                 string meta = T("läuft ", "running ") + Mmss((now - start).TotalSeconds);
                 bool w = false;
@@ -312,11 +385,12 @@ static class Agent
             if (hide) Thread.Sleep(60);
         }
 
+        // Per-pixel alpha (UpdateLayeredWindow): a see-through dark plate with opaque text, no blur, and the
+        // session's activity feed below it without any plate, readable through a dark halo around the letters.
         class Panel : Form
         {
             readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer { Interval = 500 };
-            string[] lines = new string[0];
-            Font head, body, small, big;
+            Font head, body, small, big, note;
             float dpi = 1;
 
             public Panel()
@@ -324,9 +398,6 @@ static class Agent
                 FormBorderStyle = FormBorderStyle.None;
                 ShowInTaskbar = false;
                 StartPosition = FormStartPosition.Manual;
-                BackColor = Color.FromArgb(28, 28, 28);
-                Opacity = 0.95;
-                DoubleBuffered = true;
                 timer.Tick += (s, e) => Tick();
                 timer.Start();
             }
@@ -336,73 +407,135 @@ static class Agent
                 // LAYERED | TRANSPARENT (click-through) | TOOLWINDOW (no taskbar, not in window lists) | TOPMOST | NOACTIVATE
                 get { var cp = base.CreateParams; cp.ExStyle |= 0x80000 | 0x20 | 0x80 | 0x8 | 0x08000000; return cp; }
             }
+            Font F(string face, float pt) { return new Font(face, pt * 96f / 72f * dpi, FontStyle.Regular, GraphicsUnit.Pixel); }
             protected override void OnHandleCreated(EventArgs e)
             {
                 base.OnHandleCreated(e);
                 try { excluded = Native.SetWindowDisplayAffinity(Handle, 0x11); } catch { excluded = false; }
                 using (var g = CreateGraphics()) dpi = g.DpiX / 96f;
-                head = new Font("Segoe UI Semibold", 10f, FontStyle.Regular, GraphicsUnit.Point);
-                body = new Font("Segoe UI", 9.5f, FontStyle.Regular, GraphicsUnit.Point);
-                small = new Font("Segoe UI", 8.5f, FontStyle.Regular, GraphicsUnit.Point);
-                big = new Font("Segoe UI Semibold", 13f, FontStyle.Regular, GraphicsUnit.Point);
+                head = F("Segoe UI Semibold", 10f); body = F("Segoe UI", 9.5f); small = F("Segoe UI", 8.5f);
+                big = F("Segoe UI Semibold", 13f); note = F("Segoe UI", 9f);
             }
 
             internal void Tick()
             {
                 bool visible;
-                lines = Lines(out visible);
+                string[] lines = Lines(out visible);
                 if (!visible) { if (Native.IsWindowVisible(Handle)) Native.ShowWindow(Handle, 0); return; }
+                string[] feed = Feed();
                 int pad = (int)(9 * dpi), icon = (int)(24 * dpi), gap = (int)(8 * dpi), width = (int)(300 * dpi);
-                int textW = width - 2 * pad - icon - gap, h = 0;
-                for (int i = 0; i < lines.Length; i++)
-                    if (lines[i] != null) h += TextRenderer.MeasureText(lines[i], FontFor(i), new Size(textW, 0), TextFormatFlags.SingleLine).Height;
-                int height = Math.Max(h, icon) + 2 * pad;
-                var wa = Screen.PrimaryScreen.WorkingArea;
-                Bounds = new Rectangle(wa.Right - width - (int)(10 * dpi), wa.Top + (int)(10 * dpi), width, height);
-                using (var path = Rounded(new Rectangle(0, 0, width, height), (int)(9 * dpi))) Region = new Region(path);
+                int textW = width - 2 * pad - icon - gap;
+                var yellow = Color.FromArgb(255, 204, 0);
+                using (var one = new StringFormat(StringFormatFlags.NoWrap) { Trimming = StringTrimming.EllipsisCharacter })
+                using (var wrap = new StringFormat(StringFormatFlags.LineLimit) { Trimming = StringTrimming.EllipsisWord })
+                using (var probe = new Bitmap(1, 1))
+                using (var pg = Graphics.FromImage(probe))
+                {
+                    int h = 0;
+                    var lh = new int[lines.Length];
+                    for (int i = 0; i < lines.Length; i++)
+                        if (lines[i] != null) { lh[i] = (int)Math.Ceiling(FontFor(i, lines.Length).GetHeight(pg)); h += lh[i]; }
+                    int boxH = Math.Max(h, icon) + 2 * pad;
+                    // each feed entry wraps to at most two lines
+                    int nl = (int)Math.Ceiling(note.GetHeight(pg)), fgap = (int)(6 * dpi), fw = width - 2 * pad;
+                    var fh = new int[feed.Length];
+                    int total = boxH;
+                    for (int i = 0; i < feed.Length; i++)
+                    {
+                        var sz = pg.MeasureString(feed[i], note, fw, wrap);
+                        fh[i] = Math.Min(2 * nl, Math.Max(nl, (int)Math.Ceiling(sz.Height)));
+                        total += (i == 0 ? fgap : (int)(2 * dpi)) + fh[i];
+                    }
+                    total += (int)(3 * dpi); // room for the halo
+                    using (var bmp = new Bitmap(width, total, PixelFormat.Format32bppArgb))
+                    {
+                        using (var g = Graphics.FromImage(bmp))
+                        {
+                            g.Clear(Color.Transparent);
+                            g.SmoothingMode = SmoothingMode.AntiAlias;
+                            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+                            using (var path = Rounded(new RectangleF(1, 1, width - 2, boxH - 2), 8 * dpi))
+                            {
+                                using (var fill = new SolidBrush(Color.FromArgb(110, 18, 18, 18))) g.FillPath(fill, path);
+                                using (var pen = new Pen(yellow, 2f * dpi)) g.DrawPath(pen, path);
+                            }
+                            // warning triangle with an exclamation mark
+                            var tri = new[] { new PointF(pad + icon / 2f, pad + 1), new PointF(pad + icon, pad + icon - 2), new PointF(pad, pad + icon - 2) };
+                            using (var b = new SolidBrush(yellow)) g.FillPolygon(b, tri);
+                            using (var f = new Font("Segoe UI", icon * 0.42f, FontStyle.Bold, GraphicsUnit.Pixel))
+                            using (var c = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
+                            using (var b = new SolidBrush(Color.Black))
+                                g.DrawString("!", f, b, new RectangleF(pad, pad + icon / 5f, icon, icon * 4f / 5f), c);
+                            int x = pad + icon + gap, y = pad;
+                            for (int i = 0; i < lines.Length; i++)
+                            {
+                                if (lines[i] == null) continue;
+                                bool last = i == lines.Length - 1;
+                                var color = i == KeyLine || (last && warn) ? yellow
+                                    : i == 1 || last ? Color.FromArgb(205, 205, 205) : Color.FromArgb(250, 250, 250);
+                                Halo(g, lines[i], FontFor(i, lines.Length), color, new RectangleF(x, y, textW, lh[i]), one, 1);
+                                y += lh[i];
+                            }
+                            y = boxH;
+                            for (int i = 0; i < feed.Length; i++)
+                            {
+                                y += i == 0 ? fgap : (int)(2 * dpi);
+                                Halo(g, feed[i], note, i == feed.Length - 1 ? Color.FromArgb(255, 255, 255) : Color.FromArgb(215, 215, 215),
+                                    new RectangleF(pad, y, fw, fh[i]), wrap, 2);
+                                y += fh[i];
+                            }
+                        }
+                        var wa = Screen.PrimaryScreen.WorkingArea;
+                        bool l; lock (gate) l = left;
+                        int px = l ? wa.Left + (int)(10 * dpi) : wa.Right - width - (int)(10 * dpi), py = wa.Top + (int)(10 * dpi);
+                        lock (gate) panelRect = new Rectangle(px, py, width, total);
+                        Push(bmp, px, py);
+                    }
+                }
                 if (!Native.IsWindowVisible(Handle)) Native.ShowWindow(Handle, 4); // SW_SHOWNOACTIVATE
                 Native.SetWindowPos(Handle, new IntPtr(-1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010 | 0x0040); // stay topmost
-                Invalidate();
             }
 
-            Font FontFor(int i) { return i == 0 ? head : i == KeyLine ? big : i == 1 || i == lines.Length - 1 ? small : body; }
+            // text over an unknown background: a dark halo first, then the text itself
+            void Halo(Graphics g, string s, Font font, Color color, RectangleF r, StringFormat fmt, int strength)
+            {
+                float o = Math.Max(1f, dpi);
+                using (var shade = new SolidBrush(Color.FromArgb(strength > 1 ? 170 : 140, 0, 0, 0)))
+                {
+                    if (strength > 1)
+                        foreach (var d in new[] { new PointF(-o, 0), new PointF(o, 0), new PointF(0, -o), new PointF(0, o) })
+                            g.DrawString(s, font, shade, new RectangleF(r.X + d.X, r.Y + d.Y, r.Width, r.Height), fmt);
+                    g.DrawString(s, font, shade, new RectangleF(r.X + o, r.Y + o, r.Width, r.Height), fmt);
+                }
+                using (var b = new SolidBrush(color)) g.DrawString(s, font, b, r, fmt);
+            }
+
+            void Push(Bitmap bmp, int x, int y)
+            {
+                IntPtr screen = Native.GetDC(IntPtr.Zero), mem = Native.CreateCompatibleDC(screen);
+                IntPtr hbmp = bmp.GetHbitmap(Color.FromArgb(0)), old = Native.SelectObject(mem, hbmp);
+                try
+                {
+                    var size = new Native.SIZE { cx = bmp.Width, cy = bmp.Height };
+                    var src = new Native.POINT(); var dst = new Native.POINT { X = x, Y = y };
+                    var blend = new Native.BLENDFUNCTION { BlendOp = 0, BlendFlags = 0, SourceConstantAlpha = 255, AlphaFormat = 1 };
+                    Native.UpdateLayeredWindow(Handle, screen, ref dst, ref size, mem, ref src, 0, ref blend, 2); // ULW_ALPHA
+                }
+                finally
+                {
+                    Native.SelectObject(mem, old); Native.DeleteObject(hbmp); Native.DeleteDC(mem); Native.ReleaseDC(IntPtr.Zero, screen);
+                }
+            }
+
+            Font FontFor(int i, int n) { return i == 0 ? head : i == KeyLine ? big : i == 1 || i == n - 1 ? small : body; }
             const int KeyLine = 4;
 
-            static GraphicsPath Rounded(Rectangle r, int rad)
+            static GraphicsPath Rounded(RectangleF r, float rad)
             {
-                var p = new GraphicsPath(); int d = rad * 2;
+                var p = new GraphicsPath(); float d = rad * 2;
                 p.AddArc(r.X, r.Y, d, d, 180, 90); p.AddArc(r.Right - d, r.Y, d, d, 270, 90);
                 p.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90); p.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
                 p.CloseFigure(); return p;
-            }
-
-            protected override void OnPaint(PaintEventArgs e)
-            {
-                var g = e.Graphics;
-                g.SmoothingMode = SmoothingMode.AntiAlias;
-                int pad = (int)(9 * dpi), icon = (int)(24 * dpi), gap = (int)(8 * dpi);
-                var yellow = Color.FromArgb(255, 204, 0);
-                using (var pen = new Pen(yellow, 2f * dpi))
-                using (var path = Rounded(new Rectangle(1, 1, Width - 3, Height - 3), (int)(8 * dpi))) g.DrawPath(pen, path);
-                // warning triangle with an exclamation mark
-                var tri = new[] { new PointF(pad + icon / 2f, pad + 1), new PointF(pad + icon, pad + icon - 2), new PointF(pad, pad + icon - 2) };
-                using (var b = new SolidBrush(yellow)) g.FillPolygon(b, tri);
-                using (var f = new Font("Segoe UI", icon * 0.42f, FontStyle.Bold, GraphicsUnit.Pixel))
-                    TextRenderer.DrawText(g, "!", f, new Rectangle(pad, pad + icon / 5, icon, icon * 4 / 5), Color.Black,
-                        TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
-                int x = pad + icon + gap, y = pad, textW = Width - x - pad;
-                for (int i = 0; i < lines.Length; i++)
-                {
-                    if (lines[i] == null) continue;
-                    var font = FontFor(i);
-                    bool last = i == lines.Length - 1;
-                    var color = i == KeyLine || (last && warn) ? yellow
-                        : i == 1 || last ? Color.FromArgb(184, 184, 184) : Color.FromArgb(245, 245, 245);
-                    int lh = TextRenderer.MeasureText(lines[i], font, new Size(textW, 0), TextFormatFlags.SingleLine).Height;
-                    TextRenderer.DrawText(g, lines[i], font, new Rectangle(x, y, textW, lh), color,
-                        TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
-                    y += lh;
-                }
             }
         }
 
@@ -432,6 +565,8 @@ static class Agent
             {
                 base.OnHandleCreated(e);
                 try { Native.SetWindowDisplayAffinity(Handle, 0x11); } catch { }
+                // WS_EX_LAYERED without SetLayeredWindowAttributes (or UpdateLayeredWindow) is never drawn
+                Native.SetLayeredWindowAttributes(Handle, 0, 255, 2); // LWA_ALPHA, fully opaque
                 float dpi;
                 using (var g = CreateGraphics()) dpi = g.DpiX / 96f;
                 size = (int)(46 * dpi); rim = Math.Max(3, (int)(4 * dpi));
@@ -1051,6 +1186,7 @@ static class Agent
     // the visible pointer glides to the target (about 0.1-0.2 s) so the person can follow it
     static void GlideTo(int x, int y)
     {
+        Overlay.Avoid(x, y);
         var from = System.Windows.Forms.Cursor.Position;
         double dist = Math.Sqrt((double)(x - from.X) * (x - from.X) + (double)(y - from.Y) * (y - from.Y));
         int steps = dist < 8 ? 0 : (int)Math.Min(14, Math.Max(5, dist / 60));
@@ -1138,6 +1274,7 @@ static class Agent
     {
         RequireInput();
         int[] p1 = Point(a, "x", "y"), p2 = Point(a, "x2", "y2");
+        Overlay.Avoid(p2[0], p2[1]);
         GlideTo(p1[0], p1[1]); Thread.Sleep(30);
         Mouse(0x0002, 0); Thread.Sleep(60);
         int steps = 12;
@@ -1414,6 +1551,16 @@ static class Native
     [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
     [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb, IntPtr l);
     [DllImport("user32.dll")] public static extern bool SetWindowDisplayAffinity(IntPtr h, uint affinity);
+    [StructLayout(LayoutKind.Sequential)] public struct SIZE { public int cx, cy; }
+    [StructLayout(LayoutKind.Sequential, Pack = 1)] public struct BLENDFUNCTION { public byte BlendOp, BlendFlags, SourceConstantAlpha, AlphaFormat; }
+    [DllImport("user32.dll", SetLastError = true)] public static extern bool UpdateLayeredWindow(IntPtr h, IntPtr dstDc, ref POINT dst, ref SIZE size, IntPtr srcDc, ref POINT src, uint key, ref BLENDFUNCTION blend, uint flags);
+    [DllImport("user32.dll")] public static extern bool SetLayeredWindowAttributes(IntPtr h, uint key, byte alpha, uint flags);
+    [DllImport("user32.dll")] public static extern IntPtr GetDC(IntPtr h);
+    [DllImport("user32.dll")] public static extern int ReleaseDC(IntPtr h, IntPtr dc);
+    [DllImport("gdi32.dll")] public static extern IntPtr CreateCompatibleDC(IntPtr dc);
+    [DllImport("gdi32.dll")] public static extern bool DeleteDC(IntPtr dc);
+    [DllImport("gdi32.dll")] public static extern IntPtr SelectObject(IntPtr dc, IntPtr obj);
+    [DllImport("gdi32.dll")] public static extern bool DeleteObject(IntPtr obj);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, StringBuilder sb, int n);
     [DllImport("user32.dll")] public static extern int GetWindowTextLength(IntPtr h);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);

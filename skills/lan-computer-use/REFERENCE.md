@@ -46,7 +46,7 @@ Select a target with `-t NAME`, `LCU_TARGET`, or the config `default`. A name th
 
 ## Overlay (`task`)
 
-`task "TEXT" --eta 5m` shows a compact warning panel in the top right corner of the target's screen. The panel has a yellow border and a yellow warning icon. It shows:
+`task "TEXT" --eta 5m` shows a compact warning panel in the top right corner of the target's screen. The panel is see-through (a light dark tint, no blur, so the screen behind stays visible) with a yellow border and a yellow warning icon; its text carries a dark shadow to stay readable on any background. It shows:
 
 - the header ("Claude steuert diesen Rechner" or "Claude is controlling this computer");
 - the controlling session's name, so the person can tell which agent session is acting. This is `LCU_SESSION` if set, otherwise the Claude Code session name (`~/.claude/sessions/<CLAUDE_PID>.json`), otherwise the name of the working directory;
@@ -55,7 +55,13 @@ Select a target with `-t NAME`, `LCU_TARGET`, or the config `default`. A name th
 - the last pressed keys (e.g. ⌘⇧T, Ctrl+S ×2) or typed text („Hallo“, clipped to 30 characters, password fields only as dots), large and yellow for 4 s;
 - the time left on the lease ("Freigabe noch 2:41"), yellow in the last minute, or after it ends "Zeit abgelaufen · Ende in 0:42".
 
+Below the panel, without a frame, the overlay shows the controlling session's last one or two steps: its latest chat text or visible thinking, and tool steps as "▸ description" (each clipped to about two lines). The controlled window usually covers the Claude Code chat, so this shows what the session is doing right now. After a successful `task`, `cu` starts a small detached worker that tails the session's transcript (`~/.claude/projects/*/<sessionId>.jsonl`, found via `CLAUDE_PID` or `CLAUDE_CODE_SESSION_ID`; `CLAUDE_CONFIG_DIR` is honoured) every 1.5 s and sends the lines with the `note` command. A `note` does not count as use for the idle timer. The worker exits with the lease (plus 60 s grace), on `task --done` or `down`, or when the session is gone. `LCU_FEED=0` turns the feed off; without a Claude Code session there is no feed.
+
 While the overlay is up, a yellow ring follows the mouse pointer and the pointer glides to its targets, so the person can follow every move. `task --done` hides the panel and the ring. Every input command updates the action line by itself; `task` again only changes the text or renews the lease.
+
+When a mouse target (move, click, drag end point) lies on the panel or within 40 px of it, the panel moves to the other top corner by itself, so it never sits on the spot the agent works on or looks at.
+
+`cu hide 30s` hides the panel and the feed for a while, e.g. to inspect a spot it covers. The panel first announces it for 1.5 s ("blendet sich für 0:30 aus" or "hiding for 0:30"), and `cu` waits for the notice before it returns. Rules: only with an active lease, not in the first 5 s of a task, at most 60 s and never past the lease end. The ring stays visible. `cu hide 0` shows the overlay again; `task` (renew) and `task --done` end the pause as well.
 
 `--eta` is required and at most `5m` (a longer value is an error); `task --eta 2m` without text renews the lease. The client remembers the lease end. After an input command it prints one line to stderr when no lease exists, when less than 45 s are left (renew or finish), and after it has ended (inputs are refused).
 
@@ -104,6 +110,7 @@ The panel is excluded from screen capture: `NSWindow.sharingType = .none` on mac
 | `key COMBO… [--times N]` | e.g. `cmd+shift+t`, `ctrl+w`, `alt+f4`, `enter`, `cmd++`; aliases: `option`, `command`, `return`, `escape`, `pgdn`, … |
 | `activate -w T \| -a APP \| --handle H` | bring to front, restore if minimized |
 | `launch APP [--args …] [--wait TITLE] [--timeout 15]` | macOS: app name, bundle id or path; Windows: exe, path or AUMID |
+| `hide DURATION` | hide the overlay for a while (announced first, max `60s`, not in the first 5 s of a task); `0` shows it again |
 | `batch` | JSON lines `{"cmd": …, args}` on stdin over one connection; `"out"` sets a shot file; stops at the first error |
 
 `--settle MS` makes the agent wait after an input before it reads the post state. Every input reply looks like this:

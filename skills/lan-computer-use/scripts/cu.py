@@ -278,8 +278,9 @@ def forward(name, t, rport):
 
 
 # bump together with VERSION in both agents on every behaviour change; setup never replaces a newer agent
-AGENT_VERSION = 2
+AGENT_VERSION = 3
 LEASE_MAX = 300   # seconds one control lease may span; renew with cu task --eta
+LEASE_GRACE = 60  # the agents keep control this long after a lease ran out
 
 
 def idle_minutes(t):
@@ -634,6 +635,10 @@ def render(cmd, r, as_json):
         if r.get("overlay") == "hidden":
             return "overlay hidden · now run cu down to release the machine"
         return f"overlay {r.get('overlay')}"
+    if cmd == "hide":
+        if r.get("hidden_for"):
+            return f"overlay hidden for {r['hidden_for']} s (announced in the overlay first) · cu hide 0 shows it again"
+        return "overlay shown again"
     if cmd == "windows":
         return "\n".join(fmt_win(w) for w in r.get("windows", [])) or "(no windows)"
     if cmd == "snapshot":
@@ -690,10 +695,153 @@ def session_label():
         return v[:40]
     pid = os.environ.get("CLAUDE_PID", "")
     if pid.isdigit():
-        meta = read_json(os.path.expanduser(f"~/.claude/sessions/{pid}.json")) or {}
+        meta = read_json(os.path.join(claude_home(), "sessions", f"{pid}.json")) or {}
         if isinstance(meta.get("name"), str) and meta["name"].strip():
             return meta["name"].strip()[:40]
     return os.path.basename(os.getcwd())[:40]
+
+
+# ---------------------------------------------------------------- activity feed (what the controlling session does)
+#
+# The controlled window usually hides the Claude Code chat that drives it. A small detached worker tails that
+# session's transcript and shows its last one or two steps (chat text or tool step) below the overlay.
+
+FEED_EVERY = 1.5     # seconds between transcript polls
+FEED_RESEND = 15     # resend unchanged lines this often, so a restarted agent shows them again
+FEED_CLIP = 140
+
+
+def claude_home():
+    return os.path.expanduser(os.environ.get("CLAUDE_CONFIG_DIR") or "~/.claude")
+
+
+def transcript_path():
+    """The controlling Claude Code session's transcript (.jsonl), or None."""
+    home = claude_home()
+    sid = ""
+    pid = os.environ.get("CLAUDE_PID", "")
+    if pid.isdigit():
+        meta = read_json(os.path.join(home, "sessions", f"{pid}.json")) or {}
+        sid = meta.get("sessionId") if isinstance(meta.get("sessionId"), str) else ""
+    sid = sid or os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+    if not re.fullmatch(r"[0-9A-Fa-f-]{8,64}", sid or ""):
+        return None
+    import glob
+    hits = glob.glob(os.path.join(glob.escape(os.path.join(home, "projects")), "*", f"{sid}.jsonl"))
+    return max(hits, key=os.path.getmtime) if hits else None
+
+
+def _clip_line(s, n=FEED_CLIP):
+    s = re.sub(r"```.*?(```|$)", " ", s, flags=re.S)        # code blocks say nothing at a glance
+    s = re.sub(r"[`*_#>|]+", "", s)
+    s = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", s)            # [text](link) -> text
+    s = " ".join(s.split())
+    return s if len(s) <= n else s[:n - 1].rstrip() + "…"
+
+
+def entry_items(e):
+    """Feed lines from one transcript entry: visible thoughts, chat text and tool steps, in order."""
+    if not isinstance(e, dict) or e.get("type") != "assistant" or e.get("isSidechain"):
+        return []
+    content = (e.get("message") or {}).get("content")
+    if not isinstance(content, list):
+        return []
+    out = []
+    for b in content:
+        if not isinstance(b, dict):
+            continue
+        kind = b.get("type")
+        if kind in ("text", "thinking"):
+            v = _clip_line(str(b.get(kind) or ""))
+            if v:
+                out.append(v)
+        elif kind == "tool_use":
+            inp = b.get("input") if isinstance(b.get("input"), dict) else {}
+            tool = str(b.get("name") or "tool")
+            if isinstance(inp.get("description"), str) and inp["description"].strip():
+                v = inp["description"]
+            elif isinstance(inp.get("file_path"), str):
+                v = f"{tool} {os.path.basename(inp['file_path'])}"
+            elif isinstance(inp.get("command"), str) and inp["command"].strip():
+                v = f"{tool}: {inp['command'].strip().splitlines()[0][:80]}"
+            elif isinstance(inp.get("pattern"), str):
+                v = f"{tool} {inp['pattern']}"
+            else:
+                v = tool
+            out.append("▸ " + _clip_line(v))
+    return out
+
+
+def recent_activity(path, n=2, tail=512 * 1024):
+    """The last n feed lines of a transcript, oldest first."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            f.seek(max(0, size - tail))
+            data = f.read()
+    except OSError:
+        return []
+    lines = data.split(b"\n")
+    if size > tail:
+        lines = lines[1:]   # the first line is cut
+    found = []
+    for raw in reversed(lines):
+        if not raw.strip():
+            continue
+        try:
+            items = entry_items(json.loads(raw))
+        except ValueError:
+            continue
+        for v in reversed(items):
+            found.append(v)
+            if len(found) >= n:
+                return found[::-1]
+    return found[::-1]
+
+
+def feed_worker(name, owner, path):
+    """Detached: push the session's latest activity to the overlay until the lease ends or the session is gone."""
+    me, last, sent_at, fails = os.getpid(), None, 0.0, 0
+    time.sleep(0.5)
+    while True:
+        st = load_state(name)
+        end = st.get("eta_end")
+        if st.get("feed_pid") != me or not end or time.time() > end + LEASE_GRACE or not pid_alive(owner):
+            return 0
+        lines = recent_activity(path)
+        if lines and (lines != last or time.time() - sent_at > FEED_RESEND):
+            try:
+                c = Conn(st["lport"], st["token"], timeout=5)
+                try:
+                    c.call("note", lines=lines)
+                finally:
+                    c.close()
+                last, sent_at, fails = lines, time.time(), 0
+            except (OSError, ValueError, KeyError):
+                fails += 1
+                if fails >= 5:
+                    return 1
+        time.sleep(FEED_EVERY)
+
+
+def start_feed(name):
+    """Start (or keep) the activity feed worker for this target; LCU_FEED=0 turns it off."""
+    if os.environ.get("LCU_FEED", "1") == "0":
+        return
+    owner = os.environ.get("CLAUDE_PID", "")
+    path = transcript_path()
+    if not owner.isdigit() or not path:
+        return
+    st = load_state(name)
+    if st.get("feed_pid") and pid_alive(st["feed_pid"]) and st.get("feed_path") == path:
+        return
+    p = subprocess.Popen([sys.executable, os.path.abspath(__file__), "_feed", name, owner, path],
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+    st = load_state(name)
+    st["feed_pid"], st["feed_path"] = p.pid, path
+    save_state(name, st)
 
 
 def eta_hint(name, cmd, now=None):
@@ -825,6 +973,13 @@ def run_cmd(sess, ns, osname):
         if st and r.get("ok"):
             st["eta_end"] = time.time() + eta
             save_state(sess.name, st)
+            start_feed(sess.name)
+        return r
+    if c == "hide":
+        secs = 0 if ns.duration in ("0", "off") else parse_duration(ns.duration)
+        r = sess.call("hide", secs=secs)
+        if r.get("ok") and r.get("notice"):
+            time.sleep(float(r["notice"]) + 0.1)   # return once the announcement ran and the overlay is gone
         return r
     if c in ("find", "wait"):
         a = dict(text=ns.text, role=ns.role, id=ns.id, exact=ns.exact, max=ns.max, **sel_args(ns))
@@ -953,6 +1108,9 @@ def build_parser():
     sp.add_argument("--eta", help="required: realistic estimate of the whole remaining work, e.g. 90s, 5m, 1h "
                     "(countdown); repeat with a new estimate when it runs out")
     sp.add_argument("--done", action="store_true", help="task finished: hide the overlay")
+    sp = sub.add_parser("hide", help="hide the overlay for a while (announced in it first, max 60s, not in the first "
+                        "5s of a task); 0 shows it again")
+    sp.add_argument("duration", help="e.g. 15s; 0 or off shows the overlay again")
     for name in ("find", "wait"):
         sp = sub.add_parser(name, help="search elements" if name == "find" else "wait until an element (dis)appears")
         sel(sp)
@@ -1037,6 +1195,9 @@ def build_parser():
 
 
 def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["_feed"] and len(argv) == 4 and argv[2].isdigit():
+        return feed_worker(argv[1], int(argv[2]), argv[3])
     ns = build_parser().parse_args(argv)
     try:
         normalize_refs(ns)

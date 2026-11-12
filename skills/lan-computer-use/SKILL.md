@@ -16,12 +16,13 @@ Call `scripts/cu` with its full path in every command. Don't put the command in 
 
 ## Workflow
 
-1. **Announce.** Before the first input on a machine, tell the user in text which machine you will control and why. On their own Mac, also say it aloud (`say "…"`); `cu` does this once per session for targets with `"announce": true`. Then take a control lease, which also shows the overlay (session name, task, current action, pressed keys, countdown):
+1. **Announce.** Before the first input on a machine, tell the user in text which machine you will control and why. On their own Mac, also say it aloud (`say "…"`); `cu` does this once per session for targets with `"announce": true`. Then take a control lease, which also shows the see-through overlay (session name, task, current action, pressed keys, countdown, and below it your own last one or two chat or tool steps):
    `cu task "Export im Dialog prüfen" --eta 3m`
    `--eta` is required and **at most 5m**: plan control in short sessions of 5 minutes or less. Estimate realistically (count the steps, about 3–10 s each when you work compactly, plus app starts and waits). Without a valid lease the agent refuses every input; 60 s after the lease ends it quits by itself. When `cu` warns that the lease ends soon and work is left, renew it with `cu task --eta …` (again at most 5m), otherwise finish.
 2. **Look.** `cu snapshot -i` prints a flat list of clickable or editable elements of the foreground window, each with a ref:
    `[e7] button "Speichern"`. Pick a window with `-w <title>` or `-a <app>`. Add `--rects` only when you need positions.
 3. **Act by ref.** Use `click e7`, `type "text" --ref e3`, `set-value e3 "text"`, `press e7`, `key cmd+s`. Every input command answers with the state after the action, i.e. the foreground window and the focused element. Read that line instead of taking a new snapshot.
+   The overlay steps aside by itself when you move the mouse onto it. Need to see a spot it covers without moving there? Say so in text, then `cu hide 20s` (announced in the panel, max 60 s, not in the first 5 s); `cu hide 0` ends it early.
 4. **Verify cheaply.** Use `find "Gespeichert"` or `wait "Fertig" --timeout 20`, then `snapshot -i` again. Take `shot` only when the meaning is visual: layout, images, canvas, or a dialog without an accessibility tree. Read the PNG path it prints.
 5. **Release at once.** Right after the last input, run `cu task --done` and then `cu down`. Do this before you analyse results, write a report or ask the user anything, so the overlay and the agent never stay up while you think. `down` stops the agent, removes it from the target and hands the screen back. If you need the machine again later, start over at step 1.
 
