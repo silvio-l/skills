@@ -46,6 +46,21 @@ Each skill is tagged **global** (installed with `-g`, available in every session
 
 **The Fix.** A model-invoked skill that drives the user's own Safari tab directly via `do JavaScript` (through a small JXA driver), reading the real DOM — never a screenshot or OCR. Built against three live conversations (one per site) rather than assumed selectors, which surfaced two real bugs a naive implementation would have shipped silently: Claude.ai's `[data-test-render-count]` looked assistant-specific but actually tags *every* turn's markdown rendering, so an early version double-counted each user message as a duplicate "assistant" entry — fixed by keying off `[role="article"][aria-posinset]` instead, a stable per-turn position that also fixes collection order once claude.ai's (and likely gemini.google.com's) DOM virtualization is accounted for: long conversations un-mount off-screen messages, so a single DOM snapshot silently misses most of a long chat, requiring a scroll-to-top-then-sweep collection loop instead. A second bug — JXA's Standard Additions `read` command silently mangling non-ASCII text into mojibake — was caught the same way and fixed via the Foundation/NSString bridge for guaranteed UTF-8. An unstructured `body.innerText` fallback (clearly labeled, distinct exit code) covers any site without a dedicated extractor rather than failing outright.
 
+### `grundschutz-audit` — global
+
+**The Problem.** A security review of a codebase stops at technical findings. An organisation that has to show conformity with BSI IT-Grundschutz or ISO/IEC 27001 also needs protection needs, a modelled requirement package, a risk analysis, a security concept and tracked measures with evidence. That is the work of an information security officer, and it is usually done by hand with an outdated building-block list.
+
+**The Fix.** A user-invoked procedure (`/grundschutz-audit [audit|verify] [scope] [quick|standard|deep]`) that acts as the information security officer and runs autonomously from end to end:
+
+- **Scope and protection needs.** It fixes the scope and the structure analysis, and rates protection needs before any technical work.
+- **Modelling.** It models the current BSI Grundschutz++ user catalog, which is fetched at run time and pinned to a commit, never bundled. A stdlib helper (`scripts/gspp.py`) does the deterministic work: ISMS practices always, category inheritance, raised-level selection, deduplication, and mandatory relevance decisions.
+- **Technical check.** It runs Cloudflare's MIT-licensed `security-audit` workflow, bundled unchanged in `technical/` (default profile `standard`).
+- **Target/actual check.** It validates the check under the binary UMS rule: evidence for every "implemented", and dependencies respected.
+- **Risk analysis and concept.** It performs a risk analysis per BSI 200-3 and writes the full security concept, an implementation plan and an ISO 27001 Annex A statement of applicability.
+- **Issues.** It opens one issue per measure. On a public tracker, the issue carries only the measure ID.
+
+All documentation lives outside the audited repo. A `verify` mode re-checks the evidence independently and closes or reopens issues. The result is explicitly an unofficial, certification-oriented best-effort self-declaration, not a certificate.
+
 ### `lan-computer-use` — global
 
 **The Problem.** Agents that drive a desktop through screenshots are slow, token-hungry and guess at pixels. Remote machines in the LAN, such as a Windows test PC or a second Mac, are usually out of reach entirely. When the agent controls the machine you are sitting at, you cannot tell what it is doing or when it will stop.

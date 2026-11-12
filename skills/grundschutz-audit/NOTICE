@@ -1,0 +1,31 @@
+grundschutz-audit
+=================
+
+This skill contains material derived from Cloudflare's "security-audit" skill:
+
+  Source:  https://github.com/cloudflare/security-audit-skill (commit c1c8a8c)
+  License: MIT, Copyright (c) 2025-2026 Cloudflare, Inc. (see LICENSE-cloudflare)
+
+Files in technical/ are copied from that source. Changes:
+  - SKILL.md was renamed to technical/SECURITY-AUDIT.md; its frontmatter was
+    removed and a context note was prepended. The body is unchanged.
+  - References to "SKILL.md" in HUNTING.md, RECONNAISSANCE.md and
+    VALIDATION-AND-REPORTING.md now point to "SECURITY-AUDIT.md".
+  - The upstream test file for the validators was not copied.
+All other files in technical/ are unchanged.
+
+The skill's own files (SKILL.md, METHOD.md, RISK-ANALYSIS.md,
+CONCEPT-AND-ISSUES.md, scripts/gspp.py) are original work under this
+repository's license.
+
+BSI IT-Grundschutz++ catalog
+----------------------------
+The skill uses the BSI "Stand-der-Technik-Bibliothek"
+(https://github.com/BSI-Bund/Stand-der-Technik-Bibliothek), licensed
+CC BY-SA 4.0 by the Bundesamt für Sicherheit in der Informationstechnik.
+None of its content is bundled here. scripts/gspp.py downloads it at run time
+into the audit's run directory and records the source, commit and checksums in
+sources.json. Reports that quote catalog requirements carry that attribution.
+
+This skill is not affiliated with, endorsed by or certified by Cloudflare,
+the BSI, ISO or any certification body.
