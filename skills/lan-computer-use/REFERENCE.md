@@ -125,8 +125,10 @@ A change of the input desktop (lock screen, UAC) is reported as `desktop …`.
   - Some system dialogs expose no UIA children, for example Windows Update prompts and some UWP or WebView popups. Use `shot`, then `click --img X Y`.
   - Win32 Notepad's edit area has the role `document`, not `textfield`.
   - A UAC prompt runs on the secure desktop; `hello` reports `(secure desktop)` there, and the agent cannot act on it.
+  - Snap Layouts (hovering the maximize button) do not appear for apps that draw their own caption buttons, e.g. frameless Tauri or Electron windows. That is the app's behavior, not a tool error.
 - **macOS:**
   - System Settings panes can be slow; use `wait`.
   - WebKit (WKWebView, Tauri) and Chromium apps build their accessibility tree lazily. `snapshot` walks again for up to about 0.6 s while the window shows only its title bar buttons or an empty web area.
 - **Both:**
   - Windows that are minimized or on other Spaces/desktops are not in `snapshot`; `activate` them first.
+  - Make sure you test the build you mean. A CI artifact is often an installer (NSIS, MSI, DMG), and starting it opens a setup wizard while an older installed copy of the app keeps running next to it. Before testing, check which executable runs: `Get-Process | Select Name,Path` on Windows over SSH, `ps -axo pid,comm` on macOS. Then start the app from the portable archive or a fresh install, and close the old copy first.
