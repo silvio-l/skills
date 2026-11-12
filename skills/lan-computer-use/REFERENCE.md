@@ -44,15 +44,18 @@ Select a target with `-t NAME`, `LCU_TARGET`, or the config `default`. A name th
 
 ## Overlay (`task`)
 
-`task "TEXT" [--eta 5m]` shows a compact warning panel in the top right corner of the target's screen. The panel has a yellow border and a yellow warning icon. It shows:
+`task "TEXT" --eta 5m` shows a compact warning panel in the top right corner of the target's screen. The panel has a yellow border and a yellow warning icon. It shows:
 
 - the header ("Claude steuert diesen Rechner" or "Claude is controlling this computer");
+- the controlling session's name, so the person can tell which agent session is acting. This is `LCU_SESSION` if set, otherwise the Claude Code session name (`~/.claude/sessions/<CLAUDE_PID>.json`), otherwise the name of the working directory;
 - the task;
 - the current action with its age, e.g. "klickt «Speichern» · vor 0:03";
 - a countdown, or how far the run is over the ETA;
 - when the agent auto-stops.
 
 Typing shows only the number of characters, never the text. `task --done` hides the panel. Every input command updates the action line by itself; `task` again only changes the text or the ETA.
+
+`--eta` is required; `task --eta 2m` without text sets a new estimate. The client remembers the ETA. After an input command it prints one line to stderr in two cases: when no task with an ETA is shown, and once the ETA has run out, with how far over it you are. Then re-estimate the remaining time realistically.
 
 The panel is excluded from screen capture: `NSWindow.sharingType = .none` on macOS and `WDA_EXCLUDEFROMCAPTURE` on Windows. So it never shows up in `shot`, OCR or screen sharing, and it never covers the elements the agent works on, because it ignores the mouse. Its language follows the target's UI language (German or English).
 

@@ -225,6 +225,7 @@ var overlayLabel: NSTextField? = nil
 var overlayOn = false
 var overlayStart = Date()
 var taskText = ""
+var sessionName = ""
 var taskEnd: Date? = nil
 var actionText = ""
 var actionAt = Date()
@@ -263,6 +264,7 @@ func overlayText() -> NSAttributedString {
         out.append(NSAttributedString(string: t, attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: size, weight: w), .foregroundColor: c]))
     }
     add(tr("Claude steuert diesen Rechner", "Claude is controlling this computer"), 13, .semibold, white)
+    if !sessionName.isEmpty { add("\nSession " + clip(sessionName, 40), 11, .regular, dim) }
     if !taskText.isEmpty { add("\n" + clip(taskText, 60), 12, .regular, white) }
     if !actionText.isEmpty {
         add("\n▸ " + clip(actionText, 40) + " · " + tr("vor ", "") + mmss(now.timeIntervalSince(actionAt)) + tr("", " ago"), 12, .regular, white)
@@ -345,12 +347,13 @@ func overlayHide() {
 
 func taskCmd(_ a: Dict) -> Dict {
     if bool(a, "done") {
-        taskText = ""; taskEnd = nil; actionText = ""
+        taskText = ""; taskEnd = nil; actionText = ""; sessionName = ""
         overlayOn = false
         overlayHide()
         return ["ok": true, "overlay": "hidden"]
     }
     if has(a, "text") { taskText = str(a, "text") }
+    if has(a, "session") { sessionName = str(a, "session") }
     if has(a, "eta") { let e = num(a, "eta", 0); taskEnd = e > 0 ? Date().addingTimeInterval(e) : nil }
     if !overlayOn { overlayOn = true; overlayStart = Date() }
     overlayTick()

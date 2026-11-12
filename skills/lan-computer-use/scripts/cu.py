@@ -601,6 +601,8 @@ def render(cmd, r, as_json):
                 f"{r.get('desktop')} · screen {r.get('screen')} {r.get('units')} · agent build {r.get('build')} "
                 f"pid {r.get('pid')}" + (f" · permissions {perms}" if perms else ""))
     if cmd == "task":
+        if r.get("overlay") == "hidden":
+            return "overlay hidden · now run cu down to release the machine"
         return f"overlay {r.get('overlay')}"
     if cmd == "windows":
         return "\n".join(fmt_win(w) for w in r.get("windows", [])) or "(no windows)"
@@ -648,6 +650,36 @@ def sel_args(ns):
 
 def settle(ns):
     return {"settle": ns.settle} if getattr(ns, "settle", None) is not None else {}
+
+
+def session_label():
+    """Name of the controlling agent session for the overlay: LCU_SESSION, else the Claude Code session name
+    (~/.claude/sessions/<CLAUDE_PID>.json), else the working directory's name."""
+    v = os.environ.get("LCU_SESSION", "").strip()
+    if v:
+        return v[:40]
+    pid = os.environ.get("CLAUDE_PID", "")
+    if pid.isdigit():
+        meta = read_json(os.path.expanduser(f"~/.claude/sessions/{pid}.json")) or {}
+        if isinstance(meta.get("name"), str) and meta["name"].strip():
+            return meta["name"].strip()[:40]
+    return os.path.basename(os.getcwd())[:40]
+
+
+def eta_hint(name, cmd, now=None):
+    """Nudge the controlling session to keep the overlay's ETA honest (stderr, one line), or None."""
+    if cmd not in INPUT_CMDS:
+        return None
+    st = load_state(name)
+    end = st.get("eta_end")
+    if not end:
+        return ('no task/ETA shown on the target: run cu task "WHAT" --eta DURATION with a realistic estimate '
+                "of the whole remaining work")
+    over = (now or time.time()) - end
+    if over < 0:
+        return None
+    return (f"over the ETA by {int(over) // 60}:{int(over) % 60:02d}: re-estimate the remaining time realistically "
+            "and run cu task --eta DURATION")
 
 
 def parse_duration(v):
@@ -736,7 +768,24 @@ def run_cmd(sess, ns, osname):
                 n.pop("rect", None)
         return r
     if c == "task":
-        return sess.call("task", text=ns.text, eta=parse_duration(ns.eta) if ns.eta else None, done=ns.done)
+        if ns.done:
+            r = sess.call("task", done=True)
+            st = load_state(sess.name)
+            if st.pop("eta_end", None) is not None:
+                save_state(sess.name, st)
+            return r
+        if not ns.eta:
+            raise CuError("task needs --eta: estimate realistically how long the whole remaining work takes "
+                          "(e.g. --eta 4m), the person at the machine plans around it")
+        eta = parse_duration(ns.eta)
+        if eta <= 0:
+            raise CuError("--eta must be greater than zero")
+        r = sess.call("task", text=ns.text, eta=eta, session=session_label())
+        st = load_state(sess.name)
+        if st and r.get("ok"):
+            st["eta_end"] = time.time() + eta
+            save_state(sess.name, st)
+        return r
     if c in ("find", "wait"):
         a = dict(text=ns.text, role=ns.role, id=ns.id, exact=ns.exact, max=ns.max, **sel_args(ns))
         if c == "wait":
@@ -861,7 +910,8 @@ def build_parser():
     sp.add_argument("--rects", action="store_true", help="with -i: keep the @x,y,w,h rectangles")
     sp = sub.add_parser("task", help="overlay on the target: what the agent is doing and for how long")
     sp.add_argument("text", nargs="?", help="short task description shown in the overlay")
-    sp.add_argument("--eta", help="expected duration, e.g. 90s, 5m, 1h (countdown)")
+    sp.add_argument("--eta", help="required: realistic estimate of the whole remaining work, e.g. 90s, 5m, 1h "
+                    "(countdown); repeat with a new estimate when it runs out")
     sp.add_argument("--done", action="store_true", help="task finished: hide the overlay")
     for name in ("find", "wait"):
         sp = sub.add_parser(name, help="search elements" if name == "find" else "wait until an element (dis)appears")
@@ -982,6 +1032,9 @@ def main(argv=None):
                 return batch(sess, ns.json)
             t0 = time.time()
             r = run_cmd(sess, ns, osname)
+            hint = eta_hint(name, ns.cmd) if r.get("ok") else None
+            if hint:
+                print(f"[lan-computer-use] {hint}", file=sys.stderr)
             if os.environ.get("LCU_TIMING"):
                 print(f"[{(time.time() - t0) * 1000:.0f} ms]", file=sys.stderr)
             if ns.json:

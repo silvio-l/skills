@@ -16,13 +16,14 @@ Call `scripts/cu` with its full path in every command. Don't put the command in 
 
 ## Workflow
 
-1. **Announce.** Before the first input on a machine, tell the user in text which machine you will control and why. On their own Mac, also say it aloud (`say "…"`); `cu` does this once per session for targets with `"announce": true`. Then start the overlay. It shows the task, the current action and a countdown on the target:
+1. **Announce.** Before the first input on a machine, tell the user in text which machine you will control and why. On their own Mac, also say it aloud (`say "…"`); `cu` does this once per session for targets with `"announce": true`. Then start the overlay. It shows your session name, the task, the current action and a countdown on the target:
    `cu task "Export im Dialog prüfen" --eta 3m`
+   `--eta` is required. Estimate the whole remaining work realistically: count the steps and allow about 10–20 s per step, plus waits, app starts and retries. Don't use a placeholder. The person at the machine plans around the estimate. When `cu` reports that you are over the ETA, re-estimate the remaining time and run `cu task --eta …`.
 2. **Look.** `cu snapshot -i` prints a flat list of clickable or editable elements of the foreground window, each with a ref:
    `[e7] button "Speichern"`. Pick a window with `-w <title>` or `-a <app>`. Add `--rects` only when you need positions.
 3. **Act by ref.** Use `click e7`, `type "text" --ref e3`, `set-value e3 "text"`, `press e7`, `key cmd+s`. Every input command answers with the state after the action, i.e. the foreground window and the focused element. Read that line instead of taking a new snapshot.
 4. **Verify cheaply.** Use `find "Gespeichert"` or `wait "Fertig" --timeout 20`, then `snapshot -i` again. Take `shot` only when the meaning is visual: layout, images, canvas, or a dialog without an accessibility tree. Read the PNG path it prints.
-5. **Finish.** Run `cu task --done` to hide the overlay, then `cu down`. `down` stops the agent and removes it from the target.
+5. **Release at once.** Right after the last input, run `cu task --done` and then `cu down`. Do this before you analyse results, write a report or ask the user anything, so the overlay and the agent never stay up while you think. `down` stops the agent, removes it from the target and hands the screen back. If you need the machine again later, start over at step 1.
 
 Refs (`eN`) are valid until the next `snapshot`/`find` on that machine. A stale ref gives a clear error; then take a new snapshot. No ref for the target? Use `click --text "Label"` (on macOS it falls back to OCR), then `shot` + `click --img X Y` with pixel coordinates from that shot.
 

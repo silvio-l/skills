@@ -166,7 +166,7 @@ static class Agent
     {
         static readonly object gate = new object();
         static readonly bool de = System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "de";
-        static bool on; static DateTime start, actionAt; static DateTime? end; static string task = "", action = "";
+        static bool on; static DateTime start, actionAt; static DateTime? end; static string task = "", action = "", session = "";
         static Panel form; static Thread thread;
         internal static volatile bool excluded;
 
@@ -210,10 +210,11 @@ static class Agent
             var r = Ok();
             lock (gate)
             {
-                if (Bool(a, "done")) { on = false; task = ""; action = ""; end = null; r["overlay"] = "hidden"; }
+                if (Bool(a, "done")) { on = false; task = ""; action = ""; session = ""; end = null; r["overlay"] = "hidden"; }
                 else
                 {
                     if (Has(a, "text")) task = Str(a, "text", "");
+                    if (Has(a, "session")) session = Str(a, "session", "");
                     if (Has(a, "eta")) { double e = Dbl(a, "eta", 0); end = e > 0 ? DateTime.UtcNow.AddSeconds(e) : (DateTime?)null; }
                     if (!on) { on = true; start = DateTime.UtcNow; }
                     r["overlay"] = "shown";
@@ -223,7 +224,7 @@ static class Agent
             return r;
         }
 
-        // lines: bold header, optional task, current action, small meta line
+        // lines: bold header, optional session (small), optional task, current action, small meta line
         internal static string[] Lines(out bool visible)
         {
             lock (gate)
@@ -231,6 +232,7 @@ static class Agent
                 visible = on;
                 var now = DateTime.UtcNow;
                 var l = new List<string> { T("Claude steuert diesen Rechner", "Claude is controlling this computer") };
+                l.Add(session.Length > 0 ? "Session " + Clip(session, 40) : null);
                 l.Add(task.Length > 0 ? Clip(task, 60) : null);
                 l.Add(action.Length > 0 ? "▸ " + Clip(action, 40) + " · " + T("vor ", "") + Mmss((now - actionAt).TotalSeconds) + T("", " ago") : null);
                 string meta = T("läuft ", "running ") + Mmss((now - start).TotalSeconds);
@@ -327,7 +329,7 @@ static class Agent
                 Invalidate();
             }
 
-            Font FontFor(int i) { return i == 0 ? head : i == lines.Length - 1 ? small : body; }
+            Font FontFor(int i) { return i == 0 ? head : i == 1 || i == lines.Length - 1 ? small : body; }
 
             static GraphicsPath Rounded(Rectangle r, int rad)
             {
@@ -356,7 +358,7 @@ static class Agent
                 {
                     if (lines[i] == null) continue;
                     var font = FontFor(i);
-                    var color = i == lines.Length - 1 ? Color.FromArgb(184, 184, 184) : Color.FromArgb(245, 245, 245);
+                    var color = i == 1 || i == lines.Length - 1 ? Color.FromArgb(184, 184, 184) : Color.FromArgb(245, 245, 245);
                     int lh = TextRenderer.MeasureText(lines[i], font, new Size(textW, 0), TextFormatFlags.SingleLine).Height;
                     TextRenderer.DrawText(g, lines[i], font, new Rectangle(x, y, textW, lh), color,
                         TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
