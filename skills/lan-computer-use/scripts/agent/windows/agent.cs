@@ -23,9 +23,11 @@ class AgentError : Exception { public AgentError(string m) : base(m) { } }
 
 static class Agent
 {
-    const string Version = "1";
+    const string Version = "2"; // bump with every behaviour change; setup refuses to replace a newer agent
     static string token, build = "", dir, stateFile;
-    static int idleMinutes = 30;
+    static int idleMinutes = 3;
+    // control lease: input needs an announced slot of at most 5 min; after it ends plus a short grace the agent quits
+    const double LeaseMax = 300, LeaseGrace = 60;
     static DateTime lastRequest = DateTime.UtcNow;
     static readonly JavaScriptSerializer Json = new JavaScriptSerializer { MaxJsonLength = int.MaxValue, RecursionLimit = 256 };
     static readonly Dictionary<string, AutomationElement> refs = new Dictionary<string, AutomationElement>();
@@ -37,7 +39,7 @@ static class Agent
     {
         for (int i = 0; i + 1 < args.Length; i++)
         {
-            if (args[i] == "--idle") idleMinutes = int.Parse(args[++i]);
+            if (args[i] == "--idle") idleMinutes = Math.Max(1, Math.Min(5, int.Parse(args[++i])));
             else if (args[i] == "--build") build = args[++i];
         }
         try { if (!Native.SetProcessDpiAwarenessContext(new IntPtr(-4))) Native.SetProcessDPIAware(); }
@@ -65,11 +67,9 @@ static class Agent
         {
             while (!quit)
             {
-                if (!listener.Server.Poll(1000000, SelectMode.SelectRead))
-                {
-                    if ((DateTime.UtcNow - lastRequest).TotalMinutes > idleMinutes) break;
-                    continue;
-                }
+                bool ready = listener.Server.Poll(1000000, SelectMode.SelectRead);
+                if (ShouldStop()) break;
+                if (!ready) continue;
                 using (var client = listener.AcceptTcpClient())
                 {
                     client.NoDelay = true;
@@ -85,6 +85,14 @@ static class Agent
             mutex.ReleaseMutex();
         }
         return 0;
+    }
+
+    // an expired lease ends the agent after the grace; without a lease, idle time does
+    static bool ShouldStop()
+    {
+        DateTime? end = Overlay.End;
+        if (end.HasValue) return (DateTime.UtcNow - end.Value).TotalSeconds > LeaseGrace;
+        return (DateTime.UtcNow - lastRequest).TotalMinutes > idleMinutes;
     }
 
     // One connection, any number of request lines. Returns true when the agent should exit.
@@ -166,8 +174,11 @@ static class Agent
     {
         static readonly object gate = new object();
         static readonly bool de = System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "de";
-        static bool on; static DateTime start, actionAt; static DateTime? end; static string task = "", action = "", session = "";
-        static Panel form; static Thread thread;
+        static bool on; static DateTime start, actionAt; static DateTime? end; static string task = "", action = "", session = "", keys = "";
+        static DateTime keysAt = DateTime.MinValue;
+        internal static volatile bool warn;
+        static Panel form; static Ring ring; static Thread thread;
+        internal static bool On { get { lock (gate) return on; } }
         internal static volatile bool excluded;
 
         static string T(string german, string english) { return de ? german : english; }
@@ -190,9 +201,7 @@ static class Agent
                 case "set-value": return T("setzt einen Wert", "setting a value") + tgt;
                 case "focus": return T("fokussiert", "focusing") + tgt;
                 case "type": int n = Str(a, "text", "").Length; return T("tippt " + n + " Zeichen", "typing " + n + " characters");
-                case "key":
-                    object k; var keys = a.TryGetValue("keys", out k) && k is ArrayList ? string.Join(" ", ((ArrayList)k).ToArray()) : "";
-                    return T("drückt ", "pressing ") + Clip(keys, 30);
+                case "key": return T("drückt Tasten", "pressing keys");
                 case "activate": return T("holt ein Fenster nach vorn", "bringing a window to front");
                 case "launch": return T("startet ", "launching ") + Clip(Path.GetFileName(Str(a, "target", "")), 30);
             }
@@ -205,26 +214,37 @@ static class Agent
             Refresh();
         }
 
+        internal static DateTime? End { get { lock (gate) return end; } }
+
+        // the last keys or typed text, shown large for a few seconds
+        internal static void ShowKeys(string s)
+        {
+            lock (gate) { keys = s; keysAt = DateTime.UtcNow; }
+            Refresh();
+        }
+
         internal static Dictionary<string, object> Task(Dictionary<string, object> a)
         {
             var r = Ok();
             lock (gate)
             {
-                if (Bool(a, "done")) { on = false; task = ""; action = ""; session = ""; end = null; r["overlay"] = "hidden"; }
+                if (Bool(a, "done")) { on = false; task = ""; action = ""; session = ""; keys = ""; end = null; r["overlay"] = "hidden"; }
                 else
                 {
                     if (Has(a, "text")) task = Str(a, "text", "");
                     if (Has(a, "session")) session = Str(a, "session", "");
-                    if (Has(a, "eta")) { double e = Dbl(a, "eta", 0); end = e > 0 ? DateTime.UtcNow.AddSeconds(e) : (DateTime?)null; }
+                    // a lease is at most 5 min; a longer job renews it with another task call
+                    if (Has(a, "eta")) { double e = Math.Min(Dbl(a, "eta", 0), LeaseMax); end = e > 0 ? DateTime.UtcNow.AddSeconds(e) : (DateTime?)null; }
                     if (!on) { on = true; start = DateTime.UtcNow; }
                     r["overlay"] = "shown";
+                    if (end.HasValue) r["lease_left"] = (int)Math.Round((end.Value - DateTime.UtcNow).TotalSeconds);
                 }
             }
             Refresh();
             return r;
         }
 
-        // lines: bold header, optional session (small), optional task, current action, small meta line
+        // lines: bold header, optional session (small), optional task, current action, keys (large), small meta line
         internal static string[] Lines(out bool visible)
         {
             lock (gate)
@@ -235,13 +255,18 @@ static class Agent
                 l.Add(session.Length > 0 ? "Session " + Clip(session, 40) : null);
                 l.Add(task.Length > 0 ? Clip(task, 60) : null);
                 l.Add(action.Length > 0 ? "▸ " + Clip(action, 40) + " · " + T("vor ", "") + Mmss((now - actionAt).TotalSeconds) + T("", " ago") : null);
+                l.Add(keys.Length > 0 && (now - keysAt).TotalSeconds < 4 ? "⌨ " + Clip(keys, 34) : null);
                 string meta = T("läuft ", "running ") + Mmss((now - start).TotalSeconds);
+                bool w = false;
                 if (end.HasValue)
                 {
                     double left = (end.Value - now).TotalSeconds;
-                    meta += " · " + (left >= 0 ? T("noch ca. ", "about ") + Mmss(left) + T("", " left") : T("überzogen +", "overdue +") + Mmss(-left));
+                    w = left < 60;
+                    meta += " · " + (left >= 0 ? T("Freigabe noch ", "control ends in ") + Mmss(left)
+                        : T("Zeit abgelaufen · Ende in ", "time is up · stopping in ") + Mmss(LeaseGrace + left));
                 }
-                meta += " · " + T("Auto-Ende ", "auto-stop ") + Mmss(idleMinutes * 60 - (now - lastRequest).TotalSeconds);
+                else meta += " · " + T("Auto-Ende ", "auto-stop ") + Mmss(idleMinutes * 60 - (now - lastRequest).TotalSeconds);
+                warn = w;
                 l.Add(meta);
                 return l.ToArray();
             }
@@ -257,6 +282,8 @@ static class Agent
                     form = new Panel();
                     form.HandleCreated += (s, e) => ready.Set();
                     var unused = form.Handle;
+                    ring = new Ring();
+                    var unused2 = ring.Handle;
                     Application.Run();
                 });
                 thread.IsBackground = true;
@@ -273,15 +300,23 @@ static class Agent
         {
             var f = form;
             if (excluded || f == null || !f.IsHandleCreated) return;
-            try { f.Invoke((MethodInvoker)(() => { if (hide) Native.ShowWindow(f.Handle, 0); else f.Tick(); })); } catch { }
+            try
+            {
+                f.Invoke((MethodInvoker)(() =>
+                {
+                    if (hide) { Native.ShowWindow(f.Handle, 0); if (ring != null) Native.ShowWindow(ring.Handle, 0); }
+                    else f.Tick();
+                }));
+            }
+            catch { }
             if (hide) Thread.Sleep(60);
         }
 
         class Panel : Form
         {
-            readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer { Interval = 1000 };
+            readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer { Interval = 500 };
             string[] lines = new string[0];
-            Font head, body, small;
+            Font head, body, small, big;
             float dpi = 1;
 
             public Panel()
@@ -309,6 +344,7 @@ static class Agent
                 head = new Font("Segoe UI Semibold", 10f, FontStyle.Regular, GraphicsUnit.Point);
                 body = new Font("Segoe UI", 9.5f, FontStyle.Regular, GraphicsUnit.Point);
                 small = new Font("Segoe UI", 8.5f, FontStyle.Regular, GraphicsUnit.Point);
+                big = new Font("Segoe UI Semibold", 13f, FontStyle.Regular, GraphicsUnit.Point);
             }
 
             internal void Tick()
@@ -329,7 +365,8 @@ static class Agent
                 Invalidate();
             }
 
-            Font FontFor(int i) { return i == 0 ? head : i == 1 || i == lines.Length - 1 ? small : body; }
+            Font FontFor(int i) { return i == 0 ? head : i == KeyLine ? big : i == 1 || i == lines.Length - 1 ? small : body; }
+            const int KeyLine = 4;
 
             static GraphicsPath Rounded(Rectangle r, int rad)
             {
@@ -358,12 +395,73 @@ static class Agent
                 {
                     if (lines[i] == null) continue;
                     var font = FontFor(i);
-                    var color = i == 1 || i == lines.Length - 1 ? Color.FromArgb(184, 184, 184) : Color.FromArgb(245, 245, 245);
+                    bool last = i == lines.Length - 1;
+                    var color = i == KeyLine || (last && warn) ? yellow
+                        : i == 1 || last ? Color.FromArgb(184, 184, 184) : Color.FromArgb(245, 245, 245);
                     int lh = TextRenderer.MeasureText(lines[i], font, new Size(textW, 0), TextFormatFlags.SingleLine).Height;
                     TextRenderer.DrawText(g, lines[i], font, new Rectangle(x, y, textW, lh), color,
                         TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
                     y += lh;
                 }
+            }
+        }
+
+        // a yellow ring around the mouse pointer while the computer is controlled, so the person can follow it;
+        // the ring shape is the window region, so the pointer itself stays visible and clickable in the hole
+        class Ring : Form
+        {
+            readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer { Interval = 30 };
+            int size = 46, rim = 4;
+            Point last = new Point(int.MinValue, 0);
+
+            public Ring()
+            {
+                FormBorderStyle = FormBorderStyle.None;
+                ShowInTaskbar = false;
+                StartPosition = FormStartPosition.Manual;
+                BackColor = Color.FromArgb(255, 204, 0);
+                timer.Tick += (s, e) => Follow();
+                timer.Start();
+            }
+            protected override bool ShowWithoutActivation { get { return true; } }
+            protected override CreateParams CreateParams
+            {
+                get { var cp = base.CreateParams; cp.ExStyle |= 0x80000 | 0x20 | 0x80 | 0x8 | 0x08000000; return cp; }
+            }
+            protected override void OnHandleCreated(EventArgs e)
+            {
+                base.OnHandleCreated(e);
+                try { Native.SetWindowDisplayAffinity(Handle, 0x11); } catch { }
+                float dpi;
+                using (var g = CreateGraphics()) dpi = g.DpiX / 96f;
+                size = (int)(46 * dpi); rim = Math.Max(3, (int)(4 * dpi));
+                Size = new Size(size, size);
+                using (var p = new GraphicsPath())
+                {
+                    p.AddEllipse(0, 0, size, size);
+                    p.AddEllipse(rim, rim, size - 2 * rim, size - 2 * rim); // alternate fill mode leaves the inside open
+                    Region = new Region(p);
+                }
+            }
+            protected override void OnPaint(PaintEventArgs e)
+            {
+                // thin dark edges keep the yellow ring visible on light backgrounds
+                using (var pen = new Pen(Color.FromArgb(60, 60, 60), 1f))
+                {
+                    e.Graphics.DrawEllipse(pen, 0, 0, size - 1, size - 1);
+                    e.Graphics.DrawEllipse(pen, rim - 1, rim - 1, size - 2 * rim + 1, size - 2 * rim + 1);
+                }
+            }
+
+            void Follow()
+            {
+                if (!On) { if (Native.IsWindowVisible(Handle)) Native.ShowWindow(Handle, 0); last = new Point(int.MinValue, 0); return; }
+                var c = Cursor.Position;
+                bool shown = Native.IsWindowVisible(Handle);
+                if (c == last && shown) return;
+                last = c;
+                // SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW, topmost
+                Native.SetWindowPos(Handle, new IntPtr(-1), c.X - size / 2, c.Y - size / 2, 0, 0, 0x0001 | 0x0010 | 0x0040);
             }
         }
     }
@@ -393,8 +491,21 @@ static class Agent
         finally { Native.CloseDesktop(h); }
     }
 
+    static void RequireLease()
+    {
+        DateTime? end = Overlay.End;
+        if (!end.HasValue)
+            throw new AgentError("no control lease: announce first with cu task \"WHAT\" --eta DURATION (at most 5m)");
+        double over = (DateTime.UtcNow - end.Value).TotalSeconds;
+        if (over > 0)
+            throw new AgentError("control lease expired " + Mmss(over) + " ago: finish with cu task --done and cu down, or renew with cu task --eta DURATION (at most 5m)");
+    }
+
+    static string Mmss(double sec) { int s = Math.Max(0, (int)Math.Round(sec)); return (s / 60) + ":" + (s % 60).ToString("00"); }
+
     static void RequireInput()
     {
+        RequireLease();
         string d = InputDesktop();
         if (!string.Equals(d, "Default", StringComparison.OrdinalIgnoreCase))
             throw new AgentError("input desktop is '" + d + "' (lock screen, UAC or credential prompt): stop and ask the user");
@@ -937,6 +1048,65 @@ static class Agent
         Native.SendInput(1, inp, Marshal.SizeOf(typeof(Native.INPUT)));
     }
 
+    // the visible pointer glides to the target (about 0.1-0.2 s) so the person can follow it
+    static void GlideTo(int x, int y)
+    {
+        var from = System.Windows.Forms.Cursor.Position;
+        double dist = Math.Sqrt((double)(x - from.X) * (x - from.X) + (double)(y - from.Y) * (y - from.Y));
+        int steps = dist < 8 ? 0 : (int)Math.Min(14, Math.Max(5, dist / 60));
+        for (int i = 1; i < steps; i++)
+        {
+            double t = (double)i / steps, s = t * t * (3 - 2 * t);
+            Native.SetCursorPos(from.X + (int)Math.Round((x - from.X) * s), from.Y + (int)Math.Round((y - from.Y) * s));
+            Thread.Sleep(12);
+        }
+        Native.SetCursorPos(x, y);
+    }
+
+    static string KeyDisplay(ArrayList names, int times)
+    {
+        string[] mods = { "ctrl", "alt", "shift", "cmd", "mod", "win" };
+        var parts = new List<string>();
+        foreach (string m in mods) foreach (object o in names) if (Convert.ToString(o) == m) parts.Add(m == "cmd" || m == "mod" ? "Ctrl" : char.ToUpper(m[0]) + m.Substring(1));
+        foreach (object o in names)
+        {
+            string k = Convert.ToString(o);
+            if (Array.IndexOf(mods, k) >= 0) continue;
+            string sym;
+            switch (k)
+            {
+                case "enter": case "return": sym = "↩"; break;
+                case "tab": sym = "Tab"; break;
+                case "space": sym = "Leertaste"; break;
+                case "backspace": sym = "⌫"; break;
+                case "delete": sym = "Entf"; break;
+                case "esc": case "escape": sym = "Esc"; break;
+                case "left": sym = "←"; break;
+                case "right": sym = "→"; break;
+                case "up": sym = "↑"; break;
+                case "down": sym = "↓"; break;
+                default: sym = k.Length == 1 ? k.ToUpperInvariant() : char.ToUpper(k[0]) + k.Substring(1); break;
+            }
+            parts.Add(sym);
+        }
+        string s = string.Join("+", parts.ToArray());
+        return times > 1 ? s + " ×" + times : s;
+    }
+
+    // typed text as the overlay shows it: quoted and clipped, secrets only as dots
+    static string TypedDisplay(string text, bool secret)
+    {
+        if (secret) return new string('•', Math.Min(text.Length, 12));
+        string t = text.Replace("\r", "").Replace("\n", " ↩ ");
+        if (t.Length > 30) t = t.Substring(0, 29) + "…";
+        return "„" + t + "“";
+    }
+
+    static bool IsPasswordEl(AutomationElement e)
+    {
+        try { return e != null && e.Current.IsPassword; } catch (ElementNotAvailableException) { return false; }
+    }
+
     static Dictionary<string, object> Click(Dictionary<string, object> a)
     {
         RequireInput();
@@ -945,7 +1115,7 @@ static class Agent
         uint down = 0x0002, up = 0x0004;
         if (button == "right") { down = 0x0008; up = 0x0010; }
         else if (button == "middle") { down = 0x0020; up = 0x0040; }
-        Native.SetCursorPos(p[0], p[1]);
+        GlideTo(p[0], p[1]);
         Thread.Sleep(15);
         int count = Bool(a, "double") ? 2 : 1;
         for (int i = 0; i < count; i++) { Mouse(down, 0); Mouse(up, 0); if (i + 1 < count) Thread.Sleep(40); }
@@ -959,7 +1129,7 @@ static class Agent
     {
         RequireInput();
         int[] p = Target(a);
-        Native.SetCursorPos(p[0], p[1]);
+        GlideTo(p[0], p[1]);
         Thread.Sleep(Int(a, "settle", 80));
         var r = Post(); r["at"] = p; return r;
     }
@@ -968,7 +1138,7 @@ static class Agent
     {
         RequireInput();
         int[] p1 = Point(a, "x", "y"), p2 = Point(a, "x2", "y2");
-        Native.SetCursorPos(p1[0], p1[1]); Thread.Sleep(30);
+        GlideTo(p1[0], p1[1]); Thread.Sleep(30);
         Mouse(0x0002, 0); Thread.Sleep(60);
         int steps = 12;
         for (int i = 1; i <= steps; i++)
@@ -985,7 +1155,7 @@ static class Agent
     static Dictionary<string, object> Scroll(Dictionary<string, object> a)
     {
         RequireInput();
-        if (Has(a, "ref") || Has(a, "x")) { int[] p = Target(a); Native.SetCursorPos(p[0], p[1]); Thread.Sleep(15); }
+        if (Has(a, "ref") || Has(a, "x")) { int[] p = Target(a); GlideTo(p[0], p[1]); Thread.Sleep(15); }
         int dy = Int(a, "dy", 0), dx = Int(a, "dx", 0);
         for (int i = 0; i < Math.Abs(dy); i++) { Mouse(0x0800, dy > 0 ? -120 : 120); Thread.Sleep(10); }
         for (int i = 0; i < Math.Abs(dx); i++) { Mouse(0x01000, dx > 0 ? 120 : -120); Thread.Sleep(10); }
@@ -1022,7 +1192,7 @@ static class Agent
         else
         {
             int[] c = Center(e);
-            Native.SetCursorPos(c[0], c[1]); Thread.Sleep(15); Mouse(0x0002, 0); Mouse(0x0004, 0);
+            GlideTo(c[0], c[1]); Thread.Sleep(15); Mouse(0x0002, 0); Mouse(0x0004, 0);
             how = "click (no invoke pattern)";
         }
         Thread.Sleep(Int(a, "settle", 150));
@@ -1035,6 +1205,7 @@ static class Agent
         var e = GetRef(a);
         RequireNotPassword(e, a);
         string text = Str(a, "text", "");
+        Overlay.ShowKeys(TypedDisplay(text, IsPasswordEl(e) || Bool(a, "password_ok")));
         object p;
         string how;
         if (e.TryGetCurrentPattern(ValuePattern.Pattern, out p) && !((ValuePattern)p).Current.IsReadOnly)
@@ -1066,7 +1237,9 @@ static class Agent
         if (Has(a, "ref")) { target = GetRef(a); try { target.SetFocus(); } catch { } Thread.Sleep(40); }
         else { RequireVisibleForeground(); try { target = AutomationElement.FocusedElement; } catch { } }
         RequireNotPassword(target, a);
-        SendText(Str(a, "text", ""));
+        string text = Str(a, "text", "");
+        Overlay.ShowKeys(TypedDisplay(text, IsPasswordEl(target) || Bool(a, "password_ok")));
+        SendText(text);
         Thread.Sleep(Int(a, "settle", 80));
         return Post();
     }
@@ -1168,6 +1341,7 @@ static class Agent
             vks[i] = (k == "cmd" || k == "mod") ? (ushort)0x11 : Vk(k); // mod and cmd map to ctrl on Windows
         }
         int times = Math.Max(1, Int(a, "times", 1));
+        Overlay.ShowKeys(KeyDisplay(list, times));
         for (int t = 0; t < times; t++) { SendCombo(vks); Thread.Sleep(30); }
         Thread.Sleep(Int(a, "settle", 120));
         return Post();

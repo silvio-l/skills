@@ -40,7 +40,7 @@ class CuError(Exception):
 # ---------------------------------------------------------------- targets
 
 def load_targets():
-    targets = {"local": {"os": "macos", "local": True, "announce": True, "idle_minutes": 30}}
+    targets = {"local": {"os": "macos", "local": True, "announce": True, "idle_minutes": 3}}
     default = "local"
     if os.path.exists(CONFIG):
         try:
@@ -277,10 +277,29 @@ def forward(name, t, rport):
     raise CuError(f"cannot forward the agent port: {r.stderr.strip()}")
 
 
+# bump together with VERSION in both agents on every behaviour change; setup never replaces a newer agent
+AGENT_VERSION = 2
+LEASE_MAX = 300   # seconds one control lease may span; renew with cu task --eta
+
+
+def idle_minutes(t):
+    """Idle exit of an agent without a lease: default 3, never more than 5 minutes."""
+    try:
+        v = int(t.get("idle_minutes", 3))
+    except (TypeError, ValueError):
+        v = 3
+    return max(1, min(v, 5))
+
+
+UPDATE_HINT = "update this skill copy (npx skills@latest update -g -y, or update <skill> -y in the project)"
+
+
 def parse_setup(out, err, rc):
     for line in out.splitlines():
         if line.startswith("STATE "):
             return json.loads(line[6:])
+    if "OUTDATED" in out:
+        raise CuError(out.strip()[-500:] + ": " + UPDATE_HINT)
     for marker in ("COMPILE-ERROR", "NO-DESKTOP", "START-TIMEOUT", "NO-GUI"):
         if marker in out:
             raise CuError(out.strip()[-1500:])
@@ -291,17 +310,17 @@ def parse_setup(out, err, rc):
 
 def remote_setup(name, t, h):
     osname = t["os"]
-    idle = int(t.get("idle_minutes", 30))
+    idle = idle_minutes(t)
     src, setup = agent_sources(osname)
     if osname == "windows":
         files = [(src, f"agent-{h}.cs"), (setup, f"setup-{h}.ps1")]
         rdir = REMOTE_WIN_DIR
         cmd = (f"powershell -NoProfile -ExecutionPolicy Bypass -File {rdir.replace('/', chr(92))}\\setup-{h}.ps1"
-               f" -Hash {h} -Idle {idle}")
+               f" -Hash {h} -Idle {idle} -Version {AGENT_VERSION}")
     else:
         files = [(src, f"agent-{h}.swift"), (setup, f"setup-{h}.sh")]
         rdir = REMOTE_MAC_DIR
-        cmd = f"/bin/bash {rdir}/setup-{h}.sh {h} {idle}"
+        cmd = f"/bin/bash {rdir}/setup-{h}.sh {h} {idle} {AGENT_VERSION}"
     rc, out, err = ssh_run(name, t, cmd, timeout=240)
     st = parse_setup(out, err, rc)
     if st is None:   # first run on this machine or sources changed: upload and retry
@@ -320,6 +339,9 @@ def local_setup(t, h):
     if st and st.get("build") == h and pid_alive(st.get("pid")):
         return st
     if st and pid_alive(st.get("pid")):
+        if newer_agent(st):
+            raise CuError(f"OUTDATED: agent version {st.get('version')} runs here, this skill copy brings "
+                          f"{AGENT_VERSION}: {UPDATE_HINT}")
         try:
             c = Conn(st["port"], st["token"], timeout=5)
             c.call("quit")
@@ -350,7 +372,7 @@ def local_setup(t, h):
     except OSError:
         pass
     # child of this terminal: inherits its Accessibility / Screen Recording permissions
-    subprocess.Popen([binp, "--idle", str(int(t.get("idle_minutes", 30))), "--build", h, "--dir", LOCAL_DIR],
+    subprocess.Popen([binp, "--idle", str(idle_minutes(t)), "--build", h, "--dir", LOCAL_DIR],
                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                      start_new_session=True, close_fds=True)
     deadline = time.time() + 10
@@ -360,6 +382,14 @@ def local_setup(t, h):
             return st
         time.sleep(0.05)
     raise CuError("START-TIMEOUT: local agent did not report within 10 s")
+
+
+def newer_agent(st):
+    """True if the running agent is newer than this skill copy (must not be replaced by it)."""
+    try:
+        return int(st.get("version", 0)) > AGENT_VERSION
+    except (TypeError, ValueError):
+        return False
 
 
 def read_json(p):
@@ -673,13 +703,16 @@ def eta_hint(name, cmd, now=None):
     st = load_state(name)
     end = st.get("eta_end")
     if not end:
-        return ('no task/ETA shown on the target: run cu task "WHAT" --eta DURATION with a realistic estimate '
-                "of the whole remaining work")
-    over = (now or time.time()) - end
-    if over < 0:
+        return ('no control lease: run cu task "WHAT" --eta DURATION (at most 5m) before any input')
+    left = end - (now or time.time())
+    if left > 45:
         return None
-    return (f"over the ETA by {int(over) // 60}:{int(over) % 60:02d}: re-estimate the remaining time realistically "
-            "and run cu task --eta DURATION")
+    if left > 0:
+        return (f"control lease ends in {int(left)} s: if more work is left, renew now with cu task --eta DURATION "
+                "(at most 5m), otherwise finish with cu task --done and cu down")
+    over = -left
+    return (f"control lease expired {int(over) // 60}:{int(over) % 60:02d} ago: input is refused, renew with "
+            "cu task --eta DURATION (at most 5m) or finish with cu task --done and cu down")
 
 
 def parse_duration(v):
@@ -780,7 +813,14 @@ def run_cmd(sess, ns, osname):
         eta = parse_duration(ns.eta)
         if eta <= 0:
             raise CuError("--eta must be greater than zero")
-        r = sess.call("task", text=ns.text, eta=eta, session=session_label())
+        if eta > LEASE_MAX:
+            raise CuError(f"--eta {ns.eta} is over the {LEASE_MAX // 60}m limit of one control lease: plan the work in "
+                          "chunks of at most 5 minutes and renew with cu task --eta before the lease ends")
+        a = dict(text=ns.text, eta=eta, session=session_label())
+        owner = os.environ.get("CLAUDE_PID", "")
+        if sess.t.get("local") and owner.isdigit():
+            a["owner_pid"] = int(owner)   # local agent exits as soon as the controlling session is gone
+        r = sess.call("task", **a)
         st = load_state(sess.name)
         if st and r.get("ok"):
             st["eta_end"] = time.time() + eta

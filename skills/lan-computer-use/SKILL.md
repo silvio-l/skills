@@ -16,9 +16,9 @@ Call `scripts/cu` with its full path in every command. Don't put the command in 
 
 ## Workflow
 
-1. **Announce.** Before the first input on a machine, tell the user in text which machine you will control and why. On their own Mac, also say it aloud (`say "…"`); `cu` does this once per session for targets with `"announce": true`. Then start the overlay. It shows your session name, the task, the current action and a countdown on the target:
+1. **Announce.** Before the first input on a machine, tell the user in text which machine you will control and why. On their own Mac, also say it aloud (`say "…"`); `cu` does this once per session for targets with `"announce": true`. Then take a control lease, which also shows the overlay (session name, task, current action, pressed keys, countdown):
    `cu task "Export im Dialog prüfen" --eta 3m`
-   `--eta` is required. Estimate the whole remaining work realistically: count the steps and allow about 10–20 s per step, plus waits, app starts and retries. Don't use a placeholder. The person at the machine plans around the estimate. When `cu` reports that you are over the ETA, re-estimate the remaining time and run `cu task --eta …`.
+   `--eta` is required and **at most 5m**: plan control in short sessions of 5 minutes or less. Estimate realistically (count the steps, about 3–10 s each when you work compactly, plus app starts and waits). Without a valid lease the agent refuses every input; 60 s after the lease ends it quits by itself. When `cu` warns that the lease ends soon and work is left, renew it with `cu task --eta …` (again at most 5m), otherwise finish.
 2. **Look.** `cu snapshot -i` prints a flat list of clickable or editable elements of the foreground window, each with a ref:
    `[e7] button "Speichern"`. Pick a window with `-w <title>` or `-a <app>`. Add `--rects` only when you need positions.
 3. **Act by ref.** Use `click e7`, `type "text" --ref e3`, `set-value e3 "text"`, `press e7`, `key cmd+s`. Every input command answers with the state after the action, i.e. the foreground window and the focused element. Read that line instead of taking a new snapshot.
@@ -28,6 +28,8 @@ Call `scripts/cu` with its full path in every command. Don't put the command in 
 Refs (`eN`) are valid until the next `snapshot`/`find` on that machine. A stale ref gives a clear error; then take a new snapshot. No ref for the target? Use `click --text "Label"` (on macOS it falls back to OCR), then `shot` + `click --img X Y` with pixel coordinates from that shot.
 
 ## Rules
+
+- **Fluent and compact.** The person watches a screen that should keep moving. Chain steps with `batch` or back-to-back calls, use the post state of each reply instead of extra snapshots, never `sleep` between steps (use `wait` for real waits), keep `--settle` small and don't pause to think mid-session: plan first, then act in one go.
 
 - Never type secrets. `type`/`set-value` refuse password fields; `--password-ok` is only for the user's explicit consent in this conversation.
 - Prefer `press`/`set-value` (no mouse, works in the background) over coordinate clicks; prefer `snapshot -i` over `shot`.

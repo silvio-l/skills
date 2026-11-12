@@ -1,8 +1,8 @@
 # lan-computer-use: ensure the agent runs in the logged-on desktop session of the SSH user.
 # Called by cu.py over SSH (session 0); prints "STATE <json>" on success.
-#   setup-<build>.ps1 -Hash <build>  [-Idle <minutes>]   start or reuse the agent
+#   setup-<build>.ps1 -Hash <build>  [-Idle <minutes>] [-Version <n>]   start or reuse the agent
 #   setup-<build>.ps1 -Stop                               stop the agent and remove this directory
-param([string]$Hash = '', [int]$Idle = 30, [switch]$Stop)
+param([string]$Hash = '', [int]$Idle = 3, [int]$Version = 0, [switch]$Stop)
 $ErrorActionPreference = 'Stop'
 $dir = $PSScriptRoot
 $stateFile = Join-Path $dir 'state.json'
@@ -33,6 +33,8 @@ if ($Stop) {
 
 $s = Get-AgentState
 if ($s -and $s.build -eq $Hash) { 'STATE ' + ($s | ConvertTo-Json -Compress); exit 0 }
+# never replace a newer agent with the one of an outdated skill copy (another machine or session)
+if ($s -and [int]$s.version -gt $Version) { "OUTDATED: agent version $($s.version) runs here, this skill copy brings $Version"; exit 6 }
 Stop-Agent
 
 $exe = Join-Path $dir ("lcu-agent-$Hash.exe")
@@ -57,7 +59,7 @@ if (-not (Get-Process -Name explorer -ErrorAction SilentlyContinue | Where-Objec
 
 # A scheduled task with an interactive principal is the supported way from session 0 into the user's desktop.
 $name = 'lan-computer-use-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
-$action = New-ScheduledTaskAction -Execute $exe -Argument "--idle $Idle --build $Hash" -WorkingDirectory $dir
+$action = New-ScheduledTaskAction -Execute $exe -Argument "--idle $([Math]::Min($Idle, 5)) --build $Hash" -WorkingDirectory $dir
 $principal = New-ScheduledTaskPrincipal -UserId ([Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Limited
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
 Register-ScheduledTask -TaskName $name -Action $action -Principal $principal -Settings $settings -Force | Out-Null

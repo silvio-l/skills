@@ -11,14 +11,16 @@ import ImageIO
 import UniformTypeIdentifiers
 import Vision
 
-let VERSION = "1"
+let VERSION = "2" // bump with every behaviour change; setup refuses to replace a newer agent
 typealias Dict = [String: Any]
 
 struct AgentError: Error { let msg: String; init(_ m: String) { msg = m } }
 
 var token = ""
 var build = ""
-var idleMinutes = 30.0
+var idleMinutes = 3.0
+// control lease: input needs an announced slot of at most 5 min; after it ends plus a short grace the agent quits
+let leaseMax = 300.0, leaseGrace = 60.0
 var stateDir = ""
 var lastRequest = Date()
 var refs: [String: AXUIElement] = [:]
@@ -57,7 +59,7 @@ func runAgent() -> Int32 {
     var i = 1
     while i + 1 < argv.count {
         switch argv[i] {
-        case "--idle": idleMinutes = Double(argv[i + 1]) ?? 30
+        case "--idle": idleMinutes = min(Double(argv[i + 1]) ?? 3, 5)
         case "--build": build = argv[i + 1]
         case "--dir": stateDir = argv[i + 1]
         default: break
@@ -107,10 +109,10 @@ func runAgent() -> Int32 {
         _ = CFRunLoopRunInMode(CFRunLoopMode.defaultMode, 0, true)
         var pfd = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
         overlayTick()
-        if poll(&pfd, 1, 1000) <= 0 {
-            if Date().timeIntervalSince(lastRequest) > idleMinutes * 60 { break }
-            continue
-        }
+        // tick fast while the overlay is up so the cursor ring follows the mouse
+        let ready = poll(&pfd, 1, overlayOn ? 33 : 1000)
+        if shouldStop() { break }
+        if ready <= 0 { continue }
         let c = accept(fd, nil, nil)
         if c < 0 { continue }
         var one: Int32 = 1
@@ -128,6 +130,16 @@ func runAgent() -> Int32 {
         unlink(stateFile)
     }
     return 0
+}
+
+// an expired lease ends the agent after the grace; without a lease, idle time does
+// the controlling Claude Code session (local only): once it is gone nobody will ever end the task
+var ownerPid: pid_t = 0
+
+func shouldStop() -> Bool {
+    if ownerPid > 0 && kill(ownerPid, 0) != 0 && errno == ESRCH { return true }
+    if let end = taskEnd { return Date().timeIntervalSince(end) > leaseGrace }
+    return Date().timeIntervalSince(lastRequest) > idleMinutes * 60
 }
 
 func tokenOk(_ t: String) -> Bool {
@@ -229,6 +241,30 @@ var sessionName = ""
 var taskEnd: Date? = nil
 var actionText = ""
 var actionAt = Date()
+var keyText = ""
+var keyAt = Date.distantPast
+var textAt = Date.distantPast
+let keySymbols: [String: String] = [
+    "cmd": "⌘", "mod": "⌘", "win": "⌘", "ctrl": "⌃", "alt": "⌥", "shift": "⇧", "fn": "fn",
+    "enter": "↩", "return": "↩", "tab": "⇥", "space": "␣", "backspace": "⌫", "delete": "⌦", "esc": "⎋", "escape": "⎋",
+    "left": "←", "right": "→", "up": "↑", "down": "↓", "home": "↖", "end": "↘", "pageup": "⇞", "pagedown": "⇟"]
+
+// pressed keys as the person knows them from the keyboard, e.g. ⌘⇧T or ↩ ×3
+func keyDisplay(_ names: [String], times: Int) -> String {
+    let mods = ["ctrl", "alt", "shift", "cmd", "mod", "win", "fn"]
+    let sorted = names.filter { mods.contains($0) }.sorted { mods.firstIndex(of: $0)! < mods.firstIndex(of: $1)! }
+        + names.filter { !mods.contains($0) }
+    let s = sorted.map { keySymbols[$0] ?? $0.uppercased() }.joined()
+    return times > 1 ? s + " ×\(times)" : s
+}
+
+// typed text as the overlay shows it: quoted and clipped, secrets only as dots
+func typedDisplay(_ text: String, secret: Bool) -> String {
+    secret ? String(repeating: "•", count: min(text.count, 12))
+        : "„" + clip(text.replacingOccurrences(of: "\n", with: " ↩ "), 30) + "“"
+}
+
+func showKeys(_ s: String) { keyText = s; keyAt = Date(); overlayTick() }
 
 func mmss(_ t: Double) -> String { let s = max(0, Int(t.rounded())); return String(format: "%d:%02d", s / 60, s % 60) }
 
@@ -248,7 +284,7 @@ func actionLabel(_ cmd: String, _ a: Dict) -> String? {
     case "set-value": return tr("setzt einen Wert", "setting a value") + tgt
     case "focus": return tr("fokussiert", "focusing") + tgt
     case "type": let n = str(a, "text").count; return tr("tippt \(n) Zeichen", "typing \(n) characters")
-    case "key": let k = (a["keys"] as? [Any])?.map { "\($0)" }.joined(separator: " ") ?? ""; return tr("drückt ", "pressing ") + clip(k, 30)
+    case "key": return tr("drückt Tasten", "pressing keys")
     case "activate": return tr("holt ein Fenster nach vorn", "bringing a window to front")
     case "launch": return tr("startet ", "launching ") + clip((str(a, "target") as NSString).lastPathComponent, 30)
     default: return nil
@@ -269,17 +305,70 @@ func overlayText() -> NSAttributedString {
     if !actionText.isEmpty {
         add("\n▸ " + clip(actionText, 40) + " · " + tr("vor ", "") + mmss(now.timeIntervalSince(actionAt)) + tr("", " ago"), 12, .regular, white)
     }
+    // the last keys or typed text, large and yellow, for a few seconds
+    if !keyText.isEmpty && now.timeIntervalSince(keyAt) < 4 { add("\n⌨ " + clip(keyText, 34), 17, .semibold, .systemYellow) }
     var meta = [tr("läuft ", "running ") + mmss(now.timeIntervalSince(overlayStart))]
+    var warn = false
     if let end = taskEnd {
         let left = end.timeIntervalSince(now)
-        meta.append(left >= 0 ? tr("noch ca. ", "about ") + mmss(left) + tr("", " left") : tr("überzogen +", "overdue +") + mmss(-left))
+        warn = left < 60
+        meta.append(left >= 0 ? tr("Freigabe noch ", "control ends in ") + mmss(left)
+                    : tr("Zeit abgelaufen · Ende in ", "time is up · stopping in ") + mmss(leaseGrace + left))
+    } else {
+        meta.append(tr("Auto-Ende ", "auto-stop ") + mmss(idleMinutes * 60 - now.timeIntervalSince(lastRequest)))
     }
-    meta.append(tr("Auto-Ende ", "auto-stop ") + mmss(idleMinutes * 60 - now.timeIntervalSince(lastRequest)))
-    add("\n" + meta.joined(separator: " · "), 11, .regular, dim)
+    add("\n" + meta.joined(separator: " · "), 11, warn ? .semibold : .regular, warn ? .systemYellow : dim)
     return out
 }
 
 var overlayIcon: NSImageView? = nil
+var overlayDrawn = Date.distantPast
+
+// a yellow ring around the mouse pointer while the computer is controlled, so the person can follow it
+var ringPanel: NSPanel? = nil
+let ringSize: CGFloat = 46
+
+func makeRing() {
+    let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: ringSize, height: ringSize), styleMask: [.borderless, .nonactivatingPanel],
+                    backing: .buffered, defer: false)
+    p.level = .screenSaver
+    p.isOpaque = false
+    p.backgroundColor = .clear
+    p.hasShadow = false
+    p.ignoresMouseEvents = true
+    p.hidesOnDeactivate = false
+    p.isReleasedWhenClosed = false
+    p.sharingType = .none
+    p.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
+    let v = NSView(frame: NSRect(x: 0, y: 0, width: ringSize, height: ringSize))
+    v.wantsLayer = true
+    for (width, color, inset) in [(5.0, NSColor(white: 0, alpha: 0.45), 4.0), (3.0, NSColor.systemYellow, 4.0)] {
+        let l = CAShapeLayer()
+        l.path = CGPath(ellipseIn: CGRect(x: inset, y: inset, width: ringSize - 2 * inset, height: ringSize - 2 * inset), transform: nil)
+        l.fillColor = NSColor.clear.cgColor
+        l.strokeColor = color.cgColor
+        l.lineWidth = CGFloat(width)
+        v.layer?.addSublayer(l)
+    }
+    p.contentView = v
+    ringPanel = p
+}
+
+// p in Cocoa screen coordinates (origin bottom-left of the primary screen)
+func ringAtCocoa(_ p: NSPoint) {
+    guard overlayOn else { return }
+    if ringPanel == nil { makeRing() }
+    guard let r = ringPanel else { return }
+    r.setFrameOrigin(NSPoint(x: p.x - ringSize / 2, y: p.y - ringSize / 2))
+    if !r.isVisible { r.orderFrontRegardless() }
+    CATransaction.flush()
+}
+
+// p in CoreGraphics coordinates (origin top-left of the primary display), as the mouse events use them
+func ringAt(_ p: CGPoint) {
+    let h = NSScreen.screens.first?.frame.height ?? mainDisplayRect().height
+    ringAtCocoa(NSPoint(x: p.x, y: h - p.y))
+}
 
 func makeOverlay() {
     let app = NSApplication.shared
@@ -324,8 +413,13 @@ func overlayTick() {
     // drain AppKit events so the panel stays responsive to the window server
     while let e = NSApp?.nextEvent(matching: .any, until: nil, inMode: .default, dequeue: true) { NSApp.sendEvent(e) }
     guard overlayOn else { return }
+    ringAtCocoa(NSEvent.mouseLocation)
     if overlayPanel == nil { makeOverlay() }
     guard let p = overlayPanel, let l = overlayLabel else { return }
+    // the text only needs a few redraws a second; the ring above follows the mouse at the tick rate
+    if p.isVisible && Date().timeIntervalSince(overlayDrawn) < 0.25 && Date().timeIntervalSince(actionAt) > 0.3
+        && Date().timeIntervalSince(keyAt) > 0.3 { return }
+    overlayDrawn = Date()
     l.attributedStringValue = overlayText()
     let width: CGFloat = 300, pad: CGFloat = 9, iconW: CGFloat = 26
     let textW = width - 2 * pad - iconW - 8
@@ -342,22 +436,28 @@ func overlayTick() {
 
 func overlayHide() {
     overlayPanel?.orderOut(nil)
+    ringPanel?.orderOut(nil)
     CATransaction.flush()
 }
 
 func taskCmd(_ a: Dict) -> Dict {
     if bool(a, "done") {
-        taskText = ""; taskEnd = nil; actionText = ""; sessionName = ""
+        taskText = ""; taskEnd = nil; actionText = ""; sessionName = ""; keyText = ""; ownerPid = 0
         overlayOn = false
         overlayHide()
         return ["ok": true, "overlay": "hidden"]
     }
     if has(a, "text") { taskText = str(a, "text") }
     if has(a, "session") { sessionName = str(a, "session") }
-    if has(a, "eta") { let e = num(a, "eta", 0); taskEnd = e > 0 ? Date().addingTimeInterval(e) : nil }
+    if has(a, "owner_pid") { ownerPid = pid_t(int(a, "owner_pid", 0)) }
+    // a lease is at most 5 min; a longer job renews it with another task call
+    if has(a, "eta") { let e = min(num(a, "eta", 0), leaseMax); taskEnd = e > 0 ? Date().addingTimeInterval(e) : nil }
     if !overlayOn { overlayOn = true; overlayStart = Date() }
+    overlayDrawn = .distantPast
     overlayTick()
-    return ["ok": true, "overlay": "shown"]
+    var r: Dict = ["ok": true, "overlay": "shown"]
+    if let end = taskEnd { r["lease_left"] = Int(end.timeIntervalSinceNow.rounded()) }
+    return r
 }
 
 // ---------- session state ----------
@@ -368,7 +468,18 @@ func desktopState() -> String {
     return "normal"
 }
 
+func requireLease() throws {
+    guard let end = taskEnd else {
+        throw AgentError("no control lease: announce first with cu task \"WHAT\" --eta DURATION (at most 5m)")
+    }
+    let over = Date().timeIntervalSince(end)
+    if over > 0 {
+        throw AgentError("control lease expired \(mmss(over)) ago: finish with cu task --done and cu down, or renew with cu task --eta DURATION (at most 5m)")
+    }
+}
+
 func requireInput() throws {
+    try requireLease()
     let d = desktopState()
     if d != "normal" { throw AgentError("screen is \(d): stop and ask the user") }
     if !AXIsProcessTrusted() {
@@ -1071,8 +1182,18 @@ func mouseEvent(_ type: CGEventType, _ p: CGPoint, _ btn: CGMouseButton, clicks:
     e.post(tap: .cghidEventTap)
 }
 
+// a short glide (at most ~0.1 s) instead of a jump, so the person can follow where the pointer goes
 func moveMouse(_ p: CGPoint) {
-    mouseEvent(.mouseMoved, p, .left)
+    let from = CGEvent(source: nil)?.location ?? p
+    let d = hypot(p.x - from.x, p.y - from.y)
+    let steps = d < 8 ? 1 : min(10, max(4, Int(d / 80)))
+    for i in 1...steps {
+        let t = CGFloat(i) / CGFloat(steps), e = t * t * (3 - 2 * t)
+        let q = steps == 1 ? p : CGPoint(x: from.x + (p.x - from.x) * e, y: from.y + (p.y - from.y) * e)
+        mouseEvent(.mouseMoved, q, .left)
+        ringAt(q)
+        if i < steps { sleepMs(10) }
+    }
     sleepMs(15)
 }
 
@@ -1117,7 +1238,9 @@ func drag(_ a: Dict) throws -> Dict {
     let steps = 12
     for i in 1...steps {
         let t = CGFloat(i) / CGFloat(steps)
-        mouseEvent(.leftMouseDragged, CGPoint(x: p1.x + (p2.x - p1.x) * t, y: p1.y + (p2.y - p1.y) * t), .left)
+        let q = CGPoint(x: p1.x + (p2.x - p1.x) * t, y: p1.y + (p2.y - p1.y) * t)
+        mouseEvent(.leftMouseDragged, q, .left)
+        ringAt(q)
         sleepMs(15)
     }
     sleepMs(60)
@@ -1180,6 +1303,7 @@ func setValue(_ a: Dict) throws -> Dict {
     let e = try getRef(a)
     try requireNotPassword(e, a)
     let text = str(a, "text")
+    showKeys(typedDisplay(text, secret: axString(e, "AXSubrole") == "AXSecureTextField" || bool(a, "password_ok")))
     var how: String
     var settable = DarwinBoolean(false)
     if !isWeb(e), AXUIElementIsAttributeSettable(e, "AXValue" as CFString, &settable) == .success, settable.boolValue,
@@ -1216,7 +1340,11 @@ func typeCmd(_ a: Dict) throws -> Dict {
         targetEl = axElem(axAttr(app, "AXFocusedUIElement"))
     }
     try requireNotPassword(targetEl, a)
-    typeText(str(a, "text"))
+    let secure = targetEl.map { axString($0, "AXSubrole") == "AXSecureTextField" } ?? false
+    let text = str(a, "text")
+    // the person sees the text in the field anyway; secrets show only as dots
+    showKeys(typedDisplay(text, secret: secure || bool(a, "password_ok")))
+    typeText(text)
     sleepMs(int(a, "settle", 80))
     return post()
 }
@@ -1311,6 +1439,7 @@ func keyCmd(_ a: Dict) throws -> Dict {
     try requireInput()
     guard let keys = a["keys"] as? [Any], !keys.isEmpty else { throw AgentError("key needs keys") }
     let names = keys.map { "\($0)".lowercased() }
+    showKeys(keyDisplay(names, times: max(1, int(a, "times", 1))))
     for _ in 0..<max(1, int(a, "times", 1)) { try sendCombo(names); sleepMs(30) }
     sleepMs(int(a, "settle", 120))
     return post()
