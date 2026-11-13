@@ -27,16 +27,24 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import concept  # noqa: E402
 
 MAX_ROUNDS = 3
 DECISIONS = ("copy", "direction")
 MIN_COMPETITORS = 3
+MIN_GALLERY = 3
+GALLERY_HOSTS = {"awwwards.com", "godly.website", "land-book.com", "lapa.ninja", "siteinspire.com", "onepagelove.com",
+                 "saaslandingpage.com", "landingfolio.com", "saasframe.io", "httpster.net", "minimal.gallery",
+                 "cssdesignawards.com", "refero.design", "mobbin.com", "dribbble.com", "behance.net", "admireweb.com"}
 MIN_WIDTHS = 3
 SKIP_DIRS = {"node_modules", ".git", "dist", "build", ".next", ".nuxt", ".output", ".astro", ".svelte-kit",
              ".website-creator", "out", "coverage", ".turbo", ".vercel", ".cache"}
 SOURCE_SUFFIXES = {".html", ".htm", ".css", ".scss", ".js", ".jsx", ".ts", ".tsx", ".vue", ".svelte", ".astro",
                    ".md", ".mdx", ".json", ".php", ".twig", ".liquid", ".njk"}
-GATE_CHECKS = ("decisions", "research", "lint", "render", "design-md", "fresh")
+MIN_DIRECTIONS = 3
+DIRECTION_FIELDS = ("color", "imagery", "motion")
+GATE_CHECKS = ("decisions", "research", "gallery", "concept", "directions", "lint", "render", "design-md", "fresh")
 
 
 def now():
@@ -100,9 +108,21 @@ class Run:
             if not research.exists():
                 problems.append(("research", ".website-creator/research.md is missing (competitor research, see references/research.md)"))
             else:
-                hosts = competitor_hosts(research.read_text(encoding="utf-8"))
+                text = research.read_text(encoding="utf-8")
+                hosts = competitor_hosts(text)
                 if len(hosts) < MIN_COMPETITORS:
                     problems.append(("research", f".website-creator/research.md names {len(hosts)} competitor sites, needs {MIN_COMPETITORS}"))
+                refs = gallery_refs(text)
+                if len(refs) < MIN_GALLERY and "gallery" not in waived:
+                    problems.append(("gallery", f".website-creator/research.md lists {len(refs)} gallery references under "
+                                     f"`## Gallery`, needs {MIN_GALLERY} (references/research.md; unreachable galleries go "
+                                     "under `## Gaps`, then `run.py waive gallery --reason ...`)"))
+
+        if "concept" not in waived:
+            problems += [("concept", m) for m in concept.record_problems(self.dir / "concept")]
+
+        if "directions" not in waived:
+            problems += [("directions", m) for m in direction_problems(self.dir / "directions.md")]
 
         lint = self.dir / "lint.json"
         if "lint" not in waived:
@@ -134,16 +154,73 @@ class Run:
         return problems
 
 
+def direction_sections(text):
+    """[(heading, body)] for every `## ` section of directions.md."""
+    parts = re.split(r"^## +(.+)$", text, flags=re.M)
+    return [(parts[i].strip(), parts[i + 1]) for i in range(1, len(parts) - 1, 2)]
+
+
+def direction_problems(path):
+    """Gate messages for .website-creator/directions.md: three sketches, each with source weights, color,
+    imagery and motion, and at least one marked radical."""
+    hint = "(references/direction.md, Writing it down)"
+    if not path.exists():
+        return [f".website-creator/directions.md is missing {hint}"]
+    sections = direction_sections(path.read_text(encoding="utf-8"))
+    if len(sections) < MIN_DIRECTIONS:
+        return [f"directions.md has {len(sections)} `## ` direction sections, needs {MIN_DIRECTIONS} {hint}"]
+    problems, radical = [], False
+    for head, body in sections:
+        src = re.search(r"^\W*sources\W*:(.*)$", body, re.M | re.I)
+        shares = [int(n) for n in re.findall(r"(\d{1,3})\s*%", src.group(1))] if src else []
+        if len(shares) < 2 or abs(sum(shares) - 100) > 1:
+            problems.append(f"direction '{head}' has no `Sources:` line with percentages that sum to 100")
+        missing = [f for f in DIRECTION_FIELDS if not re.search(rf"^\W*{f}\W*:\s*\S", body, re.M | re.I)]
+        if missing:
+            problems.append(f"direction '{head}' does not show {', '.join(missing)} (`Color:`, `Imagery:`, `Motion:` lines)")
+        radical = radical or bool(re.search(r"\bradical\b", head, re.I) or re.search(r"^\W*radical\W*:\s*\S", body, re.M | re.I))
+    if not radical:
+        problems.append("no direction is marked radical (`radical` in its heading or a `Radical:` line)")
+    return problems
+
+
+URL_RE = re.compile(r"https?://([^/\s)>\]\"']+)[^\s)>\]\"']*")
+
+
+def split_gallery(text):
+    """Return (text outside the `## Gallery` section, text inside it)."""
+    outside, inside, in_gallery = [], [], False
+    for line in text.splitlines():
+        if line.startswith("## "):
+            in_gallery = line[3:].strip().lower().startswith("gallery")
+        (inside if in_gallery else outside).append(line)
+    return "\n".join(outside), "\n".join(inside)
+
+
+def host_of(raw):
+    host = raw.lower().split(":")[0]
+    return host[4:] if host.startswith("www.") else host
+
+
 def competitor_hosts(text):
+    """Distinct competitor hosts: every URL outside the gallery section that is not a gallery or local."""
     hosts = set()
-    for m in re.finditer(r"https?://([^/\s)>\]\"']+)", text):
-        host = m.group(1).lower().split(":")[0]
-        if host.startswith("www."):
-            host = host[4:]
-        if host in {"localhost", "127.0.0.1"}:
+    for m in URL_RE.finditer(split_gallery(text)[0]):
+        host = host_of(m.group(1))
+        if host in {"localhost", "127.0.0.1"} or host in GALLERY_HOSTS:
             continue
         hosts.add(host)
     return hosts
+
+
+def gallery_refs(text):
+    """Distinct example URLs listed in the `## Gallery` section."""
+    refs = set()
+    for m in URL_RE.finditer(split_gallery(text)[1]):
+        if host_of(m.group(1)) in {"localhost", "127.0.0.1"}:
+            continue
+        refs.add(m.group(0).rstrip(".,;").rstrip("/"))
+    return refs
 
 
 def report_problems(name, path, waived, hint):

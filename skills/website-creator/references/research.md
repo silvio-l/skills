@@ -1,6 +1,6 @@
 # Competitor research
 
-Goal: know what the three biggest competitors say and show, so that our page argues and looks different on purpose. Inspiration, never imitation.
+Goal: know what the three biggest competitors say and show, so that our page argues and looks different on purpose, and see what the best pages outside the category do. Inspiration, never imitation.
 
 ## Choosing the three
 
@@ -24,9 +24,22 @@ pwc --headless stop
 
 `curl -sL` is fine for static pages; JS-rendered pages need pwc. Dismiss cookie banners before screenshots. If a page blocks automation, record the gap instead of guessing.
 
+## Gallery examples
+
+Competitors show the category's conventions; galleries show what is possible beyond them. Pick at least three current examples (ideally from the last 12 months) that fit the page mode and the product's mood, not the category: a dev tool may borrow from a festival page.
+
+- Sources: Awwwards (Sites of the Day), Godly, Land-book, Lapa Ninja, Siteinspire, One Page Love, SaaS Landing Page, Minimal Gallery, CSS Design Awards.
+- Open the gallery entry, then the live site; screenshot the live site at 1440 (and 375 when its mobile view teaches something) into `.website-creator/research/gallery-<name>-1440.png`.
+- Per example, name the **one principle** worth borrowing ("the hero is a playable instrument", "one drenched color with white rule ink"), never the whole look.
+- A gallery that blocks automation or shows nothing usable goes under `## Gaps` with the reason. If none is reachable, record that and `run.py waive gallery --reason "…"`.
+
+## Reference board
+
+Before the directions phase, put the competitor and gallery screenshots side by side (a throwaway `.website-creator/research/board.html` grid, rendered to `board-1440.png`, is enough) and note for each direction which references feed it and which competitor convention it breaks. The three directions draw on different references; a direction without a reference is fine only when it says so.
+
 ## `.website-creator/research.md`
 
-The gate counts distinct competitor hosts in this file (needs three). Structure:
+The gate counts distinct competitor hosts outside the `## Gallery` section (needs three, gallery sites never count) and distinct example URLs inside it (needs three, or a waiver). Structure:
 
 ```markdown
 # Research: <page>, <date>
@@ -37,8 +50,12 @@ The gate counts distinct competitor hosts in this file (needs three). Structure:
 - Visual signature: layout archetype, type, colors, imagery, motion
 - Strong: …  Weak/generic: …
 
+## Gallery
+- https://www.awwwards.com/sites/… → https://live-site.example (Awwwards SOTD, fetched 2026-11-13): principle borrowed — …
+- …
+
 ## Gaps
-Pages or sections that could not be read, and why.
+Galleries, pages or sections that could not be read, and why.
 
 ## Our distance
 - Message: what we say that none of them can or does.
@@ -46,4 +63,4 @@ Pages or sections that could not be read, and why.
 - What we keep because users expect it (e.g. pricing table).
 ```
 
-The "Our distance" section feeds both decisions: the copy skeleton and each of the three directions must name how they differ.
+The "Our distance" section feeds both decisions: the copy skeleton and each of the three directions must name how they differ. The gallery principles and the reference board feed the directions.

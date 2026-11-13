@@ -35,7 +35,7 @@ RULES = {
     "gradient-text": ("error", "Gradient-clipped text is decoration, not meaning; use a solid color."),
     "ai-color-palette": ("error", "Purple/violet/indigo gradient: the most recognizable generated-UI palette."),
     "side-tab": ("error", "Thick colored border on one side of a card; use spacing, weight or a full outline."),
-    "bounce-easing": ("error", "Bounce/elastic or overshooting easing; use a smooth deceleration (ease-out curves)."),
+    "bounce-easing": ("error", "Bounce/elastic or strongly overshooting easing; use ease-out or a damped spring."),
     "scale-zero": ("error", "Animating from scale(0) pops; start near 0.9-0.96 with opacity instead."),
     "missing-testid": ("error", "Interactive element or form without data-testid (or testID)."),
     "img-alt": ("error", "Image without alt attribute (use alt=\"\" for decoration)."),
@@ -52,6 +52,10 @@ RULES = {
     "pulsing-dot": ("warning", "Pulse/ping animation simulating liveness; keep it only for real live status."),
     "blinking-cursor": ("warning", "Typing-cursor animation where no input exists."),
     "marquee": ("warning", "Auto-scrolling marquee hides half its content and demands attention."),
+    "overshoot-easing": ("warning", "Overshooting easing: fine on small controls, never on large surfaces or sections."),
+    "uniform-sections": ("warning", "Three or more consecutive sections with the same shape; vary form or merge them."),
+    "text-heavy": ("warning", "Text-heavy page; let a demo, image or motion carry part of it and cut sections."),
+    "long-paragraph": ("warning", "Paragraph over about 70 words; split it or show the point instead."),
     "eyebrow-label": ("warning", "Tiny tracked uppercase label above a heading (eyebrow/kicker) is a generated-UI tell."),
     "numbered-section-labels": ("warning", "Numbered section labels (01, 02, ...) repeated as decoration."),
     "radial-halo": ("warning", "Chromatic radial-gradient glow behind content."),
@@ -107,6 +111,12 @@ def font_pattern(name):
 
 
 FONT_PATTERNS = [(f, font_pattern(f)) for f in OVERUSED_FONTS]
+STRONG_OVERSHOOT = (-0.6, 1.6)  # cubic-bezier y outside this range reads as bounce, not settle
+PAGE_WORDS = 800  # visible words per page (markup file) before text-heavy fires
+LOCALE_WORDS = 1500  # a locale file usually holds several pages
+PARAGRAPH_WORDS = 70
+MEDIA_TAG = re.compile(r"<(img|picture|video|canvas|svg|iframe|model-viewer)\b", re.I)
+INTERACTIVE_TAG = re.compile(r"<(button|input|select|textarea|details|form)\b|role\s*=\s*[\"'](tab|slider|switch)", re.I)
 FONT_CONTEXT = re.compile(r"font|family|fontsource|next/font|typeface", re.I)
 
 
@@ -211,6 +221,48 @@ def tag_spans(text, names):
         yield m.group(1).lower(), text[m.end():i], m.start()
 
 
+def visible_text(markup):
+    t = re.sub(r"<(script|style|svg|template)\b.*?</\1\s*>", " ", markup, flags=re.I | re.S)
+    t = re.sub(r"<!--.*?-->|\{/\*.*?\*/\}", " ", t, flags=re.S)
+    t = re.sub(r"\A---\n.*?\n---", " ", t, flags=re.S)  # Astro/MDX front matter
+    t = re.sub(r"<[^>]*>", " ", t)
+    t = re.sub(r"\{[^{}]*\}", " ", t)
+    return re.sub(r"&\w+;", " ", t)
+
+
+def visible_words(markup):
+    body = re.search(r"<body\b.*", markup, re.I | re.S)
+    return sum(1 for w in visible_text(body.group(0) if body else markup).split() if re.search(r"[A-Za-zÄÖÜäöüß]{2}", w))
+
+
+def json_strings(node):
+    if isinstance(node, str):
+        yield node
+    elif isinstance(node, dict):
+        for v in node.values():
+            yield from json_strings(v)
+    elif isinstance(node, list):
+        for v in node:
+            yield from json_strings(v)
+
+
+def section_signature(body):
+    """Coarse shape of a section: heading level, paragraph and item buckets, media, interaction."""
+    inner = re.sub(r"\A<section\b[^>]*>", "", body, flags=re.I)
+    h = re.search(r"<h([1-6])\b", inner, re.I)
+    paras = len(re.findall(r"<p\b", inner, re.I))
+    items = len(re.findall(r"<(li|article)\b", inner, re.I))
+    return (h.group(1) if h else "-", min(paras, 3), 0 if items == 0 else 1 if items < 3 else 3,
+            bool(MEDIA_TAG.search(inner)), bool(INTERACTIVE_TAG.search(inner)))
+
+
+def describe(sig):
+    h, paras, items, media, inter = sig
+    return (f"h{h}" if h != "-" else "no heading") + f", {paras}{'+' if paras == 3 else ''} paragraphs, " \
+        + f"{'no' if not items else '1-2' if items == 1 else '3+'} items, " \
+        + ("media" if media else "no media") + ", " + ("interactive" if inter else "static")
+
+
 class Linter:
     def __init__(self, design):
         self.design = design
@@ -275,11 +327,18 @@ class Linter:
                     vals = [float(v) for v in args.split(",")]
                 except ValueError:
                     continue
-                if len(vals) == 4 and (not 0 <= vals[1] <= 1 or not 0 <= vals[3] <= 1):
+                if len(vals) != 4:
+                    continue
+                ys = (vals[1], vals[3])
+                if any(y > STRONG_OVERSHOOT[1] or y < STRONG_OVERSHOOT[0] for y in ys):
                     self.add("bounce-easing", path, n, "cubic-bezier(" + args + ")", lines)
-            if re.search(r"\b(bounce|elastic|easeoutback|backout|back\.out|elastic\.out|bounce\.out)\b", low) and \
-                    re.search(r"ease|easing|animation|transition|gsap|timing", low):
-                self.add("bounce-easing", path, n, line.strip(), lines)
+                elif any(not 0 <= y <= 1 for y in ys):
+                    self.add("overshoot-easing", path, n, "cubic-bezier(" + args + ")", lines)
+            if re.search(r"ease|easing|animation|transition|gsap|timing", low):
+                if re.search(r"\b(bounce|elastic)(\.\w+)?\b|\bease(in|out|inout)?(bounce|elastic)\b", low):
+                    self.add("bounce-easing", path, n, line.strip(), lines)
+                elif re.search(r"\b(ease(in|out|inout)?back|backout|back\.(out|in|inout))\b", low):
+                    self.add("overshoot-easing", path, n, line.strip(), lines)
             if re.search(r"scale\(\s*0\s*\)|\bscale\s*:\s*0\s*[;,}\n]|scale-0\b", low):
                 self.add("scale-zero", path, n, line.strip(), lines)
             if re.search(r"\bease-in\b(?!-)", low) and "ease-in-out" not in low:
@@ -337,6 +396,7 @@ class Linter:
                         self.add("design-system-font", path, n, first, lines)
         if kind == "markup":
             self.tag_rules(path, text, lines)
+            self.section_rules(path, text, lines)
 
     def tag_rules(self, path, text, lines):
         def line_of(offset):
@@ -359,6 +419,35 @@ class Linter:
         for n, line in enumerate(lines, 1):
             if re.search(PLACEHOLDER_HOSTS, line, re.I):
                 self.add("placeholder-image", path, n, line.strip(), lines)
+
+    def section_rules(self, path, text, lines):
+        """uniform-sections, text-heavy and long-paragraph for one markup file."""
+        def line_of(offset):
+            return text.count("\n", 0, offset) + 1
+        blocks, depth, start = [], 0, None
+        for m in re.finditer(r"<(/?)section\b[^>]*>", text, re.I):
+            if not m.group(1):
+                if depth == 0:
+                    start = m.start()
+                depth += 1
+            elif depth:
+                depth -= 1
+                if depth == 0:
+                    blocks.append((start, text[start:m.end()]))
+        run, prev = 0, None
+        for off, body in blocks:
+            sig = section_signature(body)
+            run = run + 1 if sig == prev else 1
+            prev = sig
+            if run == 3:
+                self.add("uniform-sections", path, line_of(off), "same shape: " + describe(sig), lines)
+        words = visible_words(text)
+        if words > PAGE_WORDS:
+            self.add("text-heavy", path, 1, f"{words} visible words (tendency: under {PAGE_WORDS})", lines)
+        for m in re.finditer(r"<p\b[^>]*>(.*?)</p>", text, re.I | re.S):
+            count = len(visible_text(m.group(1)).split())
+            if count > PARAGRAPH_WORDS:
+                self.add("long-paragraph", path, line_of(m.start()), f"{count} words", lines)
 
     # -- copy ---------------------------------------------------------------
     def copy_rules(self, path, text, lines, kind):
@@ -401,6 +490,14 @@ class Linter:
                 if re.fullmatch(r"[A-ZÄÖÜ][^.!?]{1,30}[.!]\s+[A-ZÄÖÜ][^.!?]{1,40}[.!]", seg) or \
                         re.fullmatch(r"[A-ZÄÖÜ][^.!?]{1,30}\.\s+(?:Kein|Keine|Nur|Just|No|Not)\b[^.!?]{1,40}\.", seg):
                     self.slogans.append((path, n, seg, lines))
+        if kind == "locale":
+            try:
+                words = sum(len(v.split()) for v in json_strings(json.loads(text)))
+            except ValueError:
+                words = 0
+            if words > LOCALE_WORDS:
+                self.add("text-heavy", path, 1, f"{words} words in this locale file (tendency: under {LOCALE_WORDS})",
+                         lines)
         if dashes >= 4 and prose_chars and dashes / prose_chars > 1 / 350:
             self.add("em-dash-overuse", path, 1, f"{dashes} em dashes in {prose_chars} characters", lines)
 

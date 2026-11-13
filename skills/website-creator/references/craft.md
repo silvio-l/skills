@@ -23,7 +23,10 @@ What separates a finished page from a generated one. The scripts catch the mecha
 - Every interactive element has `data-testid`, a visible `:focus-visible` style, and ≥ 44×44px tap area on mobile.
 - Links say where they go; buttons say what happens ("Kostenlos testen – ohne Kreditkarte", not "Mehr erfahren").
 - Anchor links land below a sticky header (`scroll-margin-top`).
-- Forms: labels, autocomplete, inline errors, success state; real backend or none.
+- Forms: labels, autocomplete, inline errors, success state; real backend or none. Errors via `aria-invalid` and `aria-describedby`, and the message says what happened, why, and what to do next.
+- One primary action per screen; campaign landing pages reduce the navigation so it does not compete with it.
+- Dialogs return focus to the element that opened them. No `tabindex` above 0.
+- Loading states mirror the structure of what arrives (skeleton of the real layout), not a generic spinner block.
 
 ## Accessibility and semantics
 
@@ -37,8 +40,25 @@ What separates a finished page from a generated one. The scripts catch the mecha
 - No layout shift from fonts or images. JS only for what needs it.
 - Meta: title, description, Open Graph image (1200×630), canonical, favicon set.
 
+## Polish loop
+
+After the checks are clean, look at the 1440 and 375 screenshots and answer honestly:
+
+0. Five-second test: shown the first viewport for five seconds, can someone say what the product is, for whom, and what to click?
+1. Would a visitor describe the page afterwards in one sentence — and is that sentence about this product?
+2. Is the centerpiece the loudest thing, and does it show the product rather than decorate it?
+3. Does the skeleton (text greyed out) have a peak, or is it a column of equal blocks?
+4. Does every element react to pointer and touch (`references/liveliness.md`)?
+5. Is the color posture from the chosen direction actually on screen, or did it drift toward neutral?
+6. Is there a screen that only explains in text what could be shown?
+7. Is any section there out of habit (logo wall, three cards, FAQ nobody asked for)?
+8. What would a top studio change with three more days?
+
+Fix the three worst answers, render again, repeat while a round still finds something substantial. Rebuild a weak part instead of patching it.
+
 ## Copy on the page
 
 - TASTE.md checklist passes. Every number and claim has a source.
+- Counts (users, downloads, ratings) only when verified, with their date; never a "Join 10,000+" template. Missing facts stay visible placeholders for the user to fill, never invented — and sample data avoids suspiciously round numbers.
 - Same term for the same thing everywhere (UI labels match the app).
 - Legal pages (Impressum, Datenschutz) linked in the footer for German sites.

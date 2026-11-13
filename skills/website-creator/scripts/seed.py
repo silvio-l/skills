@@ -6,9 +6,11 @@ Usage:
   seed.py [--project .] pick N [--out DESIGN.md] [--force]
   seed.py [--project .] history
 
-`roll` derives layout archetype, type pairing, surface mode, OKLCH palette and a motion tier from a SHA-256 seed,
-skipping combinations used in recent runs (.website-creator/history.json), and stores them in
-.website-creator/directions.json. `pick` records the chosen direction and writes a DESIGN.md skeleton from it.
+`roll` derives layout archetype, type pairing, color posture, surface mode, OKLCH palette, motion tier and a source
+weighting from a SHA-256 seed, skipping combinations used in recent runs (.website-creator/history.json), and stores
+them in .website-creator/directions.json. The directions never share a posture, motion tier or leading source, and
+one of them is always radical (drenched or full-palette color, a signature or video motion tier, competitors
+weighted lowest). `pick` records the chosen direction and writes a DESIGN.md skeleton from it.
 Without --brand a hue is derived from the seed (never violet). Stdlib only.
 """
 import argparse
@@ -49,7 +51,19 @@ FONT_PAIRS = [
 ]
 
 SURFACES = ["light", "dark", "brand"]
+POSTURES = ["restrained", "committed", "drenched", "full-palette"]
+RADICAL_POSTURES = ("drenched", "full-palette")
 MOTION = ["restrained", "signature", "video"]
+SOURCES = ["origin-rules", "competitors", "galleries", "concept"]
+SOURCE_TEXT = {
+    "origin-rules": "the skill's craft and look references (looks.md, centerpiece.md, liveliness.md)",
+    "competitors": "the competitor screenshots: category conventions users already know",
+    "galleries": "the gallery examples on the reference board: what the best pages outside the category do",
+    "concept": "the concept image (.website-creator/concept/): the image model's own reading of the brief",
+}
+RADICAL_NOTE = ("Radical: breaks visibly with the competitors. It may loosen performance budgets (heavier media, "
+                "WebGL, longer motion) if it names each loosened budget and why; WCAG AA and the strict CSP stay hard.")
+ACCENT_CHROMA = {"restrained": 0.12, "committed": 0.16, "drenched": 0.2, "full-palette": 0.2}
 MOTION_TEXT = {
     "restrained": "CSS transitions and scroll-driven animation (animation-timeline: view()), no JS animation library.",
     "signature": "One signature moment with GSAP/ScrollTrigger, a shader or Three.js; everything else restrained.",
@@ -180,7 +194,7 @@ class Rng:
         return items
 
 
-def palette(brand_hex, surface, rng):
+def palette(brand_hex, surface, rng, posture="restrained"):
     bL, bC, bH = rgb_to_oklch(hex_to_rgb(brand_hex))
     tint_c = min(0.02, max(0.006, bC * 0.12))
     if 50 <= bH <= 110:  # warm brand: keep light neutrals from drifting into cream
@@ -197,10 +211,12 @@ def palette(brand_hex, surface, rng):
         ink = fit_lightness(0.94, tint_c * 0.5, bH, bg, 12.0, 0.01)
         muted = fit_lightness(0.72, tint_c, bH, bg, 4.8, 0.02)
         line = oklch_to_hex(0.32, tint_c, bH)
-    else:  # brand-colored surface
-        L = 0.3 if bL < 0.6 else 0.9
-        bg = oklch_to_hex(L, min(bC, 0.14), bH)
-        bg2 = oklch_to_hex(L + (0.05 if L < 0.5 else -0.05), min(bC, 0.12), bH)
+    else:  # brand-colored surface; a radical posture soaks it in near-full chroma
+        L = (0.4 if bL < 0.6 else 0.83) if posture in RADICAL_POSTURES else (0.3 if bL < 0.6 else 0.9)
+        cap = 0.22 if posture in RADICAL_POSTURES else 0.14
+        surf_c = max(bC, 0.12) if posture in RADICAL_POSTURES else bC
+        bg = oklch_to_hex(L, min(surf_c, cap), bH)
+        bg2 = oklch_to_hex(L + (0.05 if L < 0.5 else -0.05), min(surf_c, cap - 0.02), bH)
         step = 0.02 if L < 0.5 else -0.02
         ink = fit_lightness(0.97 if L < 0.5 else 0.2, 0.01, bH, bg, 10.0, step)
         muted = fit_lightness(0.85 if L < 0.5 else 0.35, 0.02, bH, bg, 4.8, step)
@@ -208,19 +224,60 @@ def palette(brand_hex, surface, rng):
     rotation = [150, 180, 210, 35, -35, 120][rng.int(6)]
     aH = away_from_violet(bH + rotation)
     dark_bg = luminance(bg) < 0.18
-    accent = fit_lightness(0.72 if dark_bg else 0.55, 0.16, aH, bg, 3.0, 0.02 if dark_bg else -0.02)
+    accent = fit_lightness(0.72 if dark_bg else 0.55, ACCENT_CHROMA.get(posture, 0.16), aH, bg, 3.0,
+                           0.02 if dark_bg else -0.02)
     brand_ink = brand_hex.lower() if contrast(brand_hex, bg) >= 4.5 else \
         fit_lightness(bL, bC, bH, bg, 4.5, 0.02 if dark_bg else -0.02)
     colors = {"surface": bg, "surface-2": bg2, "ink": ink, "ink-muted": muted, "line": line,
               "brand": brand_hex.lower(), "brand-ink": brand_ink, "accent": accent}
     checks = {"ink/surface": round(contrast(ink, bg), 2), "ink-muted/surface": round(contrast(muted, bg), 2),
               "brand-ink/surface": round(contrast(brand_ink, bg), 2), "accent/surface": round(contrast(accent, bg), 2)}
+    if posture in ("committed", "full-palette"):
+        # a whole section ground in strong color, with its own text color; full-palette rotates it off the brand
+        fH = bH if posture == "committed" else away_from_violet(aH + 180 if abs((aH - bH) % 360 - 180) > 60 else bH + 90)
+        field = oklch_to_hex(0.62 if bL >= 0.5 else 0.5, 0.19, fH)
+        field_ink = max(("#ffffff", oklch_to_hex(0.18, 0.02, fH)), key=lambda c: contrast(c, field))
+        if contrast(field_ink, field) < 4.5:
+            field = fit_lightness(0.5, 0.19, fH, field_ink, 4.5, -0.02 if field_ink == "#ffffff" else 0.02)
+        colors.update({"field": field, "field-ink": field_ink})
+        checks["field-ink/field"] = round(contrast(field_ink, field), 2)
     return colors, checks
 
 
 def seed_brand(seed):
     h = int.from_bytes(hashlib.sha256(f"{seed}:brand".encode()).digest()[:4], "big") % 360
     return oklch_to_hex(0.55, 0.15, away_from_violet(h))
+
+
+def postures_for(count, rng):
+    """Distinct postures, one radical slot at a seeded position; restrained at most once."""
+    radical = RADICAL_POSTURES[rng.int(len(RADICAL_POSTURES))]
+    rest = rng.shuffled(p for p in POSTURES if p != radical)
+    order = rest[:max(0, count - 1)]
+    order.insert(rng.int(len(order) + 1), radical)
+    while len(order) < count:  # more than four directions: repeat, never restrained
+        order.append(["committed", *RADICAL_POSTURES][len(order) % 3])
+    return order
+
+
+def surface_for(posture, i, rng, taken):
+    """Radical postures own the brand surface; the others take light or dark, distinct where possible."""
+    if posture in RADICAL_POSTURES and "brand" not in taken:
+        return "brand"
+    free = [s for s in ("light", "dark", "brand") if s not in taken and (s != "brand" or posture != "restrained")]
+    return free[0] if free else ("light", "dark")[i % 2]
+
+
+def source_weights(radical, lead, rng):
+    """Percentages over SOURCES. The radical direction weights competitors lowest; every other one has a lead."""
+    if radical:
+        w = {"origin-rules": 20, "competitors": 5, "galleries": 35, "concept": 40}
+        if rng.int(2):
+            w["galleries"], w["concept"] = w["concept"], w["galleries"]
+        return w
+    w = {s: 15 for s in SOURCES}
+    w[lead] = 55
+    return w
 
 
 def combo_key(arch, pair):
@@ -234,8 +291,13 @@ def roll(seed, brand, count, recent):
     used = set(recent)
     archs = rng.shuffled(range(len(ARCHETYPES)))
     pairs = rng.shuffled(range(len(FONT_PAIRS)))
-    surfaces = rng.shuffled(SURFACES)
+    postures = postures_for(count, rng)
     motions = rng.shuffled(MOTION)
+    radical_i = next(i for i, p in enumerate(postures) if p in RADICAL_POSTURES)
+    if motions[radical_i % len(motions)] == "restrained":  # the radical direction always moves with character
+        j = next(k for k in range(len(motions)) if k != radical_i % len(motions))
+        motions[radical_i % len(motions)], motions[j] = motions[j], motions[radical_i % len(motions)]
+    leads = rng.shuffled(s for s in SOURCES)
     chosen = []
     candidates = [(a, p) for a in archs for p in pairs]
     taken_a, taken_p = set(), set()
@@ -250,17 +312,27 @@ def roll(seed, brand, count, recent):
             chosen.append((a, p))
             taken_a.add(a)
             taken_p.add(p)
-    out = []
+    out, taken, lead_i = [], set(), 0
     for i, (a, p) in enumerate(chosen):
-        surface = surfaces[i % len(surfaces)]
-        colors, checks = palette(brand, surface, rng)
+        posture, radical = postures[i], i == radical_i
+        surface = surface_for(posture, i, rng, taken)
+        taken.add(surface)
+        colors, checks = palette(brand, surface, rng, posture)
+        lead = None
+        if not radical:
+            lead = leads[lead_i % len(leads)]
+            lead_i += 1
+        weights = source_weights(radical, lead, rng)
         display, body = FONT_PAIRS[p]
         out.append({
             "n": i + 1,
             "key": combo_key(ARCHETYPES[a][0], f"{display} + {body}"),
             "archetype": {"name": ARCHETYPES[a][0], "brief": ARCHETYPES[a][1]},
             "type": {"display": display, "body": body, "ratio": RATIOS[rng.int(len(RATIOS))]},
+            "posture": posture,
+            "radical": radical,
             "surface": surface,
+            "sources": weights,
             "colors": colors,
             "contrast": checks,
             "motion": {"tier": motions[i % len(motions)], "brief": MOTION_TEXT[motions[i % len(motions)]]},
@@ -295,9 +367,13 @@ def design_md(d, brand):
               "---", "",
               "# Design system", "",
               f"Layout archetype: **{d['archetype']['name']}**. {d['archetype']['brief']}", "",
-              f"Surface: {d['surface']}. Brand color {brand} is binding; `brand-ink` is its text-safe variant.", "",
-              f"Motion: {d['motion']['brief']}", "",
-              "## Contrast", ""]
+              f"Color posture: {d.get('posture', 'restrained')}. Surface: {d['surface']}. Brand color {brand} is binding; "
+              "`brand-ink` is its text-safe variant" + ("; `field` is a full section ground with `field-ink` on it."
+                                                         if "field" in c else "."), "",
+              f"Motion: {d['motion']['brief']}", ""]
+    if d.get("radical"):
+        lines += [RADICAL_NOTE + " List each loosened budget under Decisions.", ""]
+    lines += ["## Contrast", ""]
     lines += [f"- {k}: {v}:1" for k, v in d["contrast"].items()]
     lines += ["", "## Decisions", "", "Record every deviation from this file here, with the reason.", ""]
     return "\n".join(lines)
@@ -316,12 +392,15 @@ def cmd_roll(args, root):
     print(f"seed {result['seed']!r}, brand {result['brand']}")
     for d in result["directions"]:
         c = d["colors"]
-        print(f"\n[{d['n']}] {d['archetype']['name']} · {d['type']['display']} / {d['type']['body']} · "
-              f"{d['surface']} · motion {d['motion']['tier']}")
+        print(f"\n[{d['n']}]{' RADICAL' if d['radical'] else ''} {d['archetype']['name']} · "
+              f"{d['type']['display']} / {d['type']['body']} · {d['posture']} on {d['surface']} · motion {d['motion']['tier']}")
         print(f"    {d['archetype']['brief']}")
+        print("    sources " + ", ".join(f"{k} {v}%" for k, v in d["sources"].items()))
         print(f"    surface {c['surface']} ink {c['ink']} brand-ink {c['brand-ink']} accent {c['accent']} "
               f"· ratio {d['type']['ratio']} · radius {d['radius']}px")
-    print(f"\nstored in {STATE_DIR}/directions.json; choose with `seed.py pick N`")
+    print(f"\n{RADICAL_NOTE}")
+    print("Source weights are the seed's proposal; set them per project and state them in each sketch.")
+    print(f"stored in {STATE_DIR}/directions.json; choose with `seed.py pick N`")
     return 0
 
 

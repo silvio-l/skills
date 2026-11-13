@@ -68,6 +68,16 @@ Die Beispiele sind redaktionell erfunden. Produktbehauptungen daraus nur bei bel
 
 Ein gelungener emotionaler Markensatz kann bleiben, auch wenn er allein die Funktion noch nicht erklärt. Entscheide anhand der folgenden Zeile und des sichtbaren Produkts. Streiche zuerst die zweite oder dritte Wiederholung desselben Versprechens.
 
+## Weniger Text, mehr Zeigen
+
+Eine Seite wirkt lebendig, wenn der Leser etwas sieht oder ausprobiert, statt es erklärt zu bekommen. Kürze ist eine Tendenz, keine Quote.
+
+- Als Richtwert genügen etwa 60 bis 80 Wörter pro Bildschirmhöhe. Mehr ist in Ordnung, wenn jeder Satz einen neuen Gedanken trägt.
+- Wo eine Demo, ein Bild, ein Video oder eine Bewegung den Handgriff zeigt, beschriftet der Text nur noch, was zu sehen ist. Erklärt er dasselbe ein zweites Mal, streiche ihn.
+- Weniger Abschnitte. Folgen drei Abschnitte derselben Form aufeinander (Überschrift, Absatz, Bild), lege sie zusammen oder gib einem davon eine andere Aufgabe: eine Demo, ein Zitat, eine Zahl, eine Tabelle.
+- Absätze bleiben unter etwa 70 Wörtern. Ein längerer Gedanke wird zu zwei Absätzen oder zu einer Liste, wenn er wirklich aus Teilen besteht.
+- Die Prüfung meldet gleichförmige Abschnittsfolgen, textlastige Seiten und lange Absätze als Warnung. Sie ist ein Anlass zum Redigieren, kein Fehler.
+
 ## Fertig, wenn der Entwurf diese Prüfung besteht
 
 1. **Überschriften lesen.** Ist Produkt, Anlass und Entwicklung verständlich? Bei einer Übersicht: Sind die verschiedenen Wege klar unterscheidbar?
