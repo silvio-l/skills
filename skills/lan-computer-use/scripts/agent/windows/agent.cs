@@ -23,7 +23,7 @@ class AgentError : Exception { public AgentError(string m) : base(m) { } }
 
 static class Agent
 {
-    const string Version = "3"; // bump with every behaviour change; setup refuses to replace a newer agent
+    const string Version = "4"; // bump with every behaviour change; setup refuses to replace a newer agent
     static string token, build = "", dir, stateFile;
     static int idleMinutes = 3;
     // control lease: input needs an announced slot of at most 5 min; after it ends plus a short grace the agent quits
@@ -179,6 +179,7 @@ static class Agent
         static readonly object gate = new object();
         static readonly bool de = System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "de";
         static bool on; static DateTime start, actionAt; static DateTime? end; static string task = "", action = "", session = "", keys = "";
+        static string operatorName = "AI agent";
         static string[] feed = new string[0];
         // hide: announced from hideAt-HideNotice until hideAt, hidden until hideUntil; left: panel sits top-left
         static DateTime hideAt = DateTime.MinValue, hideUntil = DateTime.MinValue;
@@ -242,6 +243,7 @@ static class Agent
                 {
                     if (Has(a, "text")) task = Str(a, "text", "");
                     if (Has(a, "session")) session = Str(a, "session", "");
+                    operatorName = Clip(Str(a, "operator", "AI agent"), 40);
                     // a lease is at most 5 min; a longer job renews it with another task call
                     if (Has(a, "eta")) { double e = Math.Min(Dbl(a, "eta", 0), LeaseMax); end = e > 0 ? DateTime.UtcNow.AddSeconds(e) : (DateTime?)null; }
                     if (!on) { on = true; start = DateTime.UtcNow; }
@@ -322,7 +324,7 @@ static class Agent
             {
                 var now = DateTime.UtcNow;
                 visible = on && !(now >= hideAt && now < hideUntil);
-                var l = new List<string> { T("Claude steuert diesen Rechner", "Claude is controlling this computer") };
+                var l = new List<string> { operatorName + T(" steuert diesen Rechner", " is controlling this computer") };
                 l.Add(session.Length > 0 ? "Session " + Clip(session, 40) : null);
                 l.Add(task.Length > 0 ? Clip(task, 60) : null);
                 if (now < hideAt && hideUntil > now)

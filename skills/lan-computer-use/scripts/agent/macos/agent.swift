@@ -11,7 +11,7 @@ import ImageIO
 import UniformTypeIdentifiers
 import Vision
 
-let VERSION = "3" // bump with every behaviour change; setup refuses to replace a newer agent
+let VERSION = "4" // bump with every behaviour change; setup refuses to replace a newer agent
 typealias Dict = [String: Any]
 
 struct AgentError: Error { let msg: String; init(_ m: String) { msg = m } }
@@ -133,7 +133,7 @@ func runAgent() -> Int32 {
 }
 
 // an expired lease ends the agent after the grace; without a lease, idle time does
-// the controlling Claude Code session (local only): once it is gone nobody will ever end the task
+// the controlling session (local only): once it is gone nobody will ever end the task
 var ownerPid: pid_t = 0
 
 func shouldStop() -> Bool {
@@ -242,6 +242,7 @@ var overlayOn = false
 var overlayStart = Date()
 var taskText = ""
 var sessionName = ""
+var operatorName = "AI agent"
 var taskEnd: Date? = nil
 var actionText = ""
 var actionAt = Date()
@@ -311,7 +312,7 @@ func overlayText() -> NSAttributedString {
         out.append(NSAttributedString(string: t, attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: size, weight: w),
                                                               .foregroundColor: c, .shadow: shade]))
     }
-    add(tr("Claude steuert diesen Rechner", "Claude is controlling this computer"), 13, .semibold, white)
+    add(operatorName + tr(" steuert diesen Rechner", " is controlling this computer"), 13, .semibold, white)
     if !sessionName.isEmpty { add("\nSession " + clip(sessionName, 40), 11, .regular, dim) }
     if !taskText.isEmpty { add("\n" + clip(taskText, 60), 12, .regular, white) }
     if now < hideAt && hideUntil > now {
@@ -508,7 +509,8 @@ func taskCmd(_ a: Dict) -> Dict {
     }
     if has(a, "text") { taskText = str(a, "text") }
     if has(a, "session") { sessionName = str(a, "session") }
-    if has(a, "owner_pid") { ownerPid = pid_t(int(a, "owner_pid", 0)) }
+    operatorName = clip(str(a, "operator", "AI agent"), 40)
+    ownerPid = pid_t(int(a, "owner_pid", 0))
     // a lease is at most 5 min; a longer job renews it with another task call
     if has(a, "eta") { let e = min(num(a, "eta", 0), leaseMax); taskEnd = e > 0 ? Date().addingTimeInterval(e) : nil }
     if !overlayOn { overlayOn = true; overlayStart = Date() }

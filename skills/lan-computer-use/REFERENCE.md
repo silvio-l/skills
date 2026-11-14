@@ -7,7 +7,7 @@
 - **Agent.** A single source file per OS: `agent/macos/agent.swift` or `agent/windows/agent.cs`. It is compiled on the target on first use (`swiftc` / the .NET Framework `csc.exe`), and the binary name carries a hash of the source, so an edit triggers a rebuild automatically.
 - **Session.** The agent runs in the user's interactive desktop session. On Windows a short-lived scheduled task starts it from the SSH session 0; on remote Macs `launchctl` starts it in the `gui/<uid>` domain.
 - **Network.** The agent listens on `127.0.0.1` only and checks a 256-bit random token on every request. The client reaches it through an SSH port forward over a ControlMaster connection, so later calls cost only a local TCP round trip, typically 5–50 ms.
-- **Control lease.** `task --eta` grants a lease of at most 5 minutes; inputs without a valid lease are refused, and the agent quits 60 s after the lease ends. Renew with another `task --eta`. On the local Mac the agent also quits as soon as the controlling Claude Code session (`CLAUDE_PID`) is gone, so no orphaned overlay stays up.
+- **Control lease.** `task --eta` grants a lease of at most 5 minutes; inputs without a valid lease are refused, and the agent quits 60 s after the lease ends. Renew with another `task --eta`. On the local Mac it also watches `LCU_OWNER_PID`, or `CLAUDE_PID` for Claude Code. Codex has no assumed process ID: without an explicit owner, lease expiry bounds its lifetime.
 - **Idle stop.** Without a lease the agent exits after `idle_minutes` without requests (default 3, at most 5). `down` stops it at once and deletes its directory on the target.
 - **Version guard.** Each agent carries a `VERSION` (bumped with every behaviour change, mirrored as `AGENT_VERSION` in `cu.py`). A skill copy never replaces a running agent with a higher version; it fails with `OUTDATED` and asks to update the skill (`npx skills@latest update -g -y`). This stops an outdated copy on another machine or in another project from bringing back an old overlay.
 - **Client state.** Session state (port, token) lives in `~/.cache/lan-computer-use/` (mode 0700).
@@ -40,7 +40,7 @@ Select a target with `-t NAME`, `LCU_TARGET`, or the config `default`. A name th
 
 ### Preparing a target
 
-- **This Mac (`local`):** the terminal app that runs Claude Code needs *Accessibility* and *Screen Recording* (System Settings > Privacy & Security); the agent inherits them. It also needs Xcode Command Line Tools for `swiftc`.
+- **This Mac (`local`):** the app or terminal that runs Codex or Claude Code needs *Accessibility* and *Screen Recording* (System Settings > Privacy & Security); the agent inherits them. It also needs Xcode Command Line Tools for `swiftc`.
 - **Windows 10/11:** turn on the OpenSSH Server and put your public key into `authorized_keys`; for an admin user that is `C:\ProgramData\ssh\administrators_authorized_keys`. The SSH user must be logged on at the desktop. A locked screen is reported, and the agent cannot unlock it. The .NET Framework 4.x compiler that comes with Windows is enough.
 - **Remote Mac (experimental):** enable Remote Login and install the Command Line Tools. Grant the agent binary under `~/Library/Caches/lan-computer-use/` *Accessibility* and *Screen Recording* once at that Mac's screen. Without these grants `hello` shows `permissions … NO`.
 
@@ -48,14 +48,30 @@ Select a target with `-t NAME`, `LCU_TARGET`, or the config `default`. A name th
 
 `task "TEXT" --eta 5m` shows a compact warning panel in the top right corner of the target's screen. The panel is see-through (a light dark tint, no blur, so the screen behind stays visible) with a yellow border and a yellow warning icon; its text carries a dark shadow to stay readable on any background. It shows:
 
-- the header ("Claude steuert diesen Rechner" or "Claude is controlling this computer");
-- the controlling session's name, so the person can tell which agent session is acting. This is `LCU_SESSION` if set, otherwise the Claude Code session name (`~/.claude/sessions/<CLAUDE_PID>.json`), otherwise the name of the working directory;
+- the header with the actual operator (Codex, Claude Code, or a neutral AI agent fallback), localized to German or English;
+- the controlling session's name, so the person can tell which agent session is acting. This is `LCU_SESSION` if set, otherwise the Codex thread prefix or Claude Code session name, otherwise the working directory;
 - the task;
 - the current action with its age, e.g. "klickt «Speichern» · vor 0:03";
 - the last pressed keys (e.g. ⌘⇧T, Ctrl+S ×2) or typed text („Hallo“, clipped to 30 characters, password fields only as dots), large and yellow for 4 s;
 - the time left on the lease ("Freigabe noch 2:41"), yellow in the last minute, or after it ends "Zeit abgelaufen · Ende in 0:42".
 
-Below the panel, without a frame, the overlay shows the controlling session's last one or two steps: its latest chat text or visible thinking, and tool steps as "▸ description" (each clipped to about two lines). The controlled window usually covers the Claude Code chat, so this shows what the session is doing right now. After a successful `task`, `cu` starts a small detached worker that tails the session's transcript (`~/.claude/projects/*/<sessionId>.jsonl`, found via `CLAUDE_PID` or `CLAUDE_CODE_SESSION_ID`; `CLAUDE_CONFIG_DIR` is honoured) every 1.5 s and sends the lines with the `note` command. A `note` does not count as use for the idle timer. The worker exits with the lease (plus 60 s grace), on `task --done` or `down`, or when the session is gone. `LCU_FEED=0` turns the feed off; without a Claude Code session there is no feed.
+Below the panel the activity feed shows up to two clipped public messages or tool steps, never reasoning blocks. A detached worker checks transcript metadata every 1.5 s; unchanged files are neither reread nor reparsed. It sends changed lines, with a 15 s refresh for a restarted overlay. `note` does not reset the idle timer. The worker stops when its owner exits (if configured), the lease plus 60 s grace ends, or `task --done`/`down` clears its state. Missing transcripts simply disable the optional feed.
+
+## Caller integration
+
+Invoke `scripts/cu` by its absolute path relative to the loaded skill; no Claude-specific path variable is required. GUI execution is local or over SSH and needs no cloud computer-use API. The calling model may still use a cloud service.
+
+| Variable | Purpose |
+|---|---|
+| `LCU_AGENT` | Explicit operator label, overrides detection; use `Codex` or `Claude Code` when session markers are unavailable. |
+| `CODEX_THREAD_ID`, `CODEX_SESSION_ID` | Detect Codex (takes precedence over inherited Claude markers); resolve the matching rollout under `$CODEX_HOME/sessions` (default `~/.codex`). |
+| `CLAUDE_PID`, `CLAUDE_CODE_SESSION_ID` | Detect Claude Code and resolve its transcript under `$CLAUDE_CONFIG_DIR` (default `~/.claude`). |
+| `LCU_SESSION` | Explicit overlay session label. |
+| `LCU_OWNER_PID` | Optional long-lived controller PID on the client; also watched by a local target. Never use the short-lived CLI process. |
+| `LCU_TRANSCRIPT` | Explicit transcript path, supporting Claude assistant entries and Codex response items. No unrelated transcript is selected as a fallback. |
+| `LCU_FEED=0` | Disable the optional activity feed entirely. |
+
+Keep `task` commands outside raw `batch` input so client-side lease and feed bookkeeping runs. Batch only actions whose targets are already known; inspect again after a navigation or structural change. Prefer compact text, scoped `snapshot -i`, targeted `find --id`/`wait`, and cropped screenshots over repeated full trees or images.
 
 While the overlay is up, a yellow ring follows the mouse pointer and the pointer glides to its targets, so the person can follow every move. `task --done` hides the panel and the ring. Every input command updates the action line by itself; `task` again only changes the text or renews the lease.
 

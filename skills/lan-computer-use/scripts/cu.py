@@ -173,6 +173,8 @@ class Conn:
         self.buf = b""
 
     def call(self, cmd, **args):
+        if cmd == "task" and not args.get("done"):
+            args.setdefault("operator", operator_name())
         req = {k: v for k, v in args.items() if v is not None and v is not False}
         req["cmd"] = cmd
         req["token"] = self.token
@@ -278,7 +280,7 @@ def forward(name, t, rport):
 
 
 # bump together with VERSION in both agents on every behaviour change; setup never replaces a newer agent
-AGENT_VERSION = 3
+AGENT_VERSION = 4
 LEASE_MAX = 300   # seconds one control lease may span; renew with cu task --eta
 LEASE_GRACE = 60  # the agents keep control this long after a lease ran out
 
@@ -476,17 +478,18 @@ class Session:
         if not self.t.get("announce", False):
             return
         st = load_state(self.name)
-        if st.get("announced"):
+        identity = operator_name()
+        if st.get("announced") == identity:
             return
         where = "auf diesem Mac" if self.t.get("local") else f"auf {self.name}"
-        msg = f"Claude steuert jetzt Maus und Tastatur {where}."
+        msg = f"{identity} steuert jetzt Maus und Tastatur {where}."
         print(f"[lan-computer-use] {msg}", file=sys.stderr)
         try:
             subprocess.Popen(["say", msg], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
         except OSError:
             pass
         if st:
-            st["announced"] = True
+            st["announced"] = identity
             save_state(self.name, st)
         else:
             self._announce_pending = True
@@ -496,7 +499,7 @@ class Session:
             if getattr(self, "_announce_pending", False):
                 st = load_state(self.name)
                 if st:
-                    st["announced"] = True
+                    st["announced"] = operator_name()
                     save_state(self.name, st)
             self.conn.close()
 
@@ -687,12 +690,34 @@ def settle(ns):
     return {"settle": ns.settle} if getattr(ns, "settle", None) is not None else {}
 
 
+def operator_name():
+    """Explicit identity wins; only session markers identify an automatic caller."""
+    explicit = os.environ.get("LCU_AGENT", "").strip()
+    if explicit:
+        return " ".join(explicit.split())[:40]
+    if os.environ.get("CODEX_THREAD_ID") or os.environ.get("CODEX_SESSION_ID"):
+        return "Codex"
+    if os.environ.get("CLAUDE_PID") or os.environ.get("CLAUDE_CODE_SESSION_ID"):
+        return "Claude Code"
+    return "AI agent"
+
+
+def owner_pid():
+    """An explicit long-lived local owner, or Claude's session process; never the transient CLI parent."""
+    value = os.environ.get("LCU_OWNER_PID", "")
+    if not value and operator_name() == "Claude Code":
+        value = os.environ.get("CLAUDE_PID", "")
+    return value if value.isdigit() and int(value) > 0 else ""
+
+
 def session_label():
-    """Name of the controlling agent session for the overlay: LCU_SESSION, else the Claude Code session name
-    (~/.claude/sessions/<CLAUDE_PID>.json), else the working directory's name."""
+    """Overlay session label: explicit name, caller metadata, then the working directory."""
     v = os.environ.get("LCU_SESSION", "").strip()
     if v:
         return v[:40]
+    if operator_name() == "Codex":
+        sid = os.environ.get("CODEX_THREAD_ID") or os.environ.get("CODEX_SESSION_ID", "")
+        return ("Codex " + sid[:8]) if sid else os.path.basename(os.getcwd())[:40]
     pid = os.environ.get("CLAUDE_PID", "")
     if pid.isdigit():
         meta = read_json(os.path.join(claude_home(), "sessions", f"{pid}.json")) or {}
@@ -703,7 +728,7 @@ def session_label():
 
 # ---------------------------------------------------------------- activity feed (what the controlling session does)
 #
-# The controlled window usually hides the Claude Code chat that drives it. A small detached worker tails that
+# The controlled window usually hides the agent chat that drives it. A small detached worker tails that
 # session's transcript and shows its last one or two steps (chat text or tool step) below the overlay.
 
 FEED_EVERY = 1.5     # seconds between transcript polls
@@ -716,7 +741,19 @@ def claude_home():
 
 
 def transcript_path():
-    """The controlling Claude Code session's transcript (.jsonl), or None."""
+    """Resolve only this caller's transcript, never the newest unrelated conversation."""
+    explicit = os.environ.get("LCU_TRANSCRIPT", "")
+    if explicit:
+        path = os.path.abspath(os.path.expanduser(explicit))
+        return path if os.path.isfile(path) else None
+    if operator_name() == "Codex":
+        import glob
+        sid = os.environ.get("CODEX_THREAD_ID") or os.environ.get("CODEX_SESSION_ID", "")
+        if not re.fullmatch(r"[0-9A-Fa-f-]{8,64}", sid):
+            return None
+        home = os.path.expanduser(os.environ.get("CODEX_HOME") or "~/.codex")
+        hits = glob.glob(os.path.join(glob.escape(home), "sessions", "*", "*", "*", f"rollout-*-{sid}.jsonl"))
+        return max(hits, key=os.path.getmtime) if hits else None
     home = claude_home()
     sid = ""
     pid = os.environ.get("CLAUDE_PID", "")
@@ -740,7 +777,21 @@ def _clip_line(s, n=FEED_CLIP):
 
 
 def entry_items(e):
-    """Feed lines from one transcript entry: visible thoughts, chat text and tool steps, in order."""
+    """Feed lines from one transcript entry: public chat text and tool steps, in order."""
+    if isinstance(e, dict) and e.get("type") == "response_item":
+        payload = e.get("payload") or {}
+        if not isinstance(payload, dict):
+            return []
+        if payload.get("type") in ("function_call", "custom_tool_call"):
+            return ["▸ " + _clip_line(str(payload.get("name") or "tool"))]
+        if payload.get("type") == "message" and payload.get("role") == "assistant" and payload.get("phase") in (None, "commentary", "final", "final_answer"):
+            content = payload.get("content")
+            if not isinstance(content, list):
+                return []
+            return [_clip_line(b["text"]) for b in content
+                    if isinstance(b, dict) and b.get("type") == "output_text" and isinstance(b.get("text"), str)
+                    and b["text"].strip()]
+        return []
     if not isinstance(e, dict) or e.get("type") != "assistant" or e.get("isSidechain"):
         return []
     content = (e.get("message") or {}).get("content")
@@ -751,7 +802,7 @@ def entry_items(e):
         if not isinstance(b, dict):
             continue
         kind = b.get("type")
-        if kind in ("text", "thinking"):
+        if kind == "text":
             v = _clip_line(str(b.get(kind) or ""))
             if v:
                 out.append(v)
@@ -800,16 +851,37 @@ def recent_activity(path, n=2, tail=512 * 1024):
     return found[::-1]
 
 
+class ActivityCache:
+    """Avoid reading and parsing an unchanged transcript on every feed tick."""
+
+    def __init__(self):
+        self.signature = None
+        self.lines = []
+
+    def read(self, path):
+        try:
+            st = os.stat(path)
+            signature = (path, st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns)
+        except OSError:
+            self.signature, self.lines = None, []
+            return []
+        if signature != self.signature:
+            self.lines = recent_activity(path)
+            self.signature = signature
+        return self.lines
+
+
 def feed_worker(name, owner, path):
     """Detached: push the session's latest activity to the overlay until the lease ends or the session is gone."""
     me, last, sent_at, fails = os.getpid(), None, 0.0, 0
+    activity = ActivityCache()
     time.sleep(0.5)
     while True:
         st = load_state(name)
         end = st.get("eta_end")
-        if st.get("feed_pid") != me or not end or time.time() > end + LEASE_GRACE or not pid_alive(owner):
+        if st.get("feed_pid") != me or not end or time.time() > end + LEASE_GRACE or (owner and not pid_alive(owner)):
             return 0
-        lines = recent_activity(path)
+        lines = activity.read(path)
         if lines and (lines != last or time.time() - sent_at > FEED_RESEND):
             try:
                 c = Conn(st["lport"], st["token"], timeout=5)
@@ -829,9 +901,9 @@ def start_feed(name):
     """Start (or keep) the activity feed worker for this target; LCU_FEED=0 turns it off."""
     if os.environ.get("LCU_FEED", "1") == "0":
         return
-    owner = os.environ.get("CLAUDE_PID", "")
+    owner = owner_pid()
     path = transcript_path()
-    if not owner.isdigit() or not path:
+    if not path:
         return
     st = load_state(name)
     if st.get("feed_pid") and pid_alive(st["feed_pid"]) and st.get("feed_path") == path:
@@ -964,10 +1036,10 @@ def run_cmd(sess, ns, osname):
         if eta > LEASE_MAX:
             raise CuError(f"--eta {ns.eta} is over the {LEASE_MAX // 60}m limit of one control lease: plan the work in "
                           "chunks of at most 5 minutes and renew with cu task --eta before the lease ends")
-        a = dict(text=ns.text, eta=eta, session=session_label())
-        owner = os.environ.get("CLAUDE_PID", "")
-        if sess.t.get("local") and owner.isdigit():
-            a["owner_pid"] = int(owner)   # local agent exits as soon as the controlling session is gone
+        a = dict(text=ns.text, eta=eta, session=session_label(), operator=operator_name())
+        owner = owner_pid()
+        if sess.t.get("local"):
+            a["owner_pid"] = int(owner or "0")  # clear a previous caller's owner when none is known
         r = sess.call("task", **a)
         st = load_state(sess.name)
         if st and r.get("ok"):

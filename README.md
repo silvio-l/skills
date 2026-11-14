@@ -69,6 +69,7 @@ All documentation lives outside the audited repo. A `verify` mode re-checks the 
 
 - **Reading the UI.** `snapshot -i` returns a flat list of actionable accessibility elements with refs (`[e7] button "Save"`). The agent clicks, presses, focuses or sets values by ref instead of by coordinates. Every input answers with the resulting foreground window and focus, which saves follow-up screenshots.
 - **When pixels are needed.** Screenshots, OCR on macOS and `click --img` cover UIs without an accessibility tree.
+- **Codex and Claude Code.** The same CLI works in both. Speech and overlays name the actual caller; the optional activity feed supports both transcript formats and skips rereading unchanged files.
 - **Overlay.** A compact yellow warning panel on the target shows the task, the current action and a countdown. It is excluded from screen capture.
 - **Safety.** Password fields are refused. `down` removes the agent without a trace.
 
