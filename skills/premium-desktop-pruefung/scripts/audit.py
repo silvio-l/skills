@@ -358,7 +358,7 @@ def blocker_state(data, row):
 def inventory_digest(data):
     # Rule tables join the digest only when used, so digests of older ledgers stay stable.
     keys = ('revision', 'catalog_hash', 'files', 'objects', 'profile', 'scan_complete', 'scan_limits', 'scan_exclusions',
-            'scan_policy', 'scan_ignored', 'scan_includes')
+            'scan_policy', 'scan_ignored', 'scan_includes', 'scan_policy_adopted')
     return digest({k: data[k] for k in keys + RULE_TABLES if k in data and (k not in RULE_TABLES or data[k])})
 
 
@@ -480,6 +480,71 @@ def scan_policy(data):
 def rescan(data):
     found = scan(Path(data['repository']), exclusions=data.get('scan_exclusions', {}), policy=scan_policy(data))
     return found[0], found[1]
+
+
+def under_any(path, directories):
+    return any(path == d or path.startswith(d + '/') for d in directories)
+
+
+def baseline_files(data):
+    """The ledger rows a rescan must reproduce. Rows under scan_ignored exist only in runs that
+    adopted the policy after init; they stay in the journal but are no longer compared."""
+    ignored = data.get('scan_ignored', {})
+    if not ignored:
+        return data['files']
+    return {k: v for k, v in data['files'].items() if not under_any(k, ignored)}
+
+
+def adopt_scan_policy(run, includes=()):
+    """Switch a run created before the relevance policy to it, without rewriting its journal.
+
+    Allowed only when every row in the newly skipped directories is an excluded file and the
+    policy scan reproduces the remaining baseline exactly. The inventory digest changes, so the
+    inventory review must be repeated; outstanding fragments become stale."""
+    run = Path(run)
+    with write_lock(run):
+        ensure_ledger(run)
+        data = load(run)
+        if data.get('scan_policy'):
+            raise ValueError('run already uses the scan relevance policy')
+        includes = sorted(checked_exclusions({p: 'include' for p in includes}))
+        files, limits, ignored = scan(Path(data['repository']), exclusions=data.get('scan_exclusions', {}),
+                                      policy=dict(includes=includes))
+        if limits or data['scan_limits']:
+            raise ValueError('scan limits present; adoption needs a limit-free baseline')
+        dropped = {k: v for k, v in data['files'].items() if under_any(k, ignored)}
+        kept_mapped = sorted({d for k, v in dropped.items() if v['decision'] != 'excluded'
+                              for d in ignored if under_any(k, [d])})
+        if kept_mapped:
+            raise ValueError('skipped directories hold mapped or unclassified files; rerun with --include for: '
+                             + ', '.join(kept_mapped))
+        kept = {k: v['sha256'] for k, v in data['files'].items() if k not in dropped}
+        current = {k: v['sha256'] for k, v in files.items()}
+        if current != kept:
+            diff = sorted(k for k in set(current) | set(kept) if current.get(k) != kept.get(k))
+            raise ValueError('source differs from the baseline outside the skipped directories (' + str(len(diff))
+                             + ' paths, e.g. ' + ', '.join(diff[:5]) + '); new run required')
+        meta = dict(scan_policy=1, scan_ignored=ignored, sequence=data['sequence'] + 1,
+                    scan_policy_adopted=dict(at_sequence=data['sequence'], rows_no_longer_compared=len(dropped)))
+        if includes:
+            meta['scan_includes'] = includes
+        con = connect(run)
+        try:
+            con.execute('BEGIN IMMEDIATE')
+            try:
+                (stored,) = con.execute("SELECT value FROM meta WHERE key = 'sequence'").fetchone()
+                if json.loads(stored) != data['sequence']:
+                    raise ValueError('ledger changed during adoption; retry')
+                con.executemany('INSERT INTO meta(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+                                [(k, canonical(v)) for k, v in meta.items()])
+                con.execute('COMMIT')
+            except BaseException:
+                con.execute('ROLLBACK')
+                raise
+        finally:
+            con.close()
+        return dict(sequence=meta['sequence'], rows_no_longer_compared=len(dropped), not_inventoried=ignored,
+                    next='repeat the inventory review: its digest now binds the scan policy')
 
 
 def scan(repo, max_files=50000, max_bytes=16 * 1024 * 1024, exclusions=None, checkpoint=None, policy=None):
@@ -650,7 +715,7 @@ def validate(data, run, complete=False, check_source=None):
             need(row['status'] == 'resolved', key + ': open gap')
     if (complete if check_source is None else check_source):
         current, limits = rescan(data)
-        need(not limits and {k:v['sha256'] for k,v in current.items()} == {k:v['sha256'] for k,v in data['files'].items()}, 'source baseline changed or unreadable; new run required')
+        need(not limits and {k:v['sha256'] for k,v in current.items()} == {k:v['sha256'] for k,v in baseline_files(data).items()}, 'source baseline changed or unreadable; new run required')
     if complete:
         need(bool(data['objects']) and bool(data['units']), 'empty inventory')
         need(data['scan_complete'] and not data['scan_limits'] and not data.get('scan_exclusions'), 'source scan incomplete (including explicitly omitted paths)')
@@ -1230,6 +1295,8 @@ def main():
     init.add_argument('--include', action='append', default=[], help='scan this directory although the policy skips it (repeatable)')
     init.add_argument('--scan-all', action='store_true', help='no relevance policy: also scan dependency, Git-ignored and nested-checkout directories')
     app = sub.add_parser('apply'); app.add_argument('run'); app.add_argument('fragment')
+    ad = sub.add_parser('adopt-scan-policy', help='switch a run created before the relevance policy to it; requires a new inventory review')
+    ad.add_argument('run'); ad.add_argument('--include', action='append', default=[], help='keep scanning this skipped directory (repeatable)')
     mig = sub.add_parser('migrate', help='convert a JSON ledger (audit.json) to audit.db; apply does this on its first write'); mig.add_argument('run')
     pl = sub.add_parser('plan'); pl.add_argument('run'); pl.add_argument('--actor', required=True)
     pa = sub.add_parser('patch', help='change fields of one current row without rewriting it by hand')
@@ -1259,6 +1326,8 @@ def main():
             print(json.dumps(dict(files=len(data['files']), limits=len(data['scan_limits']),
                                   not_inventoried=data.get('scan_ignored', {})), ensure_ascii=False, indent=2))
         elif args.command == 'apply': apply(args.run, read(args.fragment))
+        elif args.command == 'adopt-scan-policy':
+            print(json.dumps(adopt_scan_policy(args.run, args.include), ensure_ascii=False, indent=2))
         elif args.command == 'migrate':
             with write_lock(args.run):
                 print('migrated' if migrate(args.run) else 'nothing to migrate')
@@ -1288,7 +1357,8 @@ def main():
                 print(json.dumps(resume(data,args.object,args.status,args.limit), ensure_ascii=False, indent=2)); return 0
             if args.command == 'drift':
                 files, limits = rescan(data)
-                changed = sorted(k for k in set(files)|set(data['files']) if files.get(k,{}).get('sha256') != data['files'].get(k,{}).get('sha256'))
+                base = baseline_files(data)
+                changed = sorted(k for k in set(files)|set(base) if files.get(k,{}).get('sha256') != base.get(k,{}).get('sha256'))
                 print(json.dumps(dict(changed=changed, limits=limits))); return int(bool(changed or limits))
             result = results(data, args.run)
             if args.command == 'report':

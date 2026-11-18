@@ -790,6 +790,24 @@
         "minLength": 1
       },
       "uniqueItems": true
+    },
+    "scan_policy_adopted": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "at_sequence",
+        "rows_no_longer_compared"
+      ],
+      "properties": {
+        "at_sequence": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rows_no_longer_compared": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
     }
   },
   "required": [

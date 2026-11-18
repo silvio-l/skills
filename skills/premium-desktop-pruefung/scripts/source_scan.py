@@ -65,7 +65,8 @@ def git_ignored_dirs(repo):
 
 
 def _skip_reason(entry, child, policy):
-    if policy is None or child in policy['includes'] or not entry.is_dir(follow_symlinks=False):
+    if policy is None or not entry.is_dir(follow_symlinks=False) or any(
+            child == d or child.startswith(d + '/') for d in policy['includes']):  # an include covers its subtree
         return None
     if os.path.lexists(os.path.join(entry.path, '.git')):
         return NESTED_CHECKOUT
