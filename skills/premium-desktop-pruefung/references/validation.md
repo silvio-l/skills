@@ -14,7 +14,7 @@ Initial replacement result: **62 tests passed** (30 ledger, 24 tracker, 8 probe/
 
 Tests cover state transitions, full catalogue matrix construction, evidence hashes, invalid references/schema fields, disjoint work ownership, interrupted/stale merges, lock contention, source drift, independent-review freshness, separated fallback rejection, negative review gaps, refuted suspicions, report consistency and issue outbox integration. The all-criteria complete-ledger fixture tests protocol consistency using synthetic observations and reviewer identities; it does not certify actual UI quality or real agent independence.
 
-Tracker tests use controlled HTTP mocks: destination/visibility guards, pagination, deduplication, dry run, errors, uncertain publication outcomes, receipt recovery and redaction. No live issue was published to internal forge, Gitea, GitHub or GitLab. Endpoint portability is based on official provider documentation and mocks, not a four-provider deployment test.
+Tracker tests use controlled HTTP mocks: destination/visibility guards, pagination, deduplication, dry run, errors, uncertain publication outcomes, receipt recovery and redaction. No live issue was published to a Gitea-compatible forge, GitHub or GitLab. Endpoint portability is based on official provider documentation and mocks, not a four-provider deployment test.
 
 The Cloudflare reference's Node suites also ran successfully: 65 tests, no failures or skips, at the commit recorded in reference-analysis.md.
 

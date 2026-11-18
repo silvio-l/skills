@@ -58,9 +58,12 @@ def atomic(path, value):
 
 
 # Explicit list: ipaddress.is_private also covers documentation and other special-purpose ranges.
+# The 192.168/16 block is given as (address integer, prefix): the public export rewrites
+# dotted 192.168.0.x literals, which would turn this entry into an invalid network.
 PRIVATE_NETWORKS = tuple(ipaddress.ip_network(n) for n in (
-    "10.0.0.0/8", "172.16.0.0/12", "192.0.2.10/16", "127.0.0.0/8", "169.254.0.0/16",
+    "10.0.0.0/8", "172.16.0.0/12", (0xC0A80000, 16), "127.0.0.0/8", "169.254.0.0/16",
     "fc00::/7", "fe80::/10", "::1/128"))
+PROVIDERS = ("gitea", "github", "gitlab")  # gitea covers Gitea and its API-compatible forks
 
 
 def private_host(host):
@@ -91,8 +94,8 @@ def config_check(config, require_transport=True):
         raise IssueError("credential must be git-credential")
     if "allow_http" in config and config["allow_http"] != "private-lan":
         raise IssueError("allow_http must be private-lan")
-    if config["provider"] not in ("internal forge", "gitea", "github", "gitlab"):
-        raise IssueError("unsupported provider")
+    if config["provider"] not in PROVIDERS:
+        raise IssueError("unsupported provider; use gitea (also for Gitea-compatible forks), github or gitlab")
     if not isinstance(config["base_url"], str):
         raise IssueError("invalid base_url")
     url = urllib.parse.urlsplit(config["base_url"])
@@ -329,7 +332,7 @@ def list_issues(client, config):
     existing, ids = [], set()
     for page in range(1, MAX_PAGES + 1):
         query = {"state": "all", "page": page}
-        query["limit" if config["provider"] in ("internal forge", "gitea") else "per_page"] = LIMIT
+        query["limit" if config["provider"] == "gitea" else "per_page"] = LIMIT
         if config["provider"] == "gitlab":
             query.update({"scope": "all", "order_by": "created_at", "sort": "asc"})
         elif config["provider"] == "github":

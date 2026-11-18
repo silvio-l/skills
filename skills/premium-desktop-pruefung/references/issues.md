@@ -10,7 +10,7 @@ Copy the reviewed configuration into the external audit workspace as `tracker.js
 
 ```json
 {
-  "provider": "internal forge",
+  "provider": "gitea",
   "base_url": "https://forge.example.org/api/v1",
   "repository": "team/product",
   "token_env": "AUDIT_TRACKER_TOKEN",
@@ -19,7 +19,7 @@ Copy the reviewed configuration into the external audit workspace as `tracker.js
 }
 ```
 
-Supported providers: `internal forge`, `gitea`, `github`, `gitlab`. API roots are `/api/v1` for internal forge/Gitea, `https://api.github.com` for GitHub.com, and `/api/v4` for GitLab. Enterprise installations may have different API roots; use their documented endpoint. Nested repository paths are accepted for GitLab.
+Supported providers: `gitea` (Gitea and its API-compatible forks), `github`, `gitlab`. API roots are `/api/v1` for `gitea`, `https://api.github.com` for GitHub.com, and `/api/v4` for GitLab. Enterprise installations may have different API roots; use their documented endpoint. Nested repository paths are accepted for GitLab.
 
 Credentials come from exactly one source: `token_env` (the token is read only from that environment variable) or `"credential": "git-credential"`, which asks git's configured credential helpers (for example the system keychain) via `git credential fill` for the endpoint's protocol and host, with terminal prompts and askpass dialogs disabled, so only stored credentials are used. A stored username/password pair is sent as HTTP Basic authentication (GitLab: the password as `PRIVATE-TOKEN`). Do not put credentials in config, shell arguments, evidence or issue text. Restrict its privileges to repository read and issue write. Review endpoint ownership before making any request; HTTPS alone does not establish trust.
 
@@ -56,7 +56,7 @@ Live network requests require HTTPS, or plain HTTP under the explicit private-LA
 
 Tests use temporary files, fake clients and a mocked urllib transport. They verify all four payload formats, public redaction, destination visibility, duplicate reconciliation, truncated/repeated pagination, unknown POST outcomes, locking, malformed JSON and CLI dry-run execution. No live tracker publication is part of skill validation. Server-version compatibility and actual token permissions must be checked on the intended installation; unsupported behavior fails visibly.
 
-Provider references reviewed during implementation (2026-11-18): [internal forge API usage](https://internal forge.org/docs/latest/user/api/usage/), [Gitea issue listing](https://docs.gitea.com/api/1.24/operations/issue-list-issues/), [GitHub issue API](https://docs.github.com/en/rest/issues/issues), [GitHub pagination](https://docs.github.com/en/rest/using-the-rest-api/using-pagination-in-the-rest-api), [GitLab issues API](https://docs.gitlab.com/api/issues/). API contracts inform endpoints, authentication and pagination; tests establish local behavior, not universal live-server conformance.
+Provider references reviewed during implementation (2026-11-18): [Gitea issue listing](https://docs.gitea.com/api/1.24/operations/issue-list-issues/), [GitHub issue API](https://docs.github.com/en/rest/issues/issues), [GitHub pagination](https://docs.github.com/en/rest/using-the-rest-api/using-pagination-in-the-rest-api), [GitLab issues API](https://docs.gitlab.com/api/issues/). API contracts inform endpoints, authentication and pagination; tests establish local behavior, not universal live-server conformance.
 
 The engine export carries `integrity_valid` and `integrity_errors`. Corrupted evidence, an inconsistent journal or a changed source baseline block every finding from issue creation, even after an earlier countercheck. Incomplete coverage alone does not: individually confirmed findings still publish. Always rerun `audit.py report` before `prepare`; a saved export is a snapshot and does not notice later file changes.
 
@@ -70,7 +70,7 @@ Some trackers are only reachable inside a local network over plain HTTP, with no
 
 ```json
 {
-  "provider": "internal forge",
+  "provider": "gitea",
   "base_url": "http://192.168.1.20:3000/api/v1",
   "repository": "team/product",
   "credential": "git-credential",

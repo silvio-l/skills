@@ -60,7 +60,7 @@ The mapping is the BSI's own (`catalog/iso-mapping.json`). For a control without
 
 - `gh` for GitHub;
 - `glab` for GitLab;
-- `tea` or internal forge-cli (`fj`) for Gitea or internal forge;
+- `tea` or `fj` for Gitea-compatible forges;
 - the forge's REST API with an existing token.
 
 When none works, write the issue bodies into `measures/` and mark the phase `partial`. Never ask for credentials.
