@@ -1,0 +1,61 @@
+# Execution loop and completion contract
+
+Use this workflow for a full audit. A user-requested partial audit retains its narrower scope. The workflow does not authorize implementation changes or new external systems.
+
+## Choose a usable path before building infrastructure
+
+Inventory the actual host, session and available browser/native tools first. Read platform-compatibility.md and agents.md for proportionate execution controls. Consider an identified installed build, local reviewed build with disposable profile, available local VM/container, and already authorized remote device. Select by method fidelity, available controls and setup effort, not by a preferred lab name. Record actual probes and alternatives in runtime evidence. Tool presence is not a successful probe; a historical failure is not a current failure.
+
+Keep web, native and source evidence distinct. A browser demo with an in-memory backend can test layout, navigation and many keyboard paths; it cannot test disk persistence, native permissions, native window restoration or OS integration. A native failure does not prevent the browser sweep; a browser success does not close native units. Never keep setting up a new environment while an existing suitable path is unused.
+
+After a setup succeeds, update `profile.runtime` with evidence and immediately perform a real core task. Then return to the work queue. After a setup fails, inspect the cause and try a suitable alternative; repeat the same setup only after a relevant change. Record a method as blocked only when available applicable alternatives cannot perform it within the authorized scope. Infrastructure work must serve a named queued method.
+
+## Discover until the inventory reconciles
+
+The scanner checkpoints bounded work and resumes initialization, including untracked and generated files; do not switch to `git ls-files` or exclusions to evade a batch limit. Follow reported unreadable paths and unresolved symlinks. Internal links to inventoried targets are fingerprinted without traversing them twice. Inventory referenced content outside the root as explicitly linked evidence/subruns when authorized; no silent following of links. External, broken or excluded link targets remain source-scan limits in the current helper: subrun evidence does not clear that gate. To close it, establish an authorized self-contained source baseline and start a linked run; never claim aggregate completeness from manual subrun reconciliation. A scan of paths does not discover all UI semantics.
+
+Produce four evidence-backed lists and reconcile their differences: (1) audience/tasks, (2) implementation/routes/commands/configuration, (3) runtime tour, (4) platforms/data/states. Include hidden menus, dialogs, nested settings, tray/windows, onboarding exits, role/permission/feature gates and generated views. New discoveries add objects/variants and rerun `plan`; keep stable unit IDs. Review this inventory independently before interpreting a finished matrix as broad coverage.
+
+Enumerate supported variant values separately from exercised combinations. Partition unbounded data by meaningful boundaries. Test independent failure risks explicitly; only use equivalence where implementation and observed behavior support it. Do not explode arbitrary combinations merely to inflate the matrix, or let a large matrix replace a missing semantic inventory.
+
+Before the first `plan` on a large inventory, and again whenever new objects arrive, record `applicability` rules for criteria that cannot apply to an object kind (a CLI or integration object has no window size or visual contrast) and `equivalences` for variants proven to share implementation and rendering. Estimate units first (objects × variants × criteria): tens of thousands of units mean the rules are missing, not that the audit is thorough. See protocol.md "Matrix rules".
+
+## Execute bounded packages continuously
+
+Run `audit.py next RUN --limit 12`. It lists packages across objects/variants, blocker freshness, active jobs and review work. `limit` bounds units per package, not total audit scope; the helper does not choose which runtime is safe or certify semantic completeness. Claim one bounded package under `jobs`; never claim thousands of untouched units just to assign a common blocked reason. Respect the GUI owner and unfinished jobs before claiming work.
+
+Schedule by user risk and evidence affinity: complete core flows, data-loss/recovery paths and platform-specific functions early, then systematically sweep remaining surfaces and criteria. A single walkthrough can supply evidence to multiple criteria only when each expected outcome was actually observed. For each package:
+
+1. Read the relevant criterion and method; establish preconditions and a discriminating expected outcome.
+2. Exercise the original path, a meaningful alternative/counterexample and recovery as appropriate. Capture positive observations as well as deviations.
+3. Import raw evidence and record only the scope established. A partial positive observation belongs in a running unit's `actual`/`limitations`; it is not a full pass. Unattempted work stays pending.
+4. Apply fragments, close/reconcile the job, add newly discovered inventory, and refresh `next`. Dispatch independent review while other executable work continues.
+
+Carry these workstreams through to evidenced outcomes, not merely smoke tests:
+
+| Workstream | Required observation where applicable |
+| --- | --- |
+| Main tasks | Entry to useful result, cancel/repeat, alternate navigation, empty/loading/populated states |
+| Errors | Controlled save/load/network/permission failure, retained input, retry, final stored state and negative control |
+| Keyboard/semantics | Full task without pointer, Tab/Shift+Tab, widget keys, modal return, accessible names/roles/values and dynamic updates |
+| Rendering | Actual viewport/scale, clipping/reflow, contrast across states, supported themes/locales and boundary windows |
+| Native lifecycle | Real target OS/backend, fresh and existing disposable profiles, save/read-back, quit/relaunch, restored state, permissions and native integrations |
+| Review/delivery | Independent inventory and terminal-unit reviews, falsified candidates, current final review, prepared issues and actual receipts |
+
+Use M1–M9 for detailed methods. Screen readers remain opt-in. Missing participant studies limit empirical claims; they do not stop heuristic walkthroughs or technical checks.
+
+## Blockers are observations, not a backlog label
+
+New blocked writes require `blocker` with nonempty `attempt`, `obstacle`, `alternatives`, `next_action`, `retry_when`, `context_digest`, plus the unit's attempted `steps`, observed `actual`, primary `evidence`, `reason` and `limitations`. Get the current digest from `next RUN`. Alternatives identify what was checked and why it cannot perform this method; never fill them with boilerplate. The tool validates structure/freshness; the reviewer must validate truth.
+
+On any capability/scope/platform change, import fresh evidence and update the corresponding profile. `next` then marks old blocker records stale. Retry or reclassify affected units using owned jobs; `blocked → pending` is allowed for work that is executable again or was never attempted. Remove obsolete `blocker` from the new row; journal history retains the old record. Legacy blocked rows without structured evidence are reported as unsubstantiated, not silently converted or counted as proven obstacles. Existing runs remain readable; their next blocked write follows the new contract.
+
+Do not mark a product defect merely because the audit tool failed. Distinguish observed behavior, inferred cause, plausible user consequence and evidence limit. Severity follows demonstrated impact. Confirmed source findings must state that runtime/native reproduction remains open, and must not claim data loss or whole-task failure from a narrower observation.
+
+## Continue, checkpoint, or finish
+
+A generated report is an intermediate artifact while executable requested work remains. Continue after setup, a few findings, package limits and critic gaps. Do not end with an offer to perform already requested checks.
+
+Stop only when the requested work is complete, the user pauses/narrows it, an actual execution limit interrupts the session, or remaining work depends on specifically documented unavailable capabilities/input after suitable alternatives were assessed. Before an unavoidable handoff, persist the current job owner, last action, evidence, retry conditions and next concrete commands. Do not convert unattempted work to blocked to justify stopping. A current documented blocker still needs its retry condition evaluated; elapsed time alone is not permission to change scope.
+
+Run drift, check and report; inspect queued reviews and the issue outbox separately. `check` certifies ledger consistency only. An incomplete inventory, unapplied review gaps, native/browser substitutions or pending delivery must stay explicit. Report separately: supported versus exercised scope, passes/failures, unexamined work, documented versus stale/unsubstantiated blockers, exclusions, review state, confirmed/suspected/refuted findings, and issue receipt URLs. Validation diagnostic counts are not product-defect counts. Do not claim a percentage of total product coverage from an incomplete inventory.
