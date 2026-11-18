@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Portable UI/UX ledger. Python >=3.10, standard library; never executes target code."""
 import argparse
+from contextlib import contextmanager
 import copy
 import hashlib
 import json
 import os
 import re
 from pathlib import Path
+import sqlite3
 import sys
 import tempfile
 import time
@@ -16,6 +18,8 @@ ROOT = Path(__file__).resolve().parents[1]
 TABLES = ('files', 'objects', 'units', 'evidence', 'findings', 'jobs', 'reviews', 'gaps', 'profile',
           'applicability', 'equivalences')
 RULE_TABLES = ('applicability', 'equivalences')  # optional in older ledgers; bound to the inventory digest
+LAZY_TABLES = ('units', 'files', 'evidence', 'reviews')  # may reach 10^5 rows; apply reads them row by row
+REF_SEP = '\x1f'
 TRANSITIONS = {'pending': {'running', 'excluded', 'blocked'},
                'running': {'pass', 'fail', 'blocked', 'excluded'},
                'pass': {'running'}, 'fail': {'running'},
@@ -35,12 +39,225 @@ def read(path):
     return json.loads(Path(path).read_text(encoding='utf-8'), object_pairs_hook=unique)
 
 
+def canonical(value):
+    return json.dumps(value, ensure_ascii=False, separators=(',', ':'))
+
+
+def row_ref(table, row):
+    """Indexed lookup key: the units of an object, the reviews of one target."""
+    if row is None:
+        return None
+    if table == 'units':
+        return row['object']
+    if table == 'reviews':
+        return row['scope'] + REF_SEP + row['target']
+    return None
+
+
+LEDGER_SQL = '''
+CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE rows(tbl TEXT NOT NULL, id TEXT NOT NULL, ref TEXT, body TEXT NOT NULL, UNIQUE(tbl, id));
+CREATE INDEX rows_ref ON rows(tbl, ref);
+CREATE TABLE history(seq INTEGER PRIMARY KEY, event TEXT NOT NULL);
+'''
+
+
+def connect(run, readonly=False):
+    path = (Path(run) / 'audit.db').resolve()
+    if readonly:
+        con = sqlite3.connect(path.as_uri() + '?mode=ro', uri=True, isolation_level=None)
+    else:
+        con = sqlite3.connect(str(path), isolation_level=None)
+        con.execute('PRAGMA synchronous=FULL')
+    return con
+
+
+def create_ledger(run, data):
+    """Write a complete ledger atomically (init, migration): build beside it, then rename."""
+    run = Path(run)
+    tmp = run / ('.ux-' + uuid.uuid4().hex + '.db')
+    try:
+        con = sqlite3.connect(str(tmp), isolation_level=None)
+        try:
+            con.executescript(LEDGER_SQL)
+            con.execute('BEGIN')
+            con.executemany('INSERT INTO meta VALUES (?, ?)',
+                            [(k, canonical(v)) for k, v in data.items() if k not in TABLES and k != 'history'])
+            con.executemany('INSERT INTO rows(tbl, id, ref, body) VALUES (?, ?, ?, ?)',
+                            [(t, k, row_ref(t, v), canonical(v)) for t in TABLES for k, v in data[t].items()])
+            con.executemany('INSERT INTO history(event) VALUES (?)', [(canonical(e),) for e in data['history']])
+            con.execute('COMMIT')
+        finally:
+            con.close()
+        with tmp.open('rb+') as stream:
+            os.fsync(stream.fileno())
+        os.replace(tmp, run / 'audit.db')
+    finally:
+        if tmp.exists():
+            tmp.unlink()
+
+
 def load(run):
-    """Read the ledger; ledgers written before the rule tables existed gain empty ones."""
-    data = read(Path(run) / 'audit.json')
-    for table in TABLES:
-        data.setdefault(table, {})
+    """Read the whole ledger into memory (check, report, queue, review digests).
+
+    Runs created before the SQLite ledger still read from audit.json until their next write
+    migrates them; they also gain the rule tables, which older ledgers lack."""
+    run = Path(run)
+    if not (run / 'audit.db').exists():
+        data = read(run / 'audit.json')
+        for table in TABLES:
+            data.setdefault(table, {})
+        return data
+    con = connect(run, readonly=True)
+    try:
+        data = {k: json.loads(v) for k, v in con.execute('SELECT key, value FROM meta')}
+        for table in TABLES:
+            data[table] = {}
+        for table, key, body in con.execute('SELECT tbl, id, body FROM rows ORDER BY rowid'):
+            data[table][key] = json.loads(body)
+        data['history'] = [json.loads(e) for (e,) in con.execute('SELECT event FROM history ORDER BY seq')]
+    finally:
+        con.close()
     return data
+
+
+class LazyTable:
+    """A large table read on demand during apply; changes stay in memory until commit.
+
+    Full iteration is refused on purpose: a code path that needs every row belongs to
+    load()/validate(), and a silent full scan here would bring back the slow apply."""
+
+    def __init__(self, con, name):
+        self.con, self.name, self.cache, self.written = con, name, {}, set()
+
+    def _fetch(self, keys):
+        keys = [k for k in dict.fromkeys(keys) if k not in self.cache]
+        for start in range(0, len(keys), 500):
+            part = keys[start:start + 500]
+            found = dict(self.con.execute('SELECT id, body FROM rows WHERE tbl = ? AND id IN (%s)'
+                                          % ','.join('?' * len(part)), (self.name, *part)))
+            for key in part:
+                self.cache[key] = json.loads(found[key]) if key in found else None
+
+    def get(self, key, default=None):
+        self._fetch([key])
+        value = self.cache[key]
+        return default if value is None else value
+
+    def __getitem__(self, key):
+        value = self.get(key)
+        if value is None:
+            raise KeyError(key)
+        return value
+
+    def __contains__(self, key):
+        return self.get(key) is not None
+
+    def __setitem__(self, key, value):
+        self.cache[key] = value
+        self.written.add(key)
+
+    def __delitem__(self, key):
+        if key not in self:
+            raise KeyError(key)
+        self.cache[key] = None
+        self.written.add(key)
+
+    def present(self, keys):
+        keys = list(keys)
+        self._fetch(keys)
+        return {k for k in keys if self.cache[k] is not None}
+
+    def by_ref(self, ref):
+        rows = {}
+        for key, body in self.con.execute('SELECT id, body FROM rows WHERE tbl = ? AND ref = ? ORDER BY rowid',
+                                          (self.name, ref)):
+            if key not in self.written:
+                rows[key] = self.cache.setdefault(key, json.loads(body))
+        for key in self.written:
+            if self.cache[key] is not None and row_ref(self.name, self.cache[key]) == ref:
+                rows[key] = self.cache[key]
+        return list(rows.items())
+
+    def _refuse(self, *args):
+        raise TypeError('full scan of lazy table ' + self.name + ' during apply; use load()')
+
+    __iter__ = __len__ = keys = values = items = _refuse
+
+
+def open_view(run):
+    """Small tables in memory, large ones lazy, history = only the events of this write."""
+    con = connect(run)
+    data = {k: json.loads(v) for k, v in con.execute('SELECT key, value FROM meta')}
+    for table in TABLES:
+        data[table] = LazyTable(con, table) if table in LAZY_TABLES else {}
+    marks = ','.join('?' * len(LAZY_TABLES))
+    for table, key, body in con.execute('SELECT tbl, id, body FROM rows WHERE tbl NOT IN (%s) ORDER BY rowid'
+                                        % marks, LAZY_TABLES):
+        data[table][key] = json.loads(body)
+    data['history'] = []
+    return con, data
+
+
+def commit(con, data, base_sequence):
+    """One SQLite transaction: final row states, appended journal events, new sequence."""
+    con.execute('BEGIN IMMEDIATE')
+    try:
+        (stored,) = con.execute("SELECT value FROM meta WHERE key = 'sequence'").fetchone()
+        if json.loads(stored) != base_sequence:
+            raise ValueError('ledger changed during apply; retry with the current sequence')
+        final = {}
+        for event in data['history']:
+            final[(event['table'], event['id'])] = event['after']
+        for (table, key), row in final.items():
+            if row is None:
+                con.execute('DELETE FROM rows WHERE tbl = ? AND id = ?', (table, key))
+            else:
+                con.execute('INSERT INTO rows(tbl, id, ref, body) VALUES (?, ?, ?, ?) ON CONFLICT(tbl, id) '
+                            'DO UPDATE SET ref = excluded.ref, body = excluded.body',
+                            (table, key, row_ref(table, row), canonical(row)))
+        con.executemany('INSERT INTO history(event) VALUES (?)', [(canonical(e),) for e in data['history']])
+        con.execute("UPDATE meta SET value = ? WHERE key = 'sequence'", (canonical(data['sequence']),))
+        con.execute('COMMIT')
+    except BaseException:
+        con.execute('ROLLBACK')
+        raise
+
+
+@contextmanager
+def write_lock(run):
+    lock = Path(run) / '.write-lock'
+    try:
+        lock.mkdir()
+    except FileExistsError:
+        raise ValueError('writer locked; inspect active coordinator before removing stale .write-lock')
+    try:
+        yield
+    finally:
+        lock.rmdir()
+
+
+def migrate(run):
+    """Convert a JSON ledger (audit.json) into audit.db once; the JSON stays as audit.json.migrated."""
+    run = Path(run)
+    if (run / 'audit.db').exists() or not (run / 'audit.json').exists():
+        return False
+    data = load(run)
+    errors = validate(data, run)
+    if errors:
+        raise ValueError('cannot migrate an invalid ledger:\n' + '\n'.join(errors))
+    create_ledger(run, data)
+    os.replace(run / 'audit.json', run / 'audit.json.migrated')
+    return True
+
+
+def ensure_ledger(run):
+    run = Path(run)
+    if not (run / 'audit.db').exists():
+        if not (run / 'audit.json').exists():
+            raise ValueError('no ledger in ' + str(run) + '; run init first')
+        with write_lock(run):
+            migrate(run)
 
 
 def digest(value):
@@ -61,10 +278,8 @@ def atomic(path, data, compact=False):
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix='.ux-')
     try:
         with os.fdopen(fd, 'w', encoding='utf-8') as stream:
-            if compact:  # the ledger is machine state; indentation multiplies its size
-                json.dump(data, stream, ensure_ascii=False, separators=(',', ':'))
-            else:
-                json.dump(data, stream, indent=2, ensure_ascii=False)
+            # json.dumps uses the C encoder; json.dump streams through the slow Python one
+            stream.write(canonical(data) if compact else json.dumps(data, indent=2, ensure_ascii=False))
             stream.write('\n')
             stream.flush()
             os.fsync(stream.fileno())
@@ -273,7 +488,7 @@ def initialize(run, repo, revision, exclusions=None):
     if not repo.is_dir():
         raise ValueError('repository directory missing')
     run.mkdir(parents=True, exist_ok=True)
-    if (run / 'audit.json').exists():
+    if (run / 'audit.json').exists() or (run / 'audit.db').exists():
         raise ValueError('run already exists; resume it')
     exclusions = checked_exclusions(exclusions or {})
     files, limits = scan(repo, exclusions=exclusions, checkpoint=run / 'scan-state.json')
@@ -286,7 +501,7 @@ def initialize(run, repo, revision, exclusions=None):
     data['files'] = files
     (run / 'evidence').mkdir(exist_ok=True)
     (run / 'parts').mkdir(exist_ok=True)
-    atomic(run / 'audit.json', data)
+    create_ledger(run, data)
     return data
 
 
@@ -356,6 +571,7 @@ def validate(data, run, complete=False, check_source=None):
                 need(data['files'][path]['decision'] == 'mapped', key + ': source is not mapped')
     errors.extend(rule_errors(data, rules))
     covered = coverage(data, rules)
+    index = review_index(data)
     expected = {uid(o, v, c) for o, row in data['objects'].items() for v in row['variants'] for c in rules} - set(covered)
     if complete:
         need(expected <= set(data['units']), 'criterion/variant matrix incomplete; run plan')
@@ -376,7 +592,7 @@ def validate(data, run, complete=False, check_source=None):
         if complete:
             need(row['status'] in ('pass', 'fail', 'excluded'), key + ': unfinished unit')
             if row['status'] in ('pass', 'fail', 'excluded'):
-                need(accepted(data, 'unit', key, row['actor']), key + ': independent unit review missing/stale')
+                need(accepted(data, 'unit', key, row['actor'], index), key + ': independent unit review missing/stale')
             if row['status'] == 'fail':
                 need(any(key in f['units'] and f['status'] == 'confirmed' for f in data['findings'].values()), key + ': failure has no confirmed finding')
     assigned = set()
@@ -393,7 +609,7 @@ def validate(data, run, complete=False, check_source=None):
         need(bool(row['units']) and set(row['units']) <= set(data['units']), key + ': missing units')
         need(bool(row['evidence']) and bool(row['steps']), key + ': finding lacks primary evidence/reproduction')
         if row['status'] in ('confirmed', 'refuted'):
-            need(accepted(data, 'finding', key, row['actor']), key + ': finding lacks independent validation')
+            need(accepted(data, 'finding', key, row['actor'], index), key + ': finding lacks independent validation')
         if row['status'] == 'confirmed':
             need(all(data['units'].get(u, {}).get('status') == 'fail' for u in row['units']), key + ': confirmed finding contradicts unit status')
         if complete:
@@ -425,6 +641,131 @@ def validate(data, run, complete=False, check_source=None):
     return errors
 
 
+def validate_changes(data, run, events):
+    """The checks of validate() for one write, limited to the rows it touched and their dependents.
+
+    Same rules as validate(complete=False) for those rows; it assumes the stored ledger was
+    valid. Untouched evidence files and the journal replay are verified by check and report,
+    which always run the full validate()."""
+    schema = read(ROOT / 'schemas/run.schema.json')
+    errors = []
+    def need(ok, message):
+        if not ok:
+            errors.append(message)
+    rules = catalog()
+    need(data['catalog_hash'] == digest(rules), 'catalog changed; start a new run')
+    touched = {t: {} for t in TABLES}
+    for event in events:
+        touched[event['table']].setdefault(event['id'], event['before'])
+    current = {t: {k: data[t].get(k) for k in keys} for t, keys in touched.items()}
+    for table, rows in current.items():
+        for key, row in rows.items():
+            need(key.strip(), 'empty ID in ' + table)
+            if row is not None:
+                schema_check(row, schema['properties'][table]['additionalProperties'], '$.' + table + '.' + key)
+    deleted_units = {k for k, row in current['units'].items() if row is None}
+    for name in ('objects', 'units', 'findings', 'reviews', 'gaps', 'profile'):
+        rows = [(k, r) for k, r in current[name].items() if r is not None]
+        known = data['evidence'].present({e for _, r in rows for e in r.get('evidence', [])})
+        for key, row in rows:
+            for eid in row.get('evidence', []):
+                need(eid in known, key + ': unknown evidence ' + eid)
+    for key, row in current['evidence'].items():
+        path = (Path(run) / row['file']).resolve()
+        safe = Path(run).resolve() in path.parents and not (Path(run) / row['file']).is_symlink()
+        need(safe and path.is_file(), key + ': missing/unsafe evidence')
+        if safe and path.is_file():
+            need(filehash(path) == row['sha256'], key + ': evidence changed')
+    # Files and objects reference each other; recheck both sides of every changed mapping.
+    file_keys, object_keys = set(touched['files']), set(touched['objects'])
+    for key, before in touched['objects'].items():
+        file_keys.update((before or {}).get('sources', []), data['objects'][key]['sources'])
+    for key, before in touched['files'].items():
+        object_keys.update((before or {}).get('objects', []), data['files'][key]['objects'])
+    data['files'].present(file_keys | {p for o in object_keys if o in data['objects'] for p in data['objects'][o]['sources']})
+    for key in sorted(file_keys):
+        row = data['files'].get(key)
+        if row is None:
+            continue
+        need(set(row['objects']) <= set(data['objects']), key + ': unknown object mapping')
+        for obj in row['objects']:
+            if obj in data['objects']:
+                need(key in data['objects'][obj]['sources'], key + ': mapping not reciprocal')
+        need(not row['objects'] or row['decision'] == 'mapped', key + ': object mapping requires mapped decision')
+        if row['decision'] == 'mapped':
+            need(bool(row['objects']), key + ': mapped without objects')
+        if row['decision'] in ('blocked', 'excluded'):
+            need(bool(row['reason'].strip()), key + ': missing exclusion/limitation reason')
+    for key in sorted(object_keys):
+        row = data['objects'].get(key)
+        if row is None:
+            continue
+        need(bool(row['sources']) and all(p in data['files'] for p in row['sources']), key + ': missing source mapping')
+        need(bool(row['variants']), key + ': no variants')
+        need(set(row['relations']) <= set(data['objects']), key + ': unknown relation')
+        for path in row['sources']:
+            if path in data['files']:
+                need(key in data['files'][path]['objects'], key + ': mapping not reciprocal')
+                need(data['files'][path]['decision'] == 'mapped', key + ': source is not mapped')
+    rules_changed = any(touched[t] for t in RULE_TABLES + ('objects',))
+    if rules_changed:
+        errors.extend(rule_errors(data, rules))
+    units = {k: r for k, r in current['units'].items() if r is not None}
+    for obj in touched['objects']:
+        units.update(data['units'].by_ref(obj))  # a removed variant makes the object's units stale
+    for key, row in units.items():
+        need(row['object'] in data['objects'], key + ': unknown object')
+        need(row['criterion'] in rules, key + ': unknown criterion')
+        need(key == uid(row['object'], row['variant'], row['criterion']), key + ': unstable ID')
+        if row['object'] in data['objects']:
+            need(row['variant'] in data['objects'][row['object']]['variants'], key + ': stale variant')
+        if row['status'] in ('pass', 'fail'):
+            need(all(row[x] for x in ('actor', 'method', 'expected', 'actual', 'steps', 'evidence')), key + ': unsupported result')
+        if row['status'] in ('excluded', 'blocked'):
+            need(bool(row['reason']) and bool(row['evidence']), key + ': unsupported exclusion/block')
+        if row['status'] == 'blocked':
+            need(bool(row['limitations']), key + ': missing next step/limitation')
+    jobs = set(data['jobs']) if deleted_units or rules_changed else set(touched['jobs'])
+    existing = data['units'].present({u for k in jobs for u in data['jobs'][k]['units']})
+    covered = None
+    assigned = set()
+    for key, job in data['jobs'].items():
+        if job['status'] == 'active':
+            need(not assigned.intersection(job['units']), key + ': overlapping active jobs')
+            assigned.update(job['units'])
+        if key in jobs:
+            missing = set(job['units']) - existing
+            if missing and job['status'] != 'active':  # closed jobs may name units a rule pruned
+                covered = set(coverage(data, rules)) if covered is None else covered
+                missing -= covered
+            need(bool(job['units']) and not missing, key + ': invalid job units')
+    changed_units = set(touched['units'])
+    findings = {k for k, f in data['findings'].items() if k in touched['findings'] or changed_units.intersection(f['units'])}
+    for key in sorted(findings):
+        row = data['findings'][key]
+        need(bool(row['units']) and data['units'].present(row['units']) == set(row['units']), key + ': missing units')
+        need(bool(row['evidence']) and bool(row['steps']), key + ': finding lacks primary evidence/reproduction')
+        if row['status'] in ('confirmed', 'refuted'):
+            need(accepted(data, 'finding', key, row['actor']), key + ': finding lacks independent validation')
+        if row['status'] == 'confirmed':
+            need(all(data['units'].get(u, {}).get('status') == 'fail' for u in row['units']), key + ': confirmed finding contradicts unit status')
+    reviews = {k: r for k, r in current['reviews'].items() if r is not None}
+    for unit in deleted_units:
+        reviews.update(data['reviews'].by_ref('unit' + REF_SEP + unit))
+    for key, row in reviews.items():
+        need(bool(row['evidence']), key + ': review has no primary evidence')
+        if row['scope'] in ('unit', 'finding'):
+            target_table = {'unit': 'units', 'finding': 'findings'}[row['scope']]
+            need(row['target'] in data[target_table], key + ': review target missing')
+    gaps = set(data['gaps']) if deleted_units else set(touched['gaps'])
+    for key in sorted(gaps):
+        row = data['gaps'][key]
+        need(data['units'].present(row['units']) == set(row['units']), key + ': unknown gap units')
+        if row['status'] == 'resolved':
+            need(bool(row['evidence']) and bool(row['resolution']), key + ': gap resolution unsupported')
+    return errors
+
+
 def review_resolved(data, review_id):
     # IDs must be referenced as whole tokens: resolving R10 cannot resolve R1.
     reference = r'(?<![A-Za-z0-9_.-])' + re.escape(review_id) + r'(?![A-Za-z0-9_.-])'
@@ -453,7 +794,23 @@ def coverage_notices(data):
             if review['scope'] == 'inventory' and review['verdict'] == 'gap' and not review_resolved(data, key)]
 
 
-def accepted(data, scope, target, author):
+def review_index(data):
+    """Reviews grouped by target, so per-unit acceptance checks stay linear in large ledgers."""
+    index = {}
+    for row in data['reviews'].values():
+        index.setdefault(row['scope'] + REF_SEP + row['target'], []).append(row)
+    return index
+
+
+def reviews_for(data, scope, target, index=None):
+    if index is not None:
+        return index.get(scope + REF_SEP + target, [])
+    if isinstance(data['reviews'], LazyTable):
+        return [row for _, row in data['reviews'].by_ref(scope + REF_SEP + target)]
+    return [r for r in data['reviews'].values() if r['scope'] == scope and r['target'] == target]
+
+
+def accepted(data, scope, target, author, index=None):
     try:
         wanted = review_digest(data, scope, target)
     except KeyError:
@@ -462,7 +819,7 @@ def accepted(data, scope, target, author):
                and r['actor'] != author and r['mode'] == 'independent' and r['verdict'] == 'accept'
                and r['evidence'] and r['countercheck']
                and (scope not in ('unit', 'finding') or r['outcome'] == data[{'unit':'units','finding':'findings'}[scope]][target]['status'])
-               for r in data['reviews'].values())
+               for r in reviews_for(data, scope, target, index))
 
 
 def put(data, actor, table, key, row):
@@ -520,46 +877,80 @@ def put(data, actor, table, key, row):
     data['history'].append(dict(actor=actor, table=table, id=key, before=copy.deepcopy(old), after=copy.deepcopy(row)))
 
 
+def check_fragment(data, fragment):
+    if not isinstance(fragment, dict) or set(fragment) != {'base_sequence', 'actor', 'operations'}:
+        raise ValueError('malformed fragment: expected base_sequence, actor, operations; review maps need wrapping')
+    if type(fragment['base_sequence']) is not int or not isinstance(fragment['operations'], list):
+        raise ValueError('malformed fragment: base_sequence must be integer and operations an array')
+    if fragment['base_sequence'] != data['sequence']:
+        raise ValueError('stale fragment: expected sequence ' + str(data['sequence']) + '; inspect changes before rebasing')
+    if not isinstance(fragment['actor'], str) or not fragment['actor'].strip():
+        raise ValueError('actor required')
+
+
+def apply_operations(data, fragment):
+    for op in fragment['operations']:
+        if not isinstance(op, dict) or set(op) != {'table', 'id', 'value'}:
+            raise ValueError('malformed operation')
+        if op['table'] == 'units' and isinstance(op['value'], dict) and op['value'].get('status') == 'blocked':
+            row = op['value']
+            if not row.get('blocker') or blocker_state(data, row) != 'documented':
+                raise ValueError('blocked requires a current structured blocker; unattempted work stays pending')
+            if not row.get('steps') or not row.get('actual') or not row.get('evidence'):
+                raise ValueError('blocked requires attempted steps, observed obstacle and primary evidence')
+        put(data, fragment['actor'], op['table'], op['id'], op['value'])
+    data['sequence'] += 1
+
+
 def apply(run, fragment):
+    """Apply one fragment as a single transaction; returns the new sequence.
+
+    Only the touched rows are read and checked, so a write stays fast in a ledger with
+    10^5 units. AUDIT_VERIFY_APPLY=1 additionally runs the full validate() on the result
+    and fails if the two disagree (used by the tests)."""
     run = Path(run)
-    lock = run / '.write-lock'
+    ensure_ledger(run)
+    with write_lock(run):
+        con, data = open_view(run)
+        try:
+            check_fragment(data, fragment)
+            base = data['sequence']
+            apply_operations(data, fragment)
+            errors = validate_changes(data, run, data['history'])
+            if os.environ.get('AUDIT_VERIFY_APPLY') == '1':
+                full = load(run)
+                apply_operations(full, fragment)
+                full_errors = validate(full, run)
+                if bool(full_errors) != bool(errors):
+                    raise AssertionError('incremental and full validation disagree: '
+                                         + repr(errors) + ' vs ' + repr(full_errors))
+            if errors:
+                raise ValueError('\n'.join(errors))
+            commit(con, data, base)
+            return data['sequence']
+        finally:
+            con.close()
+
+
+def current_row(run, table, key):
+    """One row and the ledger sequence, without loading the ledger."""
+    ensure_ledger(run)
+    con, data = open_view(run)
     try:
-        lock.mkdir()
-    except FileExistsError:
-        raise ValueError('writer locked; inspect active coordinator before removing stale .write-lock')
-    try:
-        data = load(run)
-        if not isinstance(fragment, dict) or set(fragment) != {'base_sequence', 'actor', 'operations'}:
-            raise ValueError('malformed fragment: expected base_sequence, actor, operations; review maps need wrapping')
-        if type(fragment['base_sequence']) is not int or not isinstance(fragment['operations'], list):
-            raise ValueError('malformed fragment: base_sequence must be integer and operations an array')
-        if fragment['base_sequence'] != data['sequence']:
-            raise ValueError('stale fragment: expected sequence ' + str(data['sequence']) + '; inspect changes before rebasing')
-        if not isinstance(fragment['actor'], str) or not fragment['actor'].strip():
-            raise ValueError('actor required')
-        for op in fragment['operations']:
-            if not isinstance(op, dict) or set(op) != {'table', 'id', 'value'}:
-                raise ValueError('malformed operation')
-            if op['table'] == 'units' and isinstance(op['value'], dict) and op['value'].get('status') == 'blocked':
-                row = op['value']
-                if not row.get('blocker') or blocker_state(data, row) != 'documented':
-                    raise ValueError('blocked requires a current structured blocker; unattempted work stays pending')
-                if not row.get('steps') or not row.get('actual') or not row.get('evidence'):
-                    raise ValueError('blocked requires attempted steps, observed obstacle and primary evidence')
-            put(data, fragment['actor'], op['table'], op['id'], op['value'])
-        data['sequence'] += 1
-        errors = validate(data, run)
-        if errors:
-            raise ValueError('\n'.join(errors))
-        atomic(run / 'audit.json', data, compact=True)
-        return data
+        return data['sequence'], copy.deepcopy(data[table].get(key))
     finally:
-        lock.rmdir()
+        con.close()
 
 
 def plan(run, actor):
     """Add missing matrix units and prune untouched pending units that a rule now covers."""
-    data = load(run)
+    ensure_ledger(run)
+    con, data = open_view(run)
+    try:
+        units = {key: json.loads(body) for key, body in con.execute(
+            "SELECT id, body FROM rows WHERE tbl = 'units' ORDER BY rowid")}
+    finally:
+        con.close()
     rules = catalog()
     covered = coverage(data, rules)
     claimed = {u for j in data['jobs'].values() if j['status'] == 'active' for u in j['units']}
@@ -568,9 +959,9 @@ def plan(run, actor):
         for variant in row['variants']:
             for criterion in rules:
                 key = uid(obj, variant, criterion)
-                if key not in data['units'] and key not in covered:
+                if key not in units and key not in covered:
                     ops.append(dict(table='units', id=key, value=blank_unit(obj, variant, criterion)))
-    for key, row in data['units'].items():
+    for key, row in units.items():
         if key in covered and key not in claimed and row['status'] == 'pending' and not row['actor']:
             ops.append(dict(table='units', id=key, value=None))
     return apply(run, dict(base_sequence=data['sequence'], actor=actor, operations=ops))
@@ -580,12 +971,11 @@ def patch_row(run, actor, table, key, set_fields=None, add_fields=None, write_fr
     """Change selected fields of the current row; list fields in add_fields are unioned in order.
 
     Builds the operation from the current ledger state, so concurrent fields are kept."""
-    data = load(run)
     if table not in TABLES:
         raise ValueError('unknown table')
-    if key not in data[table]:
+    sequence, row = current_row(run, table, key)
+    if row is None:
         raise ValueError(key + ': no current row in ' + table + '; create it with a full fragment')
-    row = copy.deepcopy(data[table][key])
     for name, value in (set_fields or {}).items():
         if name not in row and table != 'units':
             raise ValueError('unknown field for patch: ' + name)
@@ -594,10 +984,10 @@ def patch_row(run, actor, table, key, set_fields=None, add_fields=None, write_fr
         if not isinstance(row.get(name), list) or not isinstance(values, list):
             raise ValueError('--add needs a list field and a JSON array: ' + name)
         row[name] = row[name] + [v for v in values if v not in row[name]]
-    fragment = dict(base_sequence=data['sequence'], actor=actor, operations=[dict(table=table, id=key, value=row)])
+    fragment = dict(base_sequence=sequence, actor=actor, operations=[dict(table=table, id=key, value=row)])
     if not write_fragment:
         return apply(run, fragment)
-    path = Path(run) / 'parts' / ('patch-' + str(data['sequence']) + '-' + uuid.uuid4().hex + '.json')
+    path = Path(run) / 'parts' / ('patch-' + str(sequence) + '-' + uuid.uuid4().hex + '.json')
     with path.open('x', encoding='utf-8') as stream:
         json.dump(fragment, stream, indent=2, ensure_ascii=False)
         stream.write('\n')
@@ -625,9 +1015,9 @@ def evidence(run, actor, key, source, kind, locator, environment):
     if not dest.exists():
         with dest.open('xb') as out:
             out.write(content)
-    data = load(run)
+    sequence, _ = current_row(run, 'evidence', key)
     row = dict(file=relative, sha256=h, kind=kind, locator=locator, environment=environment, captured_by=actor)
-    return apply(run, dict(base_sequence=data['sequence'], actor=actor,
+    return apply(run, dict(base_sequence=sequence, actor=actor,
                           operations=[dict(table='evidence', id=key, value=row)]))
 
 
@@ -739,6 +1129,7 @@ def next_work(data, limit=12):
     if not 1 <= limit <= 100:
         raise ValueError('next limit must be between 1 and 100')
     blockers = {state: 0 for state in ('documented', 'stale', 'unsubstantiated')}
+    index = review_index(data)
     packages = {}
     review_units = []
     for key, row in data['units'].items():
@@ -746,7 +1137,7 @@ def next_work(data, limit=12):
         if state:
             blockers[state] += 1
         if row['status'] in ('pass', 'fail', 'excluded'):
-            if not accepted(data, 'unit', key, row['actor']):
+            if not accepted(data, 'unit', key, row['actor'], index):
                 review_units.append(key)
             continue
         action = 'reassess-blocker' if state in ('stale', 'unsubstantiated') else 'retry-when-ready' if state else 'execute'
@@ -811,6 +1202,7 @@ def main():
     sub = p.add_subparsers(dest='command', required=True)
     init = sub.add_parser('init'); init.add_argument('run'); init.add_argument('repository'); init.add_argument('--revision', required=True); init.add_argument('--exclusions', help='JSON path-to-reason map; run remains incomplete')
     app = sub.add_parser('apply'); app.add_argument('run'); app.add_argument('fragment')
+    mig = sub.add_parser('migrate', help='convert a JSON ledger (audit.json) to audit.db; apply does this on its first write'); mig.add_argument('run')
     pl = sub.add_parser('plan'); pl.add_argument('run'); pl.add_argument('--actor', required=True)
     pa = sub.add_parser('patch', help='change fields of one current row without rewriting it by hand')
     pa.add_argument('run'); pa.add_argument('--actor', required=True); pa.add_argument('--table', required=True, choices=TABLES)
@@ -835,6 +1227,9 @@ def main():
     try:
         if args.command == 'init': initialize(args.run, args.repository, args.revision, read(args.exclusions) if args.exclusions else None)
         elif args.command == 'apply': apply(args.run, read(args.fragment))
+        elif args.command == 'migrate':
+            with write_lock(args.run):
+                print('migrated' if migrate(args.run) else 'nothing to migrate')
         elif args.command == 'wrap-reviews': print(wrap_reviews(args.run, read(args.draft), args.actor))
         elif args.command == 'plan': plan(args.run, args.actor)
         elif args.command == 'patch':

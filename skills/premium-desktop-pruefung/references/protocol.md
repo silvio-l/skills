@@ -4,7 +4,7 @@ Python 3.10+, standard library. `schemas/run.schema.json` is the authoritative D
 
 ## State and baseline
 
-`audit.json` contains immutable baseline metadata, content-hashed source manifest, profile, objects, units, evidence, findings, jobs, reviews, gaps and replayable history. `sequence` is optimistic concurrency control. Atomic replacement and an exclusive `.write-lock` prevent torn or conflicting coordinator writes. Workers write separate fragments under `parts/`, never the ledger. Keep evidence and raw artifacts outside the audited repository.
+`audit.db` (SQLite, standard library) contains immutable baseline metadata, content-hashed source manifest, profile, objects, units, evidence, findings, jobs, reviews, gaps and replayable history. `sequence` is optimistic concurrency control. Each write is one SQLite transaction under an exclusive `.write-lock`, so coordinator writes are never torn or interleaved. Read it only through `audit.py`; never edit the database directly (`check` detects rows that differ from the journal). Workers write separate fragments under `parts/`, never the ledger. Keep evidence and raw artifacts outside the audited repository.
 
 `init RUN REPO --revision REV` refuses to overwrite a completed initialization. It inventories regular files without executing project code, excluding only Git metadata by default. Bounded batches checkpoint to `scan-state.json` and continue automatically; rerun the same initialization after interruption to resume. Large files are hashed incrementally, not omitted by a size ceiling. The scanner reconciles source changes during discovery; a changed checkpoint is rejected and initialization must rerun on a stable baseline. Internal links to inventoried targets are fingerprinted without duplicate traversal. Unreadable paths and unresolved external/broken/excluded link targets remain explicit scan limits. Evidence/subruns cannot clear those immutable limits: establish an authorized self-contained baseline and start a linked run to close them. `--exclusions` intentionally narrows the scan and keeps the run incomplete; it is not the remedy for a full audit hitting a work-batch boundary. Never replace discovery with tracked files only. `drift` compares the observed manifest within the recorded scan scope, including additions/deletions. Source changes after initialization require a fresh linked run.
 
@@ -23,7 +23,13 @@ A large product multiplies objects × variants × 100 criteria into a matrix nob
 
 Both need primary evidence (source, tokens, rendered comparison) and belong to the inventory digest, so the independent inventory review accepts or rejects them like any other inventory claim. `plan` creates only uncovered units and removes untouched pending units that a rule now covers (journalled as a deletion); it never removes worked units or units claimed by an active job. The report lists every rule and the number of covered units. A rule is a scope claim, not a pass: a disputed rule is resolved by inventory review, and per-unit exclusions remain available for individual cases.
 
-The ledger is stored as compact JSON. Older ledgers without the rule tables stay readable; their inventory digest is unchanged until a rule is added.
+Older ledgers without the rule tables stay readable; their inventory digest is unchanged until a rule is added.
+
+## Ledger storage and scale
+
+`apply` (and `patch`, `evidence`, `plan`) reads only the rows a fragment touches plus the rows that depend on them: the files and objects of a changed mapping, the units of a changed object, the jobs, findings, reviews and gaps that name a changed or removed unit. It enforces the same rules as the full validator for those rows and writes the result in one transaction, so a write stays well under a second even with 100,000 units (10–150 ms measured). `check` and `report` load the whole ledger and replay the complete journal, re-hash every evidence file and compare the source baseline; tampering between writes (a hand-edited row, a replaced evidence file) surfaces there, not at the next write. Run `check` before handing results on.
+
+Runs created with the JSON ledger (`audit.json`) stay readable. The first write converts them after a full validation (`audit.py migrate RUN` does the same explicitly) and keeps the original as `audit.json.migrated`; an invalid JSON ledger is not converted.
 
 ## Transactions
 

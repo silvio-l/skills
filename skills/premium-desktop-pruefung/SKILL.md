@@ -73,7 +73,7 @@ Follow [issues](references/issues.md) to prepare, deduplicate and create issues 
 
 Use `next RUN --limit 12` for packages across surfaces and `resume RUN --object OBJECT_ID --status pending --limit 20` for bounded work queues and `digest RUN --scope unit --target UNIT_ID` for review hashes. Change single fields of a current row with `patch RUN --actor A --table T --id X --set JSON` / `--add JSON` / `--append-variant V` instead of hand-built fragments. `check`/`report` print compact diagnostics and retain all errors in `validation.json`. See protocol for safe review-draft wrapping.
 
-On interruption, resume `audit.json`, inspect active jobs and pending outbox entries, verify `drift`, and reopen affected units. A changed source baseline requires a new linked run; never reuse old evidence as if captured on the new build. After separately authorized fixes, retest original and adjacent paths, restart/persistence where relevant, and link outcomes to the existing issues.
+On interruption, resume the ledger (`audit.db`), inspect active jobs and pending outbox entries, verify `drift`, and reopen affected units. A changed source baseline requires a new linked run; never reuse old evidence as if captured on the new build. After separately authorized fixes, retest original and adjacent paths, restart/persistence where relevant, and link outcomes to the existing issues.
 
 ## Maintainer evidence
 
