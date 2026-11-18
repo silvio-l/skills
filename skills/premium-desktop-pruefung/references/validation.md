@@ -121,3 +121,7 @@ The ledger is now `audit.db` (SQLite from the standard library): rows per table 
 Guarantees: the full validator and journal replay are unchanged and still run on `check`/`report`. The tests run every `apply` a second time through the full validator (`AUDIT_VERIFY_APPLY=1`) and fail when the two disagree; a deliberately removed dependency check is caught this way. Further tests cover JSON ledger migration, rows that depend on a change (stale variants, unmapped sources, a reopened unit under a confirmed finding, pruning a reviewed unit), a hand-edited database row and a commit against a ledger that moved on. Large tables refuse full iteration during `apply`, so a slow path cannot return unnoticed.
 
 Regression result: **122 tests passed** (60 ledger, 36 tracker, 12 probe/package, 14 source discovery), with Python 3.15 and the system Python 3.9.
+
+## Relevance policy for the source scan — 2026-11-18
+
+Live run on a Tauri/React product: the full traversal inventoried 128,529 files in 34.9 s (ledger 48 MB), about 98 % of them in nested agent worktrees, `target/` and `node_modules/`. With the policy, `init` on the same tree inventoried 1,854 files in 0.3 s (ledger 0.5 MB) and listed ten skipped directories, all Git-ignored. Tests cover nested checkouts (`.git` file or directory), exact-path Git ignores (`target/` skipped, `src/target/` kept), cache names, `--include`, `--scan-all`, checkpoint scope, no drift from changes in skipped trees and unchanged full scope for pre-policy runs.

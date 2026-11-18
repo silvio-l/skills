@@ -357,7 +357,8 @@ def blocker_state(data, row):
 
 def inventory_digest(data):
     # Rule tables join the digest only when used, so digests of older ledgers stay stable.
-    keys = ('revision', 'catalog_hash', 'files', 'objects', 'profile', 'scan_complete', 'scan_limits', 'scan_exclusions')
+    keys = ('revision', 'catalog_hash', 'files', 'objects', 'profile', 'scan_complete', 'scan_limits', 'scan_exclusions',
+            'scan_policy', 'scan_ignored', 'scan_includes')
     return digest({k: data[k] for k in keys + RULE_TABLES if k in data and (k not in RULE_TABLES or data[k])})
 
 
@@ -471,17 +472,27 @@ def checked_exclusions(exclusions):
     return exclusions
 
 
-def scan(repo, max_files=50000, max_bytes=16 * 1024 * 1024, exclusions=None, checkpoint=None):
+def scan_policy(data):
+    """None for runs created before the relevance policy, so their baseline stays comparable."""
+    return dict(includes=data.get('scan_includes', [])) if data.get('scan_policy') else None
+
+
+def rescan(data):
+    found = scan(Path(data['repository']), exclusions=data.get('scan_exclusions', {}), policy=scan_policy(data))
+    return found[0], found[1]
+
+
+def scan(repo, max_files=50000, max_bytes=16 * 1024 * 1024, exclusions=None, checkpoint=None, policy=None):
     # Explicit sibling loading also supports importlib-based test/adapter callers.
     import importlib.util
     spec = importlib.util.spec_from_file_location('premium_source_scan', ROOT / 'scripts/source_scan.py')
     scanner = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(scanner)
     return scanner.scan_tree(repo, max_files, max_bytes,
-                             checked_exclusions(exclusions or {}), checkpoint)
+                             checked_exclusions(exclusions or {}), checkpoint, policy=policy)
 
 
-def initialize(run, repo, revision, exclusions=None):
+def initialize(run, repo, revision, exclusions=None, includes=None, scan_all=False):
     run, repo = Path(run).resolve(), Path(repo).resolve()
     if run == repo or repo in run.parents:
         raise ValueError('audit workspace must be outside target repository')
@@ -491,10 +502,20 @@ def initialize(run, repo, revision, exclusions=None):
     if (run / 'audit.json').exists() or (run / 'audit.db').exists():
         raise ValueError('run already exists; resume it')
     exclusions = checked_exclusions(exclusions or {})
-    files, limits = scan(repo, exclusions=exclusions, checkpoint=run / 'scan-state.json')
+    includes = sorted(checked_exclusions({p: 'include' for p in includes or []}))
+    if scan_all:
+        files, limits = scan(repo, exclusions=exclusions, checkpoint=run / 'scan-state.json')
+    else:
+        files, limits, ignored = scan(repo, exclusions=exclusions, checkpoint=run / 'scan-state.json',
+                                      policy=dict(includes=includes))
     data = dict(version=1, run_id=str(uuid.uuid4()), repository=str(repo), revision=revision,
                 catalog_hash=digest(catalog()), sequence=0, scan_complete=not limits,
                 scan_limits=limits, **{t: {} for t in TABLES}, history=[])
+    if not scan_all:
+        # Not product source: listed for the inventory review, not an incomplete scan.
+        data.update(scan_policy=1, scan_ignored=ignored)
+        if includes:
+            data['scan_includes'] = includes
     if exclusions:
         data['scan_exclusions'] = exclusions
         data['scan_complete'] = False
@@ -628,7 +649,7 @@ def validate(data, run, complete=False, check_source=None):
         if complete:
             need(row['status'] == 'resolved', key + ': open gap')
     if (complete if check_source is None else check_source):
-        current, limits = scan(Path(data['repository']), exclusions=data.get('scan_exclusions', {}))
+        current, limits = rescan(data)
         need(not limits and {k:v['sha256'] for k,v in current.items()} == {k:v['sha256'] for k,v in data['files'].items()}, 'source baseline changed or unreadable; new run required')
     if complete:
         need(bool(data['objects']) and bool(data['units']), 'empty inventory')
@@ -1036,7 +1057,7 @@ def results(data, run):
     covered = coverage(data, rules)
     return dict(run_id=data['run_id'], repository=data['profile'].get('tracker',{}).get('value',data['repository']),
                 target_path=data['repository'], revision=data['revision'],
-                scan_exclusions=data.get('scan_exclusions', {}),
+                scan_exclusions=data.get('scan_exclusions', {}), scan_ignored=data.get('scan_ignored', {}),
                 integrity_valid=not integrity_errors, integrity_errors=integrity_errors,
                 coverage_notices=coverage_notices(data),
                 covered_units={kind: sum(c[0] == kind for c in covered.values()) for kind in ('not-applicable', 'equivalent')},
@@ -1081,6 +1102,10 @@ def report(result):
         for key, rule in result['equivalences'].items():
             lines.append('- ' + key + ' (equivalent): ' + rule['object'] + ' ' + ', '.join(rule['variants']) + ' → ' + rule['representative']
                          + ' — ' + rule['reason'].replace('\n', ' '))
+    if result.get('scan_ignored'):
+        lines += ['', '## Not inventoried: nested checkouts, Git-ignored and dependency directories', '',
+                  'Not product source by the scan policy; the inventory review can dispute any entry (rerun init with --include).', '']
+        lines += ['- ' + path.replace('\n', ' ') + ': ' + reason for path, reason in result['scan_ignored'].items()]
     if result.get('scan_exclusions'):
         lines += ['', '## Explicitly omitted source paths (unexamined)', '']
         lines += ['- ' + path.replace('\n', ' ') + ': ' + reason.replace('\n', ' ') for path, reason in result['scan_exclusions'].items()]
@@ -1108,7 +1133,8 @@ def compact(result):
         if len(group['examples']) < 3:
             group['examples'].append(message)
     return dict(status=result['status'], counts=result['counts'], error_count=len(result['errors']),
-                error_groups=groups, scan_exclusions=result['scan_exclusions'])
+                error_groups=groups, scan_exclusions=result['scan_exclusions'],
+                not_inventoried=len(result.get('scan_ignored', {})))
 
 
 def resume(data, obj=None, status=None, limit=20):
@@ -1201,6 +1227,8 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     sub = p.add_subparsers(dest='command', required=True)
     init = sub.add_parser('init'); init.add_argument('run'); init.add_argument('repository'); init.add_argument('--revision', required=True); init.add_argument('--exclusions', help='JSON path-to-reason map; run remains incomplete')
+    init.add_argument('--include', action='append', default=[], help='scan this directory although the policy skips it (repeatable)')
+    init.add_argument('--scan-all', action='store_true', help='no relevance policy: also scan dependency, Git-ignored and nested-checkout directories')
     app = sub.add_parser('apply'); app.add_argument('run'); app.add_argument('fragment')
     mig = sub.add_parser('migrate', help='convert a JSON ledger (audit.json) to audit.db; apply does this on its first write'); mig.add_argument('run')
     pl = sub.add_parser('plan'); pl.add_argument('run'); pl.add_argument('--actor', required=True)
@@ -1225,7 +1253,11 @@ def main():
             cmd.add_argument('--verbose', action='store_true')
     args = p.parse_args()
     try:
-        if args.command == 'init': initialize(args.run, args.repository, args.revision, read(args.exclusions) if args.exclusions else None)
+        if args.command == 'init':
+            data = initialize(args.run, args.repository, args.revision, read(args.exclusions) if args.exclusions else None,
+                              args.include, args.scan_all)
+            print(json.dumps(dict(files=len(data['files']), limits=len(data['scan_limits']),
+                                  not_inventoried=data.get('scan_ignored', {})), ensure_ascii=False, indent=2))
         elif args.command == 'apply': apply(args.run, read(args.fragment))
         elif args.command == 'migrate':
             with write_lock(args.run):
@@ -1255,7 +1287,7 @@ def main():
             if args.command == 'resume':
                 print(json.dumps(resume(data,args.object,args.status,args.limit), ensure_ascii=False, indent=2)); return 0
             if args.command == 'drift':
-                files, limits = scan(Path(data['repository']), exclusions=data.get('scan_exclusions', {}))
+                files, limits = rescan(data)
                 changed = sorted(k for k in set(files)|set(data['files']) if files.get(k,{}).get('sha256') != data['files'].get(k,{}).get('sha256'))
                 print(json.dumps(dict(changed=changed, limits=limits))); return int(bool(changed or limits))
             result = results(data, args.run)

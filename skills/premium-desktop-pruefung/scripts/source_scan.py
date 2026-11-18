@@ -3,7 +3,9 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import stat
+import subprocess
 import sys
 import tempfile
 import time
@@ -34,14 +36,59 @@ def _source_path(repo, rel):
     return path
 
 
-def _children(repo, rel, exclusions):
+# Directory names that only ever hold installed dependencies or tool caches. Ambiguous names
+# such as build/, dist/ or target/ are skipped only when Git ignores them (see git_ignored_dirs).
+GENERATED_DIRS = frozenset({
+    'node_modules', 'bower_components', 'jspm_packages', '__pycache__', '.pytest_cache', '.mypy_cache',
+    '.ruff_cache', '.tox', '.nox', '.venv', '.next', '.nuxt', '.svelte-kit', '.turbo', '.parcel-cache',
+    '.gradle', '.dart_tool', 'DerivedData', 'Pods'})
+NESTED_CHECKOUT = 'separate Git checkout or worktree (own baseline)'
+GIT_IGNORED = 'ignored by Git (.gitignore or exclude rules)'
+GENERATED = 'dependency or tool cache directory'
+
+
+def git_ignored_dirs(repo):
+    """Directories Git itself ignores; read-only, with fsmonitor hooks disabled. [] without Git."""
+    git = shutil.which('git')
+    if not git or not (Path(repo) / '.git').exists():
+        return []
+    env = {**os.environ, 'GIT_OPTIONAL_LOCKS': '0', 'GIT_TERMINAL_PROMPT': '0'}
+    try:
+        done = subprocess.run([git, '-c', 'core.fsmonitor=false', '-c', 'core.untrackedCache=false', 'ls-files', '-z',
+                               '--others', '--ignored', '--exclude-standard', '--directory'],
+                              cwd=repo, capture_output=True, timeout=300, env=env)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if done.returncode:
+        return []
+    return sorted(p[:-1] for p in done.stdout.decode('utf-8', 'surrogateescape').split('\0') if p.endswith('/'))
+
+
+def _skip_reason(entry, child, policy):
+    if policy is None or child in policy['includes'] or not entry.is_dir(follow_symlinks=False):
+        return None
+    if os.path.lexists(os.path.join(entry.path, '.git')):
+        return NESTED_CHECKOUT
+    if child in policy['git_ignored']:
+        return GIT_IGNORED
+    if entry.name in GENERATED_DIRS:
+        return GENERATED
+    return None
+
+
+def _children(repo, rel, exclusions, policy=None, ignored=None):
     directory = _source_path(repo, rel)
     names = []
     with os.scandir(directory) as entries:
         for entry in entries:
             child = (Path(rel) / entry.name).as_posix()
-            # Git metadata is the only implicit omission, also for worktree .git files.
+            # Git metadata is always omitted, also for worktree .git files.
             if entry.name == '.git' or child in exclusions:
+                continue
+            reason = _skip_reason(entry, child, policy)
+            if reason:
+                if ignored is not None:
+                    ignored[child] = reason
                 continue
             names.append(entry.name)
     return sorted(names)
@@ -54,7 +101,7 @@ def _membership(names):
 def _reconcile(repo, state):
     for rel, expected in state['directories'].items():
         try:
-            if (repo / rel).is_symlink() or _membership(_children(repo, rel, state['exclusions'])) != expected:
+            if (repo / rel).is_symlink() or _membership(_children(repo, rel, state['exclusions'], state.get('policy'))) != expected:
                 return False
         except (OSError, ValueError):
             return False
@@ -137,23 +184,30 @@ def _finish_links(repo, state):
 
 
 def scan_tree(repo, max_files=50000, max_bytes=16 * 1024 * 1024,
-              exclusions=None, checkpoint=None, batch_seconds=60):
+              exclusions=None, checkpoint=None, batch_seconds=60, policy=None):
     """Scan all entries. max_files/time are checkpoint intervals, not global caps.
 
     max_bytes bounds a read chunk (at most 1 MiB), never the file size. A changed
     tree fails closed; use a stable source copy for coherent multi-batch scans.
+
+    policy=None scans everything (runs created before the relevance policy). With a policy
+    {'includes': [...]}, directories that are nested checkouts, ignored by Git or dependency/
+    tool caches are not traversed; they are returned as a third value, path -> reason.
+    Paths in includes are scanned regardless.
     """
     if max_files < 1 or max_bytes < 1 or batch_seconds <= 0:
         raise ValueError('scan batch controls must be positive')
     repo = Path(repo).resolve()
     exclusions = exclusions or {}
+    if policy is not None:
+        policy = dict(includes=sorted(policy.get('includes', [])), git_ignored=git_ignored_dirs(repo))
     checkpoint = Path(checkpoint).resolve() if checkpoint else None
     if checkpoint and (checkpoint == repo or repo in checkpoint.parents):
         raise ValueError('scan checkpoint must be outside source repository')
     if checkpoint and checkpoint.exists():
         state = json.loads(checkpoint.read_text(encoding='utf-8'))
         if (state.get('version') != 2 or state.get('repository') != str(repo)
-                or state.get('exclusions') != exclusions):
+                or state.get('exclusions') != exclusions or state.get('policy') != policy):
             raise ValueError('scan checkpoint belongs to another source/scope')
         paths = list(state['pending']) + list(state['files']) + list(state['directories']) + list(state['signatures']) + list(state['links'])
         if any(not isinstance(rel, str) or (rel != '.' and (Path(rel).is_absolute() or '\\' in rel or any(part in ('', '.', '..') for part in rel.split('/')))) for rel in paths):
@@ -164,6 +218,8 @@ def scan_tree(repo, max_files=50000, max_bytes=16 * 1024 * 1024,
     else:
         state = dict(version=2, repository=str(repo), exclusions=exclusions,
                      pending=['.'], files={}, limits=[], directories={}, signatures={}, links={})
+        if policy is not None:
+            state.update(policy=policy, ignored={})
     started, count = time.monotonic(), 0
     while state['pending']:
         # Keep the current path queued until its observation is fully recorded.
@@ -173,7 +229,7 @@ def scan_tree(repo, max_files=50000, max_bytes=16 * 1024 * 1024,
         try:
             before = _signature(path)
             if stat.S_ISDIR(before[2]):
-                names = _children(repo, rel, exclusions)
+                names = _children(repo, rel, exclusions, policy, state.get('ignored'))
                 state['directories'][rel] = _membership(names)
                 children = [(Path(rel) / name).as_posix() for name in reversed(names)]
             elif stat.S_ISREG(before[2]):
@@ -227,4 +283,6 @@ def scan_tree(repo, max_files=50000, max_bytes=16 * 1024 * 1024,
         raise ValueError('source changed during inventory; rerun on a stable baseline')
     if checkpoint:
         _write(checkpoint, state)
-    return state['files'], state['limits']
+    if policy is None:
+        return state['files'], state['limits']
+    return state['files'], state['limits'], dict(sorted(state['ignored'].items()))

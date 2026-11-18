@@ -21,7 +21,7 @@ Shared GUI access must be serialized. Parallel workers may inspect disjoint stat
 
 First provide raw repository, audience/task contract, baseline and runtime access **without investigator verdicts**. Ask for an independent route/window/command/configuration/state inventory, particularly indirect and alternative paths. Record this independently derived list as evidence. Then provide ledger and raw artifacts:
 
-- Reconcile the independently derived inventory with objects/variants, file exclusions and relationships. Find missing paths and unsupported equivalence claims.
+- Reconcile the independently derived inventory with objects/variants, file exclusions, the not-inventoried directories (`scan_ignored`) and relationships. Find missing paths and unsupported equivalence claims.
 - Select original files, build/version and runtime evidence directly; do not rely on summaries or screenshots alone for behavior.
 - Review each terminal unit's method and evidence. Keyboard interaction needs a sequence and focus observations; persistence needs restart; visual quality needs actual rendered inspection; user-perception claims need suitable user evidence or explicit heuristic qualification.
 - Actively falsify each candidate: alternate accessible name source, authorized role differences, valid WCAG exception, transformed color/background, intended platform behavior, stale build or test setup error. Record attempted counterexample and outcome, including when the claim survives.

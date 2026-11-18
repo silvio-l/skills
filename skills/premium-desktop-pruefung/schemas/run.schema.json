@@ -769,6 +769,27 @@
         "type": "string",
         "minLength": 1
       }
+    },
+    "scan_policy": {
+      "type": "integer",
+      "enum": [
+        1
+      ]
+    },
+    "scan_ignored": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "scan_includes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
     }
   },
   "required": [
