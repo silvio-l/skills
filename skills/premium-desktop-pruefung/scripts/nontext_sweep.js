@@ -81,9 +81,11 @@
       has_text: Boolean((el.textContent || '').trim()) || (tag === 'input' && ['button', 'submit', 'reset'].includes(type)),
       // Checkboxes, radios, sliders, colour/file pickers and selects keep their platform look while
       // appearance is auto, so their computed borders say nothing about what is drawn. Text fields
-      // and buttons drop the native look once the author styles a border or background.
+      // and buttons drop the native look once the author styles a border or background; until then
+      // they keep the user-agent inset/outset border, whose computed colour is not what is painted.
       native_appearance: cs.appearance !== 'none' && (tag === 'select'
-        || ['checkbox', 'radio', 'range', 'color', 'file'].includes(type)),
+        || ['checkbox', 'radio', 'range', 'color', 'file'].includes(type)
+        || ['inset', 'outset'].includes(cs.borderTopStyle) && cs.borderTopStyle === cs.borderBottomStyle),
       box_shadow: cs.boxShadow !== 'none',
       outline: cs.outlineStyle !== 'none' && parseFloat(cs.outlineWidth) > 0,
       disabled: Boolean(el.closest(':disabled, [aria-disabled="true"], [inert]')),

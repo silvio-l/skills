@@ -106,7 +106,10 @@
     url: location.href,
     viewport: [innerWidth, innerHeight],
     device_pixel_ratio: devicePixelRatio,
+    // The browser's preferred scheme (often the host setting), not proof of what the page renders:
+    // a page without colour-scheme rules renders light regardless. Prove the theme from the canvas.
     color_scheme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
+    root_color_scheme: getComputedStyle(document.documentElement).colorScheme || 'normal',
     canvas: canvasColor[3] === 1 ? canvasColor : [255, 255, 255, 1],
     skipped,
     items,

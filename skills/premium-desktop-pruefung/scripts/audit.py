@@ -1229,13 +1229,17 @@ def current_row(run, table, key):
         con.close()
 
 
-def show(run, table, keys):
-    """Current rows by ID, read-only and without loading the ledger (for critics and workers)."""
+def show(run, table, keys, obj=None):
+    """Current rows by ID, read-only and without loading the ledger (for critics and workers).
+    Without IDs it lists the table's IDs with their status, optionally only those touching one object;
+    a listing reads the whole ledger, still read-only."""
     if table not in TABLES:
         raise ValueError('unknown table: ' + str(table) + '; one of ' + ', '.join(TABLES))
-    if not keys:
-        raise ValueError('show needs at least one --id')
+    if keys and obj:
+        raise ValueError('show takes --id or --object, not both')
     ensure_ledger(run)
+    if not keys:
+        return listing(load(run), table, obj)  # a listing scans whole tables; the lazy view refuses full scans
     con, data = open_view(run)
     try:
         rows = {k: copy.deepcopy(data[table].get(k)) for k in keys}
@@ -1245,6 +1249,32 @@ def show(run, table, keys):
         return dict(sequence=data['sequence'], table=table, rows=rows)
     finally:
         con.close()
+
+
+def listing(data, table, obj=None):
+    """IDs of one table with their status (or verdict), optionally only rows that touch OBJ."""
+    if obj and obj not in data['objects']:
+        raise ValueError('unknown object: ' + obj)
+    if obj and table not in ('units', 'findings', 'jobs', 'gaps', 'files', 'reviews'):
+        raise ValueError('--object does not apply to table ' + table)
+    def on_object(units):
+        return any(data['units'].get(u, {}).get('object') == obj for u in units)
+    def touches(row):
+        if not obj:
+            return True
+        if table == 'units':
+            return row.get('object') == obj
+        if table == 'files':
+            return obj in row.get('objects', [])
+        if table == 'reviews':
+            target = row.get('target')
+            if target in data['units']:
+                return data['units'][target]['object'] == obj
+            return target in data['findings'] and on_object(data['findings'][target]['units'])
+        return on_object(row.get('units', []))
+    ids = {k: row.get('status', row.get('verdict', '')) for k, row in data[table].items()
+           if isinstance(row, dict) and touches(row)}
+    return dict(sequence=data['sequence'], table=table, ids=ids)
 
 
 def plan(run, actor):
@@ -1848,7 +1878,8 @@ def main():
     wrap = sub.add_parser('wrap-reviews'); wrap.add_argument('run'); wrap.add_argument('draft'); wrap.add_argument('--actor', required=True)
     res = sub.add_parser('resume'); res.add_argument('run'); res.add_argument('--object'); res.add_argument('--status', choices=list(TRANSITIONS)); res.add_argument('--limit', type=int, default=20)
     sh = sub.add_parser('show', help='print current rows read-only'); sh.add_argument('run'); sh.add_argument('--table', required=True)
-    sh.add_argument('--id', action='append', default=[], help='row ID (repeatable)')
+    sh.add_argument('--id', action='append', default=[], help='row ID (repeatable); omit to list IDs with status')
+    sh.add_argument('--object', help='list only rows that touch this object (units, findings, jobs, gaps, files, reviews)')
     nxt = sub.add_parser('next'); nxt.add_argument('run'); nxt.add_argument('--limit', type=int, default=12)
     nxt.add_argument('--first', action='append', default=[], help='schedule this object first (repeatable, risk order)')
     ev.add_argument('--batch', action='store_true', help='SOURCE is a JSON array of {id, source, kind, locator, environment}; one write')
@@ -1881,7 +1912,7 @@ def main():
             print(json.dumps(dict(files=len(data['files']), limits=len(data['scan_limits']),
                                   not_inventoried=data.get('scan_ignored', {})), ensure_ascii=False, indent=2))
         elif args.command == 'show':
-            print(json.dumps(show(args.run, args.table, args.id), ensure_ascii=False, indent=2))
+            print(json.dumps(show(args.run, args.table, args.id, args.object), ensure_ascii=False, indent=2))
         elif args.command == 'apply':
             info = {}
             print(json.dumps(dict(sequence=apply(args.run, read(args.fragment), info), **info)))

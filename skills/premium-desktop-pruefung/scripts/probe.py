@@ -81,6 +81,7 @@ def sweep(path):
     order = {'fail': 0, 'uncertain': 1, 'exempt-candidate': 2, 'pass': 3}
     rows.sort(key=lambda r: (order[r['status']], r['ratio']))
     return dict(url=data.get('url'), viewport=data.get('viewport'), color_scheme=data.get('color_scheme'),
+                root_color_scheme=data.get('root_color_scheme'),
                 canvas=_hex(_premultiplied(canvas)), skipped_hidden=data.get('skipped', {}), counts=counts, items=rows,
                 limitation='Composites DOM ancestors only. Overlapping non-ancestor layers, images, filters, '
                            'shadows and anti-aliasing need a pixel check of a screenshot; one state per sweep.')

@@ -33,7 +33,7 @@ Before the first `plan` on a large inventory, and again whenever new objects arr
 
 ## Execute bounded packages continuously
 
-Run `audit.py next RUN --limit 12`. It lists packages across objects/variants, blocker freshness, active jobs and review work. `limit` bounds units per package, not total audit scope; the helper does not choose which runtime is safe or certify semantic completeness. Claim one bounded package under `jobs`; never claim thousands of untouched units just to assign a common blocked reason. Respect the GUI owner and unfinished jobs before claiming work.
+Run `audit.py next RUN --limit 12` (the limit bounds the suggested packages; a small object can go to one worker whole). It lists packages across objects/variants, blocker freshness, active jobs and review work. `limit` bounds units per package, not total audit scope; the helper does not choose which runtime is safe or certify semantic completeness. Claim one bounded package under `jobs`; never claim thousands of untouched units just to assign a common blocked reason. Respect the GUI owner and unfinished jobs before claiming work.
 
 Schedule by user risk and evidence affinity (`next --first OBJECT` puts named objects first): complete core flows, data-loss/recovery paths and platform-specific functions early, then systematically sweep remaining surfaces and criteria. A single walkthrough can supply evidence to multiple criteria only when each expected outcome was actually observed. For each package:
 

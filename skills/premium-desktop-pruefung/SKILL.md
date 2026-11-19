@@ -19,6 +19,7 @@ A next "$RUN" --first O-core-flow               # risk-ordered packages; claim o
 A ingest "$RUN" result.json --actor W           # one worker result: evidence, units, findings, job
 A digest "$RUN" --scope unit --targets-file ids # batch digests for critics
 A show "$RUN" --table findings --id F-1          # read rows; never read audit.db directly
+A show "$RUN" --table findings --object O-settings # list IDs with status, per object
 A apply-corrections "$RUN" --actor C; A resolve-answered "$RUN" --actor C
 A drift "$RUN"; A check "$RUN"; A report "$RUN"
 ```
