@@ -59,7 +59,13 @@ CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE rows(tbl TEXT NOT NULL, id TEXT NOT NULL, ref TEXT, body TEXT NOT NULL, UNIQUE(tbl, id));
 CREATE INDEX rows_ref ON rows(tbl, ref);
 CREATE TABLE history(seq INTEGER PRIMARY KEY, event TEXT NOT NULL);
+CREATE TABLE marks(sequence INTEGER PRIMARY KEY, history_start INTEGER NOT NULL);
 '''
+# marks: the journal position where each sequence's events start, so a stale fragment can be
+# rebased when no row it writes changed since its base. Ledgers created before it gain the
+# table on their next write; sequences without a mark cannot be rebased.
+MARKS_SQL = 'CREATE TABLE IF NOT EXISTS marks(sequence INTEGER PRIMARY KEY, history_start INTEGER NOT NULL)'
+
 
 
 def connect(run, readonly=False):
@@ -69,6 +75,7 @@ def connect(run, readonly=False):
     else:
         con = sqlite3.connect(str(path), isolation_level=None)
         con.execute('PRAGMA synchronous=FULL')
+        con.execute(MARKS_SQL)
     return con
 
 
@@ -216,12 +223,30 @@ def commit(con, data, base_sequence):
                 con.execute('INSERT INTO rows(tbl, id, ref, body) VALUES (?, ?, ?, ?) ON CONFLICT(tbl, id) '
                             'DO UPDATE SET ref = excluded.ref, body = excluded.body',
                             (table, key, row_ref(table, row), canonical(row)))
+        mark(con, data['sequence'])
         con.executemany('INSERT INTO history(event) VALUES (?)', [(canonical(e),) for e in data['history']])
         con.execute("UPDATE meta SET value = ? WHERE key = 'sequence'", (canonical(data['sequence']),))
         con.execute('COMMIT')
     except BaseException:
         con.execute('ROLLBACK')
         raise
+
+
+def mark(con, sequence):
+    (start,) = con.execute('SELECT COALESCE(MAX(seq), 0) FROM history').fetchone()
+    con.execute('INSERT OR REPLACE INTO marks(sequence, history_start) VALUES (?, ?)', (sequence, start))
+
+
+def rebase_conflicts(con, base, rows):
+    """Rows of a fragment written by others since base; None if the journal cannot tell."""
+    found = con.execute('SELECT history_start FROM marks WHERE sequence = ?', (base + 1,)).fetchone()
+    if found is None:
+        return None
+    changed = set()
+    for (event,) in con.execute('SELECT event FROM history WHERE seq > ?', found):
+        event = json.loads(event)
+        changed.add((event['table'], event['id']))
+    return sorted(changed & rows)
 
 
 @contextmanager
@@ -300,7 +325,7 @@ def schema_check(value, schema, at='$'):
     if typ and (not isinstance(value, types[typ]) or (typ == 'integer' and isinstance(value, bool))):
         raise ValueError(at + ': expected ' + typ)
     if 'enum' in schema and value not in schema['enum']:
-        raise ValueError(at + ': invalid enum')
+        raise ValueError(at + ': invalid enum ' + json.dumps(value) + '; allowed: ' + ', '.join(map(str, schema['enum'])))
     if isinstance(value, str) and len(value.strip()) < schema.get('minLength', 0):
         raise ValueError(at + ': empty text')
     if typ == 'integer' and value < schema.get('minimum', value):
@@ -377,9 +402,10 @@ def coverage(data, rules):
         for obj, row in data['objects'].items():
             if (rule['kinds'] and row['kind'] not in rule['kinds']) or (rule['objects'] and obj not in rule['objects']):
                 continue
+            variants = [v for v in row['variants'] if not rule.get('variants') or v in rule['variants']]
             for criterion in rules:
                 if rule_matches(rule, criterion, rules):
-                    for variant in row['variants']:
+                    for variant in variants:
                         covered.setdefault(uid(obj, variant, criterion), ('not-applicable', key, None))
     for key, rule in sorted(data['equivalences'].items()):
         row = data['objects'].get(rule['object'])
@@ -430,6 +456,9 @@ def rule_errors(data, rules):
                     errors.append(key + ': unknown object kind in rule')
                 if set(rule['objects']) - set(data['objects']):
                     errors.append(key + ': unknown object in rule')
+                known = {v for o in data['objects'].values() for v in o['variants']}
+                if set(rule.get('variants', [])) - known:
+                    errors.append(key + ': unknown variant in rule')
     members = {}
     for key, rule in data['equivalences'].items():
         row = data['objects'].get(rule['object'])
@@ -455,9 +484,15 @@ def review_digest(data, scope, target):
     if scope == 'final':
         return digest({k: v for k, v in data.items() if k not in ('reviews', 'history', 'sequence')})
     table = {'unit': 'units', 'finding': 'findings'}[scope]
-    row = dict(data[table][target])
+    return row_digest(scope, data[table][target])
+
+
+def row_digest(scope, row):
+    row = dict(row)
     if scope == 'finding':
-        row.pop('status')  # validation precedes promotion, without changing reviewed content
+        # Validation precedes promotion without changing the reviewed content. duplicate_of stays
+        # in the digest: an independent review with outcome duplicate vouches for that primary.
+        row.pop('status')
     return digest(row)
 
 
@@ -500,7 +535,7 @@ def adopt_scan_policy(run, includes=()):
 
     Allowed only when every row in the newly skipped directories is an excluded file and the
     policy scan reproduces the remaining baseline exactly. The inventory digest changes, so the
-    inventory review must be repeated; outstanding fragments become stale."""
+    inventory review must be repeated; an outstanding fragment that writes a changed row is refused as stale."""
     run = Path(run)
     with write_lock(run):
         ensure_ledger(run)
@@ -537,6 +572,7 @@ def adopt_scan_policy(run, includes=()):
                     raise ValueError('ledger changed during adoption; retry')
                 con.executemany('INSERT INTO meta(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
                                 [(k, canonical(v)) for k, v in meta.items()])
+                mark(con, meta['sequence'])
                 con.execute('COMMIT')
             except BaseException:
                 con.execute('ROLLBACK')
@@ -627,14 +663,10 @@ def validate(data, run, complete=False, check_source=None):
     need({t:replay[t] for t in TABLES} == {t:data[t] for t in TABLES}, 'ledger differs from journal')
     for name in ('objects', 'units', 'findings', 'reviews', 'gaps', 'profile'):
         for key, row in data[name].items():
-            for eid in row.get('evidence', []):
+            for eid in evidence_refs(row):
                 need(eid in data['evidence'], key + ': unknown evidence ' + eid)
     for key, row in data['evidence'].items():
-        path = (Path(run) / row['file']).resolve()
-        safe = Path(run).resolve() in path.parents and not (Path(run) / row['file']).is_symlink()
-        need(safe and path.is_file(), key + ': missing/unsafe evidence')
-        if safe and path.is_file():
-            need(filehash(path) == row['sha256'], key + ': evidence changed')
+        errors.extend(evidence_errors(run, key, row))
     for key, row in data['files'].items():
         need(set(row['objects']) <= set(data['objects']), key + ': unknown object mapping')
         for obj in row['objects']:
@@ -670,9 +702,9 @@ def validate(data, run, complete=False, check_source=None):
         if row['status'] in ('pass', 'fail'):
             need(all(row[x] for x in ('actor', 'method', 'expected', 'actual', 'steps', 'evidence')), key + ': unsupported result')
         if row['status'] in ('excluded', 'blocked'):
-            need(bool(row['reason']) and bool(row['evidence']), key + ': unsupported exclusion/block')
+            need(bool(row['reason']) and bool(row['evidence']), key + ': unsupported exclusion/block (needs reason and evidence)')
         if row['status'] == 'blocked':
-            need(bool(row['limitations']), key + ': missing next step/limitation')
+            need(bool(row['limitations']), key + ': missing next step/limitation (blocked needs limitations: what stays untested)')
             if complete:
                 need(blocker_state(data, row) == 'documented', key + ': blocker missing or stale; reassess available execution paths')
         if complete:
@@ -680,7 +712,7 @@ def validate(data, run, complete=False, check_source=None):
             if row['status'] in ('pass', 'fail', 'excluded'):
                 need(accepted(data, 'unit', key, row['actor'], index), key + ': independent unit review missing/stale')
             if row['status'] == 'fail':
-                need(any(key in f['units'] and f['status'] == 'confirmed' for f in data['findings'].values()), key + ': failure has no confirmed finding')
+                need(covering_finding(data, key), key + ': failure has no confirmed finding (list the unit in a finding\'s units)')
     assigned = set()
     for key, job in data['jobs'].items():
         # Closed jobs may name units that a later applicability/equivalence rule pruned.
@@ -692,12 +724,7 @@ def validate(data, run, complete=False, check_source=None):
         if complete:
             need(job['status'] != 'active', key + ': unfinished job')
     for key, row in data['findings'].items():
-        need(bool(row['units']) and set(row['units']) <= set(data['units']), key + ': missing units')
-        need(bool(row['evidence']) and bool(row['steps']), key + ': finding lacks primary evidence/reproduction')
-        if row['status'] in ('confirmed', 'refuted'):
-            need(accepted(data, 'finding', key, row['actor'], index), key + ': finding lacks independent validation')
-        if row['status'] == 'confirmed':
-            need(all(data['units'].get(u, {}).get('status') == 'fail' for u in row['units']), key + ': confirmed finding contradicts unit status')
+        errors.extend(finding_errors(data, key, row, index))
         if complete:
             need(row['status'] != 'suspected', key + ': unresolved suspicion')
     for key, row in data['reviews'].items():
@@ -715,7 +742,11 @@ def validate(data, run, complete=False, check_source=None):
             need(row['status'] == 'resolved', key + ': open gap')
     if (complete if check_source is None else check_source):
         current, limits = rescan(data)
-        need(not limits and {k:v['sha256'] for k,v in current.items()} == {k:v['sha256'] for k,v in baseline_files(data).items()}, 'source baseline changed or unreadable; new run required')
+        base = baseline_files(data)
+        changed = sorted(k for k in set(current) | set(base) if current.get(k, {}).get('sha256') != base.get(k, {}).get('sha256'))
+        need(not limits and not changed, 'source baseline changed or unreadable; new run required'
+             + ((' (changed: ' + ', '.join(changed[:5]) + (', ...' if len(changed) > 5 else '') + ')') if changed else '')
+             + ((' (unreadable: ' + ', '.join(sorted(limits)[:5]) + ')') if limits else ''))
     if complete:
         need(bool(data['objects']) and bool(data['units']), 'empty inventory')
         need(data['scan_complete'] and not data['scan_limits'] and not data.get('scan_exclusions'), 'source scan incomplete (including explicitly omitted paths)')
@@ -752,16 +783,12 @@ def validate_changes(data, run, events):
     deleted_units = {k for k, row in current['units'].items() if row is None}
     for name in ('objects', 'units', 'findings', 'reviews', 'gaps', 'profile'):
         rows = [(k, r) for k, r in current[name].items() if r is not None]
-        known = data['evidence'].present({e for _, r in rows for e in r.get('evidence', [])})
+        known = data['evidence'].present({e for _, r in rows for e in evidence_refs(r)})
         for key, row in rows:
-            for eid in row.get('evidence', []):
+            for eid in evidence_refs(row):
                 need(eid in known, key + ': unknown evidence ' + eid)
     for key, row in current['evidence'].items():
-        path = (Path(run) / row['file']).resolve()
-        safe = Path(run).resolve() in path.parents and not (Path(run) / row['file']).is_symlink()
-        need(safe and path.is_file(), key + ': missing/unsafe evidence')
-        if safe and path.is_file():
-            need(filehash(path) == row['sha256'], key + ': evidence changed')
+        errors.extend(evidence_errors(run, key, row))
     # Files and objects reference each other; recheck both sides of every changed mapping.
     file_keys, object_keys = set(touched['files']), set(touched['objects'])
     for key, before in touched['objects'].items():
@@ -808,9 +835,9 @@ def validate_changes(data, run, events):
         if row['status'] in ('pass', 'fail'):
             need(all(row[x] for x in ('actor', 'method', 'expected', 'actual', 'steps', 'evidence')), key + ': unsupported result')
         if row['status'] in ('excluded', 'blocked'):
-            need(bool(row['reason']) and bool(row['evidence']), key + ': unsupported exclusion/block')
+            need(bool(row['reason']) and bool(row['evidence']), key + ': unsupported exclusion/block (needs reason and evidence)')
         if row['status'] == 'blocked':
-            need(bool(row['limitations']), key + ': missing next step/limitation')
+            need(bool(row['limitations']), key + ': missing next step/limitation (blocked needs limitations: what stays untested)')
     jobs = set(data['jobs']) if deleted_units or rules_changed else set(touched['jobs'])
     existing = data['units'].present({u for k in jobs for u in data['jobs'][k]['units']})
     covered = None
@@ -826,15 +853,11 @@ def validate_changes(data, run, events):
                 missing -= covered
             need(bool(job['units']) and not missing, key + ': invalid job units')
     changed_units = set(touched['units'])
-    findings = {k for k, f in data['findings'].items() if k in touched['findings'] or changed_units.intersection(f['units'])}
+    findings = {k for k, f in data['findings'].items() if k in touched['findings']
+                or changed_units.intersection(f['units']) or f.get('duplicate_of') in touched['findings']}
     for key in sorted(findings):
         row = data['findings'][key]
-        need(bool(row['units']) and data['units'].present(row['units']) == set(row['units']), key + ': missing units')
-        need(bool(row['evidence']) and bool(row['steps']), key + ': finding lacks primary evidence/reproduction')
-        if row['status'] in ('confirmed', 'refuted'):
-            need(accepted(data, 'finding', key, row['actor']), key + ': finding lacks independent validation')
-        if row['status'] == 'confirmed':
-            need(all(data['units'].get(u, {}).get('status') == 'fail' for u in row['units']), key + ': confirmed finding contradicts unit status')
+        errors.extend(finding_errors(data, key, row, units_present=data['units'].present(row['units'])))
     reviews = {k: r for k, r in current['reviews'].items() if r is not None}
     for unit in deleted_units:
         reviews.update(data['reviews'].by_ref('unit' + REF_SEP + unit))
@@ -849,6 +872,79 @@ def validate_changes(data, run, events):
         need(data['units'].present(row['units']) == set(row['units']), key + ': unknown gap units')
         if row['status'] == 'resolved':
             need(bool(row['evidence']) and bool(row['resolution']), key + ': gap resolution unsupported')
+    return errors
+
+
+def finding_errors(data, key, row, index=None, units_present=None):
+    """Checks of one finding, shared by validate() and validate_changes()."""
+    errors = []
+    present = set(data['units']) if units_present is None else units_present
+    if row['status'] == 'confirmed' or row['status'] == 'duplicate':
+        if not row['units']:
+            errors.append(key + ': missing units (a confirmed or duplicate finding needs its failing units)')
+    if not set(row['units']) <= present:
+        errors.append(key + ': missing units')
+    if not row['evidence'] or not row['steps']:
+        errors.append(key + ': finding lacks primary evidence/reproduction')
+    if row['status'] in ('confirmed', 'refuted', 'duplicate') and not accepted(data, 'finding', key, row['actor'], index):
+        stale = any(r['verdict'] == 'accept' and r['mode'] == 'independent' and r['actor'] != row['actor']
+                    for r in reviews_for(data, 'finding', key, index))
+        errors.append(key + (': finding changed after its independent review; apply the reviewer\'s corrections '
+                             '(apply-corrections) or set status suspected and obtain a new review' if stale
+                             else ': finding lacks independent validation'))
+    if row['status'] == 'confirmed':
+        if not all(data['units'].get(u, {}).get('status') == 'fail' for u in row['units']):
+            errors.append(key + ': confirmed finding contradicts unit status')
+    if row['status'] == 'duplicate' and 'duplicate_of' not in row:
+        errors.append(key + ': status duplicate needs duplicate_of')
+    if 'duplicate_of' in row and row['status'] not in ('suspected', 'duplicate'):
+        errors.append(key + ': duplicate_of belongs to a proposed (suspected) or reviewed duplicate')
+    if 'duplicate_of' in row:
+        primary = data['findings'].get(row['duplicate_of'])
+        if primary is None or row['duplicate_of'] == key:
+            errors.append(key + ': duplicate_of names no other finding')
+        elif primary['status'] == 'duplicate':
+            errors.append(key + ': duplicate_of must name a primary finding, not another duplicate')
+    if 'tracking' in row and not row['tracking']['evidence']:
+        errors.append(key + ': tracking claim needs primary evidence')
+    return errors
+
+
+def evidence_refs(row):
+    """Evidence IDs a row relies on, including those of a tracking claim."""
+    return list(row.get('evidence', [])) + list((row.get('tracking') or {}).get('evidence', []))
+
+
+def covering_finding(data, unit):
+    """A fail unit is covered by a confirmed finding, or by a reviewed duplicate of a confirmed one."""
+    for f in data['findings'].values():
+        if unit in f['units']:
+            if f['status'] == 'confirmed':
+                return True
+            if f['status'] == 'duplicate' and data['findings'].get(f.get('duplicate_of'), {}).get('status') == 'confirmed':
+                return True
+    return False
+
+
+def evidence_errors(run, key, row):
+    errors = []
+    path = (Path(run) / row['file']).resolve()
+    safe = Path(run).resolve() in path.parents and not (Path(run) / row['file']).is_symlink()
+    if not (safe and path.is_file()):
+        return [key + ': missing/unsafe evidence']
+    if filehash(path) != row['sha256']:
+        errors.append(key + ': evidence changed')
+    elif 'members' in row:
+        try:
+            listed = json.loads(path.read_text(encoding='utf-8')).get('manifest')
+        except (ValueError, UnicodeDecodeError, AttributeError):
+            listed = None
+        if listed != row['members']:
+            errors.append(key + ': members differ from the stored manifest')
+    for name, sha in row.get('members', {}).items():
+        member = (Path(run) / 'evidence' / sha)
+        if member.is_symlink() or not member.is_file() or filehash(member) != sha:
+            errors.append(key + ': manifest member missing or changed: ' + name)
     return errors
 
 
@@ -912,7 +1008,16 @@ def put(data, actor, table, key, row):
     if table not in TABLES:
         raise ValueError('unknown table')
     old = data[table].get(key)
+    if row is None and old is None:
+        raise ValueError(key + ': no ' + table + ' row to remove')
     if old == row:
+        return
+    if row is None and table in RULE_TABLES:
+        # Retiring a rule is journaled and changes the inventory digest, so it is reviewed.
+        if old['actor'] != actor:
+            raise ValueError(key + ': only the rule author ' + repr(old['actor']) + ' may retire it')
+        del data[table][key]
+        data['history'].append(dict(actor=actor, table=table, id=key, before=copy.deepcopy(old), after=None))
         return
     if row is None:
         # Only plan prunes, and only untouched units that a rule now covers.
@@ -933,11 +1038,14 @@ def put(data, actor, table, key, row):
         raise ValueError('evidence is immutable; use a new ID')
     if table == 'reviews' and old is not None:
         raise ValueError('reviews are immutable; use a new ID')
+    # A reviewer correction is looked up only when a write would otherwise be refused, so the
+    # journal replay does not scan reviews for every ordinary write.
+    correction = lambda: old is not None and correcting_review(data, table, key, old, row) is not None
     if table == 'units':
         if old is None:
             if row != blank_unit(row['object'], row['variant'], row['criterion']):
                 raise ValueError('units must start pending')
-        else:
+        elif not (old['status'] in ('pass', 'fail', 'excluded') and old['status'] == row['status'] and correction()):
             if old['status'] in ('pass', 'fail', 'excluded') and row['status'] != 'running':
                 raise ValueError('reopen terminal unit before changing its result')
             if any(old[x] != row[x] for x in ('object', 'variant', 'criterion')):
@@ -957,10 +1065,71 @@ def put(data, actor, table, key, row):
         raise ValueError('job owner must match actor')
     if table == 'reviews' and row['actor'] != actor:
         raise ValueError('review actor mismatch')
-    if table == 'findings' and row['actor'] != actor:
-        raise ValueError('finding actor mismatch')
+    if table == 'findings':
+        if old is not None and row['actor'] != old['actor']:
+            raise ValueError(key + ': finding author is immutable')
+        if row['actor'] != actor and not bookkeeping_only(old, row) and not correction():
+            raise ValueError(key + ': finding actor mismatch; only its author ' + repr(row['actor']) + ' may change the content. '
+                             'Others may add units, mark it duplicate, or apply reviewer corrections (apply-corrections)')
     data[table][key] = row
     data['history'].append(dict(actor=actor, table=table, id=key, before=copy.deepcopy(old), after=copy.deepcopy(row)))
+
+
+# Corrections sharpen text. What decides coverage, identity or publication stays with the author:
+# units, evidence, root cause and tracking change the finding itself and need its author and a review.
+CORRECTION_LOCKED = ('status', 'actor', 'object', 'variant', 'criterion', 'duplicate_of',
+                     'units', 'evidence', 'root_cause', 'tracking', 'blocker')
+
+
+def correcting_review(data, table, key, old, row):
+    """An accepting independent review whose corrections turn old into exactly row.
+
+    The reviewer authored the corrected content and reviewed it in advance (digest of the
+    corrected row), so applying it needs no further review round; who applies it is irrelevant."""
+    scope = 'unit' if table == 'units' else 'finding'
+    if scope == 'unit' and (old['status'] not in ('pass', 'fail', 'excluded') or row['status'] != old['status']):
+        return None  # running work belongs to the job owner; only a finished result is corrected
+    base = row_digest(scope, old)
+    for review in reviews_for(data, scope, key):
+        fix = review.get('corrections')
+        if (fix and review.get('base_digest') == base and review['verdict'] == 'accept'
+                and review['mode'] == 'independent' and review['actor'] != old['actor']
+                and (scope != 'unit' or review['outcome'] == old['status'])
+                and not set(fix) & set(CORRECTION_LOCKED) and set(fix) <= set(old)
+                and {**old, **fix} == row and row_digest(scope, row) == review['digest']):
+            return review
+    return None
+
+
+def bookkeeping_only(old, row):
+    """Changes anyone may make to another author's finding: link more units, propose or mark a duplicate.
+
+    Units and duplicate_of are reviewed content: a finding that gains units, or a duplicate pointed
+    at another primary, needs a new independent review before it is confirmed or duplicate again
+    (finding_errors enforces that), so these writes cannot launder an unreviewed claim."""
+    if old is None:
+        return False
+    rest = lambda r: {k: v for k, v in r.items() if k not in ('units', 'status', 'duplicate_of')}
+    if rest(old) != rest(row) or not set(old['units']) <= set(row['units']):
+        return False
+    grew = set(row['units']) > set(old['units'])
+    return row['status'] == old['status'] or row['status'] == 'duplicate' \
+        or (old['status'] == 'duplicate' and row['status'] == 'suspected') \
+        or (grew and old['status'] == 'confirmed' and row['status'] == 'suspected')
+
+
+def normalize_blocked(data, row):
+    """Accept the shapes workers naturally send; the stored row stays schema-exact."""
+    blocker = row.get('blocker')
+    if isinstance(blocker, dict):
+        blocker = dict(blocker)
+        if isinstance(blocker.get('alternatives'), list):
+            blocker['alternatives'] = '; '.join(str(x) for x in blocker['alternatives'] if str(x).strip())
+        blocker.setdefault('context_digest', context_digest(data))
+        row = {**row, 'blocker': blocker}
+        if not row.get('actual') and blocker.get('obstacle'):
+            row['actual'] = blocker['obstacle']
+    return row
 
 
 def check_fragment(data, fragment):
@@ -979,28 +1148,52 @@ def apply_operations(data, fragment):
         if not isinstance(op, dict) or set(op) != {'table', 'id', 'value'}:
             raise ValueError('malformed operation')
         if op['table'] == 'units' and isinstance(op['value'], dict) and op['value'].get('status') == 'blocked':
-            row = op['value']
+            row = op['value'] = normalize_blocked(data, op['value'])
             if not row.get('blocker') or blocker_state(data, row) != 'documented':
-                raise ValueError('blocked requires a current structured blocker; unattempted work stays pending')
-            if not row.get('steps') or not row.get('actual') or not row.get('evidence'):
-                raise ValueError('blocked requires attempted steps, observed obstacle and primary evidence')
+                raise ValueError(op['id'] + ': blocked requires a current structured blocker (attempt, obstacle, alternatives, '
+                                 'next_action, retry_when); unattempted work stays pending')
+            missing = [f for f in ('steps', 'actual', 'evidence') if not row.get(f)]
+            if missing:
+                raise ValueError(op['id'] + ': blocked requires attempted steps, observed obstacle and primary evidence; missing: '
+                                 + ', '.join(missing))
         put(data, fragment['actor'], op['table'], op['id'], op['value'])
     data['sequence'] += 1
 
 
-def apply(run, fragment):
+def apply(run, fragment, info=None):
     """Apply one fragment as a single transaction; returns the new sequence.
 
     Only the touched rows are read and checked, so a write stays fast in a ledger with
-    10^5 units. AUDIT_VERIFY_APPLY=1 additionally runs the full validate() on the result
-    and fails if the two disagree (used by the tests)."""
+    10^5 units. A fragment based on an older sequence is rebased when none of the rows it
+    writes changed since then (parallel workers on disjoint units); the result is validated
+    against the current ledger like any write. AUDIT_VERIFY_APPLY=1 additionally runs the
+    full validate() on the result and fails if the two disagree (used by the tests)."""
     run = Path(run)
     ensure_ledger(run)
     with write_lock(run):
         con, data = open_view(run)
         try:
-            check_fragment(data, fragment)
             base = data['sequence']
+            if isinstance(fragment, dict) and type(fragment.get('base_sequence')) is int and fragment['base_sequence'] < base \
+                    and isinstance(fragment.get('operations'), list):
+                rows = {(op.get('table'), op.get('id')) for op in fragment['operations'] if isinstance(op, dict)}
+                conflicts = rebase_conflicts(con, fragment['base_sequence'], rows)
+                if conflicts is None:
+                    raise ValueError('stale fragment: expected sequence ' + str(base) + '; the journal has no rebase marks '
+                                     'before sequence ' + str(fragment['base_sequence'] + 1) + ', rebuild it on the current state')
+                if conflicts:
+                    raise ValueError('stale fragment: rows changed since sequence ' + str(fragment['base_sequence']) + ': '
+                                     + ', '.join(t + '/' + k for t, k in conflicts[:10]) + '; rebuild these operations')
+                implicit = [op.get('id') for op in fragment['operations'] if isinstance(op, dict) and op.get('table') == 'units'
+                            and isinstance(op.get('value'), dict) and op['value'].get('status') == 'blocked'
+                            and not (isinstance(op['value'].get('blocker'), dict) and 'context_digest' in op['value']['blocker'])]
+                if implicit and rebase_conflicts(con, fragment['base_sequence'], {('profile', k) for k in ('runtime', 'platforms', 'scope')}):
+                    raise ValueError('stale fragment: runtime, platforms or scope changed since sequence ' + str(fragment['base_sequence'])
+                                     + '; re-check the blocker of ' + ', '.join(map(str, implicit[:5])) + ' against the current context')
+                if info is not None:
+                    info['rebased_from'] = fragment['base_sequence']
+                fragment = {**fragment, 'base_sequence': base}
+            check_fragment(data, fragment)
             apply_operations(data, fragment)
             errors = validate_changes(data, run, data['history'])
             if os.environ.get('AUDIT_VERIFY_APPLY') == '1':
@@ -1047,10 +1240,14 @@ def plan(run, actor):
                 key = uid(obj, variant, criterion)
                 if key not in units and key not in covered:
                     ops.append(dict(table='units', id=key, value=blank_unit(obj, variant, criterion)))
+    created = len(ops)
     for key, row in units.items():
         if key in covered and key not in claimed and row['status'] == 'pending' and not row['actor']:
             ops.append(dict(table='units', id=key, value=None))
-    return apply(run, dict(base_sequence=data['sequence'], actor=actor, operations=ops))
+    sequence = apply(run, dict(base_sequence=data['sequence'], actor=actor, operations=ops))
+    pruned = len(ops) - created
+    return dict(sequence=sequence, created=created, pruned=pruned, covered_by_rule=len(covered),
+                units=len(units) + created - pruned)
 
 
 def patch_row(run, actor, table, key, set_fields=None, add_fields=None, write_fragment=False):
@@ -1062,9 +1259,14 @@ def patch_row(run, actor, table, key, set_fields=None, add_fields=None, write_fr
     sequence, row = current_row(run, table, key)
     if row is None:
         raise ValueError(key + ': no current row in ' + table + '; create it with a full fragment')
+    optional = dict(units={'blocker'}, findings={'duplicate_of', 'tracking'}, reviews={'corrections', 'base_digest'},
+                    applicability={'variants'}).get(table, set())
     for name, value in (set_fields or {}).items():
-        if name not in row and table != 'units':
+        if name not in row and name not in optional and table != 'units':
             raise ValueError('unknown field for patch: ' + name)
+        if value is None and name in optional:
+            row.pop(name, None)
+            continue
         row[name] = value
     for name, values in (add_fields or {}).items():
         if not isinstance(row.get(name), list) or not isinstance(values, list):
@@ -1080,20 +1282,15 @@ def patch_row(run, actor, table, key, set_fields=None, add_fields=None, write_fr
     return path
 
 
-def evidence(run, actor, key, source, kind, locator, environment):
-    run, source = Path(run), Path(source)
-    if source.is_symlink() or not source.is_file():
-        raise ValueError('evidence source must be a regular file, not a symlink')
-    if source.stat().st_size > 32 * 1024 * 1024:
-        raise ValueError('evidence exceeds 32 MiB')
-    if (run / 'evidence').resolve().parent != run.resolve():
-        raise ValueError('unsafe evidence directory')
-    content = source.read_bytes()
-    if not content or len(content) > 32 * 1024 * 1024:
-        raise ValueError('evidence must be nonempty and at most 32 MiB; split large traces')
+MAX_EVIDENCE = 32 * 1024 * 1024
+MAX_MEMBERS = 10000
+
+
+def _store_blob(run, content, label):
+    if not content or len(content) > MAX_EVIDENCE:
+        raise ValueError(label + ': evidence must be nonempty and at most 32 MiB; split large traces')
     h = hashlib.sha256(content).hexdigest()
-    relative = 'evidence/' + h
-    dest = run / relative
+    dest = run / 'evidence' / h
     if dest.is_symlink():
         raise ValueError('unsafe evidence destination')
     if dest.exists() and filehash(dest) != h:
@@ -1101,10 +1298,299 @@ def evidence(run, actor, key, source, kind, locator, environment):
     if not dest.exists():
         with dest.open('xb') as out:
             out.write(content)
+    return h
+
+
+def store_evidence(run, actor, source, kind, locator, environment):
+    """Copy a file, or every file of a directory plus a hash manifest, into evidence/.
+
+    Returns the evidence row; files are content-addressed, so storing twice is harmless."""
+    run, source = Path(run), Path(source)
+    if (run / 'evidence').resolve().parent != run.resolve():
+        raise ValueError('unsafe evidence directory')
+    if source.is_symlink():
+        raise ValueError(str(source) + ': evidence source is a symlink; pass the real file or directory')
+    if source.is_dir():
+        paths = {}
+        for path in sorted(source.rglob('*')):  # check the whole tree before storing anything
+            name = path.relative_to(source).as_posix()
+            if path.is_symlink():
+                raise ValueError(str(source) + ': directory evidence contains a symlink: ' + name)
+            if path.is_dir():
+                continue
+            if not path.is_file():
+                raise ValueError(str(source) + ': directory evidence contains a non-regular file: ' + name)
+            if len(paths) >= MAX_MEMBERS:
+                raise ValueError(str(source) + ': more than ' + str(MAX_MEMBERS) + ' files; split the directory')
+            paths[name] = path
+        members = {name: _store_blob(run, path.read_bytes(), name) for name, path in paths.items()}
+        if not members:
+            raise ValueError(str(source) + ': evidence directory is empty')
+        manifest = (json.dumps(dict(manifest=members), sort_keys=True, ensure_ascii=False, indent=1) + '\n').encode()
+        h = _store_blob(run, manifest, str(source))
+        return dict(file='evidence/' + h, sha256=h, kind=kind, locator=locator, environment=environment,
+                    captured_by=actor, members=members)
+    if not source.is_file():
+        raise ValueError(str(source) + ': evidence source missing or not a regular file or directory')
+    if source.stat().st_size > MAX_EVIDENCE:
+        raise ValueError(str(source) + ': evidence exceeds 32 MiB')
+    h = _store_blob(run, source.read_bytes(), str(source))
+    return dict(file='evidence/' + h, sha256=h, kind=kind, locator=locator, environment=environment, captured_by=actor)
+
+
+def evidence(run, actor, key, source, kind, locator, environment):
+    row = store_evidence(run, actor, source, kind, locator, environment)
     sequence, _ = current_row(run, 'evidence', key)
-    row = dict(file=relative, sha256=h, kind=kind, locator=locator, environment=environment, captured_by=actor)
     return apply(run, dict(base_sequence=sequence, actor=actor,
                           operations=[dict(table='evidence', id=key, value=row)]))
+
+
+EVIDENCE_ITEM = ('id', 'source', 'kind', 'locator', 'environment')
+
+
+def evidence_operations(run, actor, items, base):
+    if not isinstance(items, list) or not items:
+        raise ValueError('evidence batch must be a nonempty array')
+    ops, seen = [], set()
+    for i, item in enumerate(items):
+        if not isinstance(item, dict) or set(item) != set(EVIDENCE_ITEM) or not all(isinstance(item[k], str) and item[k].strip() for k in EVIDENCE_ITEM):
+            raise ValueError('evidence item ' + str(i) + ' needs exactly: ' + ', '.join(EVIDENCE_ITEM))
+        if item['id'] in seen:
+            raise ValueError('duplicate evidence ID in batch: ' + item['id'])
+        seen.add(item['id'])
+        source = Path(item['source']) if Path(item['source']).is_absolute() else Path(base) / item['source']
+        ops.append(dict(table='evidence', id=item['id'],
+                        value=store_evidence(run, actor, source, item['kind'], item['locator'], item['environment'])))
+    return ops
+
+
+def evidence_batch(run, actor, batch_path):
+    """Register many artifacts in one write; relative sources resolve against the batch file."""
+    batch_path = Path(batch_path)
+    ops = evidence_operations(run, actor, read(batch_path), batch_path.parent)
+    sequence, _ = current_row(run, 'evidence', ops[0]['id'])
+    return apply(run, dict(base_sequence=sequence, actor=actor, operations=ops))
+
+
+INGEST_KEYS = {'job', 'evidence', 'units', 'findings', 'close'}
+UNIT_RESULT = ('method', 'expected', 'actual', 'steps', 'evidence', 'limitations', 'reason')
+
+
+def ingest(run, actor, result_path):
+    """Import one worker result in a single write: evidence, unit results, findings, job close.
+
+    Format (see references/fragments.md): {"job": ID, "evidence": [batch items], "units":
+    {unit: {"status", "method", ... , "blocker"?, "finding"?}}, "findings": {id: row}, "close": bool}.
+    A unit's "finding" adds the unit to that finding (new or existing)."""
+    run, result_path = Path(run), Path(result_path)
+    result = read(result_path)
+    if not isinstance(result, dict) or not set(result) <= INGEST_KEYS or 'job' not in result:
+        raise ValueError('worker result needs "job" and only: ' + ', '.join(sorted(INGEST_KEYS)))
+    ensure_ledger(run)
+    con, data = open_view(run)
+    try:
+        sequence = data['sequence']
+        job = data['jobs'].get(result['job'])
+        if not job or job['status'] != 'active' or job['owner'] != actor:
+            raise ValueError(result['job'] + ': ingest needs an active job owned by ' + repr(actor))
+        ops = evidence_operations(run, actor, result['evidence'], result_path.parent) if result.get('evidence') else []
+        links = {}
+        for key, given in (result.get('units') or {}).items():
+            if key not in job['units']:
+                raise ValueError(key + ': not in job ' + result['job'] + '; rework units must be claimed in the job')
+            current = data['units'].get(key)
+            if current is None:
+                raise ValueError(key + ': unknown unit')
+            extra = set(given) - set(UNIT_RESULT) - {'status', 'blocker', 'finding'}
+            if extra or given.get('status') not in ('pass', 'fail', 'blocked', 'excluded'):
+                raise ValueError(key + ': unit result needs a terminal status and only: status, blocker, finding, ' + ', '.join(UNIT_RESULT))
+            row = {**blank_unit(current['object'], current['variant'], current['criterion']), 'actor': actor, 'status': 'running'}
+            if current['status'] != 'running':
+                ops.append(dict(table='units', id=key, value=row))
+            final = {**row, **{k: given[k] for k in UNIT_RESULT if k in given}, 'status': given['status']}
+            if 'blocker' in given:
+                final['blocker'] = given['blocker']
+            ops.append(dict(table='units', id=key, value=final))
+            if given.get('finding'):
+                links.setdefault(given['finding'], []).append(key)
+        new = result.get('findings') or {}
+        for key, row in new.items():
+            row = {'actor': actor, 'units': [], **row}
+            row['units'] = list(dict.fromkeys(row['units'] + links.pop(key, [])))
+            ops.append(dict(table='findings', id=key, value=row))
+        for key, units in links.items():
+            existing = data['findings'].get(key)
+            if existing is None:
+                raise ValueError(key + ': unit names a finding that neither exists nor is in this result')
+            grown = {**existing, 'units': list(dict.fromkeys(existing['units'] + units))}
+            if existing['status'] in ('confirmed', 'duplicate') and grown['units'] != existing['units']:
+                grown['status'] = 'suspected'  # new units change the reviewed content
+            ops.append(dict(table='findings', id=key, value=grown))
+        if result.get('close'):
+            ops.append(dict(table='jobs', id=result['job'], value={**job, 'status': 'done'}))
+    finally:
+        con.close()
+    info = {}
+    sequence = apply(run, dict(base_sequence=sequence, actor=actor, operations=ops), info)
+    touched = sorted({op['id'] for op in ops if op['table'] == 'findings'})
+    return dict(sequence=sequence, operations=len(ops), findings=touched, **info,
+                note='findings that gained units need a new finding review' if links or touched else '')
+
+
+def apply_corrections(run, actor, review_ids=None):
+    """Apply the machine-readable corrections of accepting reviews ("corrections": {field: value}).
+
+    Only corrections whose base_digest matches the current target apply; the reviewer already
+    accepted the corrected content (its digest), so no further review round is needed."""
+    data = load(run)
+    ops, skipped = [], {}
+    wanted = set(review_ids) if review_ids else None
+    for key, review in data['reviews'].items():
+        if not review.get('corrections') or (wanted is not None and key not in wanted):
+            continue
+        table = {'unit': 'units', 'finding': 'findings'}.get(review['scope'])
+        target = data[table].get(review['target']) if table else None
+        if target is None:
+            skipped[key] = 'corrections apply to unit or finding reviews with an existing target'
+            continue
+        if review_digest(data, review['scope'], review['target']) == review['digest']:
+            continue  # already applied
+        if review.get('base_digest') != row_digest(review['scope'], target):
+            skipped[key] = 'target changed since the review (base_digest differs); obtain a new review'
+            continue
+        fixed = {**target, **review['corrections']}
+        if not correcting_review({**data, 'reviews': {key: review}}, table, review['target'], target, fixed):
+            skipped[key] = ('corrections invalid: only existing text fields (never ' + ', '.join(CORRECTION_LOCKED)
+                            + '), an independent accept, a digest of the corrected row, and for a unit a finished '
+                            'result whose status equals the review outcome')
+            continue
+        ops.append(dict(table=table, id=review['target'], value=fixed))
+        data[table][review['target']] = fixed
+    if wanted is not None and wanted - set(data['reviews']):
+        raise ValueError('unknown review: ' + ', '.join(sorted(wanted - set(data['reviews']))))
+    sequence = apply(run, dict(base_sequence=data['sequence'], actor=actor, operations=ops)) if ops else data['sequence']
+    return dict(sequence=sequence, applied=[op['id'] for op in ops], skipped=skipped)
+
+
+def resolve_answered(run, actor):
+    """Resolve review objections that a later independent accept on the current content answered."""
+    data = load(run)
+    index = review_index(data)
+    order = list(data['reviews'])
+    ops = []
+    for key, review in data['reviews'].items():
+        if review['verdict'] not in ('reject', 'gap') or review_resolved(data, key):
+            continue
+        scope, target = review['scope'], review['target']
+        if scope in ('unit', 'finding'):
+            table = {'unit': 'units', 'finding': 'findings'}[scope]
+            if target not in data[table]:
+                continue
+            author = data[table][target]['actor']
+        else:
+            author = data['profile'].get('coordinator', {}).get('value', '')
+        if not accepted(data, scope, target, author, index):
+            continue
+        wanted = review_digest(data, scope, target)
+        later = [r for r in order[order.index(key) + 1:]
+                 if data['reviews'][r]['scope'] == scope and data['reviews'][r]['target'] == target
+                 and data['reviews'][r]['verdict'] == 'accept' and data['reviews'][r]['digest'] == wanted
+                 and data['reviews'][r]['actor'] != author and data['reviews'][r]['mode'] == 'independent']
+        if not later:
+            continue
+        answer = data['reviews'][later[0]]
+        units = [target] if scope == 'unit' else data['findings'][target]['units'] if scope == 'finding' else []
+        gap = 'G-answered-' + key
+        if gap in data['gaps']:
+            continue
+        ops.append(dict(table='gaps', id=gap, value=dict(
+            description='Review ' + key + ' answered: ' + scope + ' ' + target + ' was reworked and independently accepted by '
+                        + later[0] + ' on its current content.',
+            status='resolved', units=units, evidence=answer['evidence'], resolution='answered by ' + later[0])))
+    sequence = apply(run, dict(base_sequence=data['sequence'], actor=actor, operations=ops)) if ops else data['sequence']
+    return dict(sequence=sequence, resolved=[op['id'] for op in ops])
+
+
+def classify(run, actor, prefix, exclude=None, obj=None):
+    """Exclude or map every file under one directory prefix in a single write."""
+    if bool(exclude) == bool(obj):
+        raise ValueError('classify needs exactly one of --exclude REASON or --map OBJECT')
+    checked_exclusions({prefix: 'prefix'})
+    ensure_ledger(run)
+    con, data = open_view(run)
+    try:
+        # substr, not LIKE: LIKE ignores ASCII case and would take Docs/ for docs/.
+        files = {k: json.loads(b) for k, b in con.execute(
+            "SELECT id, body FROM rows WHERE tbl = 'files' AND (id = ? OR substr(id, 1, ?) = ?) ORDER BY id",
+            (prefix, len(prefix) + 1, prefix + '/'))}
+        if not files:
+            raise ValueError('no inventoried file under ' + prefix)
+        ops = []
+        if exclude:
+            mapped = sorted(k for k, f in files.items() if f['decision'] == 'mapped')
+            if mapped:
+                raise ValueError('files under ' + prefix + ' are mapped to objects (e.g. ' + ', '.join(mapped[:3]) + '); unmap them first')
+            for key, row in files.items():
+                if row['decision'] != 'blocked':
+                    ops.append(dict(table='files', id=key, value={**row, 'decision': 'excluded', 'reason': exclude}))
+        else:
+            target = data['objects'].get(obj)
+            if target is None:
+                raise ValueError('unknown object: ' + obj)
+            for key, row in files.items():
+                if row['decision'] == 'blocked':
+                    continue
+                ops.append(dict(table='files', id=key, value={**row, 'decision': 'mapped', 'reason': '',
+                                                              'objects': list(dict.fromkeys(row['objects'] + [obj]))}))
+            ops.append(dict(table='objects', id=obj, value={**target, 'sources': list(dict.fromkeys(
+                target['sources'] + [op['id'] for op in ops]))}))
+        sequence = data['sequence']
+    finally:
+        con.close()
+    return dict(sequence=apply(run, dict(base_sequence=sequence, actor=actor, operations=ops)), files=len(files),
+                changed=sum(op['table'] == 'files' for op in ops))
+
+
+SIZE_OR_MODE = re.compile(r'(compact|narrow|wide|mobile|tablet|desktop|small|large|\d{3,4}x\d{3,4}|dark|light|'
+                          r'high-contrast|rtl|ltr|zoom|landscape|portrait)', re.I)
+
+
+def inventory_export(data):
+    """Compact inventory for reviewers: objects and rules without the file manifest."""
+    rules = catalog()
+    covered = coverage(data, rules)
+    per_rule = {}
+    for kind, rule, _ in covered.values():
+        per_rule[rule] = per_rule.get(rule, 0) + 1
+    dimensions = {}
+    for cid, row in rules.items():
+        dimensions.setdefault(row.get('dimension', ''), []).append(cid)
+    objects = {}
+    for key, row in data['objects'].items():
+        variants = {}
+        for variant in row['variants']:
+            gaps = {d: sum(uid(key, variant, c) in covered for c in ids) for d, ids in dimensions.items()}
+            variants[variant] = {d: str(len(ids) - gaps[d]) + '/' + str(len(ids)) for d, ids in dimensions.items()}
+        objects[key] = dict(label=row['label'], kind=row['kind'], sources=len(row['sources']),
+                            relations=row['relations'], criteria_planned_per_dimension=variants)
+    warnings = []
+    for key, rule in data['equivalences'].items():
+        tokens = {v: {t.lower() for t in SIZE_OR_MODE.findall(v)} for v in [rule['representative']] + rule['variants']}
+        if len({frozenset(t) for t in tokens.values()}) > 1:
+            warnings.append(key + ': equivalence spans variants that differ in size, layout or mode tokens ('
+                            + ', '.join(sorted(tokens)) + '); confirm structure, navigation and setting criteria really match')
+    decisions = {}
+    for row in data['files'].values():
+        decisions[row['decision']] = decisions.get(row['decision'], 0) + 1
+    return dict(revision=data['revision'], objects=objects,
+                applicability={k: {**{f: r[f] for f in ('kinds', 'objects', 'criteria', 'dimensions', 'reason', 'evidence')},
+                                   'variants': r.get('variants', []), 'covered_units': per_rule.get(k, 0)}
+                               for k, r in data['applicability'].items()},
+                equivalences={k: {**{f: r[f] for f in ('object', 'representative', 'variants', 'criteria', 'dimensions', 'reason', 'evidence')},
+                                  'covered_units': per_rule.get(k, 0)} for k, r in data['equivalences'].items()},
+                file_decisions=decisions, not_inventoried=data.get('scan_ignored', {}),
+                scan_exclusions=data.get('scan_exclusions', {}), warnings=warnings,
+                inventory_digest=inventory_digest(data))
 
 
 def results(data, run):
@@ -1174,9 +1660,18 @@ def report(result):
     if result.get('scan_exclusions'):
         lines += ['', '## Explicitly omitted source paths (unexamined)', '']
         lines += ['- ' + path.replace('\n', ' ') + ': ' + reason.replace('\n', ' ') for path, reason in result['scan_exclusions'].items()]
+    foreign = {k: g for k, g in result['gaps'].items() if g.get('category') == 'foreign-change'}
+    if foreign:
+        lines += ['', '## Foreign changes on the test host', '',
+                  'Activity outside the audit (other sessions, provisioning, updates) during the run; affected units are listed.', '']
+        lines += ['- ' + k + ' (' + g['status'] + '): ' + g['description'].replace('\n', ' ')
+                  + (' — units: ' + ', '.join(g['units']) if g['units'] else '') for k, g in foreign.items()]
     lines += ['', '## Findings', '']
     for f in result['findings']:
-        lines += ['### ' + f['id'] + ': ' + f['title'], '', f['status'] + ' / ' + f['priority'], '',
+        state = f['status'] + (' of ' + f['duplicate_of'] if f.get('duplicate_of') else '')
+        if f.get('tracking'):
+            state += ' / tracked (' + f['tracking']['kind'] + '): ' + f['tracking']['reference']
+        lines += ['### ' + f['id'] + ': ' + f['title'], '', state + ' / ' + f['priority'], '',
                   'Impact: ' + f['impact'], '', 'Expected: ' + f['expected'], '', 'Observed: ' + f['actual'], '',
                   'Reproduce: ' + ' → '.join(f['steps']), '', 'Recommendation: ' + f['recommendation'], '',
                   'Evidence: ' + ', '.join(f['evidence']), '']
@@ -1215,8 +1710,13 @@ def resume(data, obj=None, status=None, limit=20):
                 jobs={k: v for k, v in data['jobs'].items() if any(u in {key for key, _ in rows[:limit]} for u in v['units'])})
 
 
-def next_work(data, limit=12):
-    """Read-only queue: bounded packages, every object/variant represented before overflow."""
+def next_work(data, limit=12, first=()):
+    """Read-only queue: bounded packages, every object/variant represented before overflow.
+
+    first: objects to schedule ahead of the rest (risk order), in the given order."""
+    unknown = set(first) - set(data['objects'])
+    if unknown:
+        raise ValueError('unknown object for --first: ' + ', '.join(sorted(unknown)))
     if not 1 <= limit <= 100:
         raise ValueError('next limit must be between 1 and 100')
     blockers = {state: 0 for state in ('documented', 'stale', 'unsubstantiated')}
@@ -1257,7 +1757,8 @@ def next_work(data, limit=12):
         actions.append('Resolve remaining gaps, then obtain final independent review')
     actions.append('Prepare eligible issue drafts; inspect outbox and verify publication receipts separately')
     order = {'execute': 0, 'reassess-blocker': 1, 'retry-when-ready': 2}
-    ordered = sorted(packages, key=lambda k: (order[k[2]], k[0], k[1]))
+    rank = {obj: i for i, obj in enumerate(first)}
+    ordered = sorted(packages, key=lambda k: (order[k[2]], rank.get(k[0], len(rank)), k[0], k[1]))
     return dict(sequence=data['sequence'], context_digest=context_digest(data), blockers=blockers,
                 unclassified_files=unclassified, actions=actions,
                 package_count=len(packages), packages=[dict(object=k[0], variant=k[1], action=k[2],
@@ -1306,16 +1807,32 @@ def main():
     pa.add_argument('--add', dest='add_fields', help='JSON object of arrays; unions them into list fields')
     pa.add_argument('--append-variant', help='objects only: add one variant, then run plan')
     pa.add_argument('--fragment', action='store_true', help='write the fragment to parts/ instead of applying it')
-    ev = sub.add_parser('evidence'); ev.add_argument('run'); ev.add_argument('source'); ev.add_argument('--id', required=True); ev.add_argument('--actor', required=True)
-    ev.add_argument('--kind', required=True); ev.add_argument('--locator', required=True); ev.add_argument('--environment', required=True)
+    ev = sub.add_parser('evidence'); ev.add_argument('run'); ev.add_argument('source'); ev.add_argument('--id'); ev.add_argument('--actor', required=True)
+    ev.add_argument('--kind'); ev.add_argument('--locator'); ev.add_argument('--environment')
     wrap = sub.add_parser('wrap-reviews'); wrap.add_argument('run'); wrap.add_argument('draft'); wrap.add_argument('--actor', required=True)
     res = sub.add_parser('resume'); res.add_argument('run'); res.add_argument('--object'); res.add_argument('--status', choices=list(TRANSITIONS)); res.add_argument('--limit', type=int, default=20)
     nxt = sub.add_parser('next'); nxt.add_argument('run'); nxt.add_argument('--limit', type=int, default=12)
+    nxt.add_argument('--first', action='append', default=[], help='schedule this object first (repeatable, risk order)')
+    ev.add_argument('--batch', action='store_true', help='SOURCE is a JSON array of {id, source, kind, locator, environment}; one write')
+    ing = sub.add_parser('ingest', help='import one worker result (evidence, units, findings, job close) in one write')
+    ing.add_argument('run'); ing.add_argument('result'); ing.add_argument('--actor', required=True)
+    co = sub.add_parser('apply-corrections', help="apply accepting reviews' machine-readable corrections")
+    co.add_argument('run'); co.add_argument('--actor', required=True); co.add_argument('--review', action='append', default=[])
+    ra = sub.add_parser('resolve-answered', help='resolve rejects/gaps answered by a later independent accept on current content')
+    ra.add_argument('run'); ra.add_argument('--actor', required=True)
+    cl = sub.add_parser('classify', help='exclude or map every inventoried file under a directory in one write')
+    cl.add_argument('run'); cl.add_argument('--actor', required=True); cl.add_argument('--prefix', required=True)
+    group = cl.add_mutually_exclusive_group(required=True)
+    group.add_argument('--exclude', metavar='REASON'); group.add_argument('--map', metavar='OBJECT')
+    inv = sub.add_parser('inventory', help='compact inventory (objects, rules, coverage, warnings) for reviewers'); inv.add_argument('run')
     for command in ('check', 'report', 'digest', 'drift'):
         cmd = sub.add_parser(command); cmd.add_argument('run')
         if command == 'digest':
             cmd.add_argument('--scope', choices=['inventory','final','unit','finding'], default='final')
             cmd.add_argument('--target', default='all')
+            cmd.add_argument('--targets', help='comma-separated targets; prints a JSON map target -> digest')
+            cmd.add_argument('--targets-file', help='file with one target per line (or a JSON array); prints a JSON map')
+            cmd.add_argument('--corrections', help='JSON {field: value}; prints base_digest and the digest of the corrected row')
         if command in ('check', 'report'):
             cmd.add_argument('--verbose', action='store_true')
     args = p.parse_args()
@@ -1332,7 +1849,13 @@ def main():
             with write_lock(args.run):
                 print('migrated' if migrate(args.run) else 'nothing to migrate')
         elif args.command == 'wrap-reviews': print(wrap_reviews(args.run, read(args.draft), args.actor))
-        elif args.command == 'plan': plan(args.run, args.actor)
+        elif args.command == 'plan': print(json.dumps(plan(args.run, args.actor)))
+        elif args.command == 'ingest': print(json.dumps(ingest(args.run, args.actor, args.result), ensure_ascii=False, indent=2))
+        elif args.command == 'apply-corrections':
+            print(json.dumps(apply_corrections(args.run, args.actor, args.review), ensure_ascii=False, indent=2))
+        elif args.command == 'resolve-answered': print(json.dumps(resolve_answered(args.run, args.actor), ensure_ascii=False, indent=2))
+        elif args.command == 'classify':
+            print(json.dumps(classify(args.run, args.actor, args.prefix.rstrip('/'), args.exclude, args.map)))
         elif args.command == 'patch':
             add = json.loads(args.add_fields) if args.add_fields else {}
             if args.append_variant:
@@ -1344,11 +1867,40 @@ def main():
                 raise ValueError('patch needs --set, --add or --append-variant with a JSON object')
             out = patch_row(args.run, args.actor, args.table, args.id, change, add, args.fragment)
             if args.fragment: print(out)
+        elif args.command == 'evidence' and not args.batch and not (args.id and args.kind and args.locator and args.environment):
+            raise ValueError('evidence needs --id, --kind, --locator and --environment (or --batch)')
+        elif args.command == 'evidence' and args.batch: evidence_batch(args.run, args.actor, args.source)
         elif args.command == 'evidence': evidence(args.run,args.actor,args.id,args.source,args.kind,args.locator,args.environment)
         else:
             data = load(args.run)
             if args.command == 'next':
-                print(json.dumps(next_work(data, args.limit), ensure_ascii=False, indent=2)); return 0
+                print(json.dumps(next_work(data, args.limit, args.first), ensure_ascii=False, indent=2)); return 0
+            if args.command == 'inventory':
+                print(json.dumps(inventory_export(data), ensure_ascii=False, indent=2)); return 0
+            if args.command == 'digest' and args.corrections:
+                if args.scope not in ('unit', 'finding'):
+                    raise ValueError('--corrections applies to unit and finding scopes')
+                row = data['units' if args.scope == 'unit' else 'findings'].get(args.target)
+                fix = json.loads(args.corrections)
+                if row is None or not isinstance(fix, dict) or not fix:
+                    raise ValueError('--corrections needs an existing --target and a nonempty JSON object')
+                if set(fix) & set(CORRECTION_LOCKED) or not set(fix) <= set(row):
+                    raise ValueError('corrections may change existing content fields only, not ' + ', '.join(CORRECTION_LOCKED))
+                print(json.dumps(dict(base_digest=row_digest(args.scope, row), digest=row_digest(args.scope, {**row, **fix})), indent=2))
+                return 0
+            if args.command == 'digest' and (args.targets or args.targets_file):
+                if args.scope not in ('unit', 'finding'):
+                    raise ValueError('--targets applies to unit and finding scopes')
+                if args.targets_file:
+                    text = Path(args.targets_file).read_text(encoding='utf-8')
+                    targets = json.loads(text) if text.lstrip().startswith('[') else text.split()
+                else:
+                    targets = [t for t in args.targets.split(',') if t]
+                table = 'units' if args.scope == 'unit' else 'findings'
+                missing = [t for t in targets if t not in data[table]]
+                if missing:
+                    raise ValueError('unknown ' + args.scope + ': ' + ', '.join(missing[:10]))
+                print(json.dumps({t: review_digest(data, args.scope, t) for t in targets}, indent=2)); return 0
             if args.command == 'digest':
                 if args.scope in ('inventory', 'final') and args.target != 'all':
                     raise ValueError('inventory/final target must be all')

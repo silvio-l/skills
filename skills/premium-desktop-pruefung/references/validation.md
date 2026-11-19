@@ -127,3 +127,39 @@ Regression result: **122 tests passed** (60 ledger, 36 tracker, 12 probe/package
 Live run on a Tauri/React product: the full traversal inventoried 128,529 files in 34.9 s (ledger 48 MB), about 98 % of them in nested agent worktrees, `target/` and `node_modules/`. With the policy, `init` on the same tree inventoried 1,854 files in 0.3 s (ledger 0.5 MB) and listed ten skipped directories, all Git-ignored. Tests cover nested checkouts (`.git` file or directory), exact-path Git ignores (`target/` skipped, `src/target/` kept), cache names, `--include`, `--scan-all`, checkpoint scope, no drift from changes in skipped trees and unchanged full scope for pre-policy runs.
 
 Adoption for a pre-policy run: a copy of the live gitoodo ledger (5,389 journal steps, 128,529 file rows) could no longer run `drift` or `check`, because other sessions were building in Git-ignored agent worktrees inside the target repository. `adopt-scan-policy` with three includes for mapped generated sources took 0.9 s; afterwards `drift` reported no changes in 0.9 s, the journal replay stayed consistent and the only new check error was the expected stale inventory review.
+
+## Review loop and practical-audit feedback 3 — 2026-11-19
+
+A follow-up run on the same product (4,293 units, 95 issues) cost most of its time outside testing: three critic rounds that each corrected the previous round's free-text corrections, duplicates copied by hand onto identical units, 554 evidence files registered one process at a time, 156 digests at more than 120 s, parallel workers colliding on stale sequences. Changes and their checks:
+
+- Reviewer `corrections` with `base_digest`; `apply-corrections` applies exactly the accepted text, and `apply` admits a third-party write only when it equals such a correction (tests: applied correction stays accepted, locked fields and stale targets are skipped, a free edit by the coordinator is refused, unit corrections keep the terminal result reviewed).
+- `duplicate`/`duplicate_of`: a duplicate needs its own independent review with outcome `duplicate`; `duplicate_of` is reviewed content, status is not. Others may add units (a confirmed or duplicate finding returns to suspected). `tracking` (`issue`/`fixed`) with resolvable evidence. Suspected findings may start without units. Error for a changed confirmed finding names both fixes.
+- An independent review of the diff found six defects, all fixed with regression tests: a correction could rewrite a unit inside another worker's active job (now only finished results, outcome must equal the status); a rebased blocker took the newer runtime context (now refused when runtime, platforms or scope changed); an unreviewed duplicate covered failing units and could clear someone's open suspicion (now reviewed like a confirmation); corrections could replace units, evidence and root cause (now locked); tracking evidence was not resolved; `classify` matched prefixes case-insensitively. Also fixed: foreign issue URLs were taken as local numbers, duplicates bypassed their own publication gates, a plain file could carry a forged `members` map, any actor could retire a rule, and author-drawn selects, date inputs and editable regions were judged as text buttons in the non-text sweep. The reviewer's repro scripts now fail at the intended check.
+- Row-level rebase: a stale fragment applies when no row it writes changed since its base (tests: disjoint rows rebase, a changed row is named, a ledger without marks stays strict).
+- `ingest` (one write per worker result; refuses units outside the job; links units to new or existing findings), `evidence --batch` and directory manifests (tampered member detected, symlinks and empty directories refused before anything is stored), `digest --targets`/`--corrections`, `resolve-answered`, rule retirement, variant-scoped applicability, `classify`, `inventory` with equivalence warnings, `next --first`, `plan` counts, outcome `blocked`, blocker normalization, foreign-change gaps, drift errors naming the changed paths.
+- issues.py: duplicates join their primary's issue with the primary's text, tracked findings are verified and recorded as `existing` (a missing issue fails publication), fixed findings are skipped, self-numbered steps are not numbered twice.
+- Contrast: `contrast_sweep.js` no longer divides canvas values by alpha a second time (channels above 255), skips and counts visually hidden text and composites onto the page's `Canvas` colour. New `nontext_sweep.js` + `probe.py nontext` for 1.4.11. Both collectors ran in Google Chrome (Playwright) on a fixture in light and dark color schemes: canvas `#ffffff`/`#121212`, one opacity-0 and one clipped text skipped, OKLCH text normalized, visible aria-hidden text kept, a `#cccccc` field border 1.61:1 fail, a `#767676` border 4.54:1 pass, the probe element removed again. After the review fixes the same run classified a contenteditable region, a date input and an author-drawn select with `#cccccc` borders as 1.61:1 fails in the light scheme.
+- Every example in `fragments.md` is validated against the schema by the tests.
+
+Performance against the previous release on 50,000 units: `plan` 1.19 s (before 1.47 s), applying 2,000 unit transitions 0.11 s (0.14 s), full validation with journal replay 1.66 s (1.62 s); reviewer corrections are looked up only for writes that would otherwise be refused, so the replay does not scan reviews per write.
+
+Regression result: **176 tests passed** (98 ledger, 40 tracker, 16 probe/package, 22 source discovery), with Python 3.15 and the system Python 3.9. Not done: an end-to-end audit by fresh agents with the new commands; the next practical run is the test.
+
+## Host capability observations — 2026-11-18
+
+Moved from the platform guide: these are observations on specific hosts, not requirements or current-run evidence.
+
+### Local checks actually performed
+
+| Check | Observed result | Limit |
+| --- | --- | --- |
+| codex --version | codex-cli 0.169.0 | Version observation only |
+| codex --help | exec, review, resume, agents and sandbox commands; sandbox/approval options exposed | No live skill discovery or model-driven audit was exercised by this check |
+| claude --version | Claude Code 2.1.326 | Version observation only |
+| claude --help | --agent, --agents JSON, --print, --tools, --allowedTools, --worktree and settings controls exposed | No Claude model invocation or fresh-agent E2E audit was run |
+| Official specifications | Current skill and agent pages read | Documentation is capability evidence, not an installation smoke test |
+| This development session | Delegated research agent used by coordinator | Demonstrates this host's current delegation, not every Codex installation |
+
+Bundled functional tests and schema checks are documented separately in the implementation's test record. Do not relabel CLI-help checks as a successful Claude/Codex end-to-end run. Production-host skill-discovery and real browser/native-app audits remain environment-dependent validation tasks.
+
+On the development Mac, agent-desktop 1.3.1 returned a complete Warp accessibility snapshot. On the available remote Mac, a Finder menu-bar snapshot and a System Settings navigation action succeeded. After the user granted screen recording to the responsible SSH launcher, permission checks reported accessibility and screen recording granted, and a 2560×1664 screenshot succeeded. On Windows, direct SSH execution could not observe the taskbar. The agent-desktop skill's interactive scheduled-task launcher subsequently returned a complete taskbar snapshot with 14 refs, resolved a ref in a separate invocation and captured a 1920×1080 screenshot. Windows mutation actions remain untested. These are adapter smoke checks, not full product audits or cross-harness end-to-end validation.

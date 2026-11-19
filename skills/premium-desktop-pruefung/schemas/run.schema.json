@@ -297,6 +297,13 @@
           "captured_by": {
             "type": "string",
             "minLength": 1
+          },
+          "members": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "minLength": 1
+            }
           }
         },
         "required": [
@@ -332,7 +339,8 @@
             "enum": [
               "suspected",
               "confirmed",
-              "refuted"
+              "refuted",
+              "duplicate"
             ]
           },
           "actor": {
@@ -383,6 +391,45 @@
               "minLength": 1
             },
             "uniqueItems": true
+          },
+          "duplicate_of": {
+            "type": "string",
+            "minLength": 1
+          },
+          "tracking": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "reference",
+              "reason",
+              "evidence"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "issue",
+                  "fixed"
+                ]
+              },
+              "reference": {
+                "type": "string",
+                "minLength": 1
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              },
+              "evidence": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              }
+            }
           }
         },
         "required": [
@@ -508,10 +555,19 @@
               "pass",
               "fail",
               "excluded",
+              "blocked",
               "confirmed",
               "refuted",
+              "duplicate",
               "none"
             ]
+          },
+          "corrections": {
+            "type": "object"
+          },
+          "base_digest": {
+            "type": "string",
+            "minLength": 1
           }
         },
         "required": [
@@ -563,6 +619,12 @@
           },
           "resolution": {
             "type": "string"
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "foreign-change"
+            ]
           }
         },
         "required": [
@@ -652,6 +714,14 @@
           "actor": {
             "type": "string",
             "minLength": 1
+          },
+          "variants": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "uniqueItems": true
           }
         },
         "required": [

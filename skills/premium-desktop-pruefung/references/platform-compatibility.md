@@ -28,19 +28,6 @@ Current Codex documentation permits delegation after a direct request or applica
 
 The portable workflow needs no nested agents. If delegation is absent or denied, use a distinct counter-review pass, reopen primary sources, and record that the same model/context performed both roles. This is weaker evidence and cannot be presented as independent-agent validation.
 
-## Local checks actually performed
-
-| Check | Observed result | Limit |
-| --- | --- | --- |
-| codex --version | codex-cli 0.169.0 | Version observation only |
-| codex --help | exec, review, resume, agents and sandbox commands; sandbox/approval options exposed | No live skill discovery or model-driven audit was exercised by this check |
-| claude --version | Claude Code 2.1.326 | Version observation only |
-| claude --help | --agent, --agents JSON, --print, --tools, --allowedTools, --worktree and settings controls exposed | No Claude model invocation or fresh-agent E2E audit was run |
-| Official specifications | Current skill and agent pages read | Documentation is capability evidence, not an installation smoke test |
-| This development session | Delegated research agent used by coordinator | Demonstrates this host's current delegation, not every Codex installation |
-
-Bundled functional tests and schema checks are documented separately in the implementation's test record. Do not relabel CLI-help checks as a successful Claude/Codex end-to-end run. Production-host skill-discovery and real browser/native-app audits remain environment-dependent validation tasks.
-
 ## Safe execution and missing capabilities
 
 ### Native desktop adapter
@@ -58,9 +45,17 @@ Choose per check, not once for the whole audit. Among methods that can establish
 
 Record the selected adapter and its evidence limits in runtime evidence. Add a brief reason when switching methods or when the cheaper available method cannot answer the check; no per-action accounting is required.
 
-On the development Mac, agent-desktop 1.3.1 returned a complete Warp accessibility snapshot. On the available remote Mac, a Finder menu-bar snapshot and a System Settings navigation action succeeded. After the user granted screen recording to the responsible SSH launcher, permission checks reported accessibility and screen recording granted, and a 2560×1664 screenshot succeeded. On Windows, direct SSH execution could not observe the taskbar. The agent-desktop skill's interactive scheduled-task launcher subsequently returned a complete taskbar snapshot with 14 refs, resolved a ref in a separate invocation and captured a 1920×1080 screenshot. Windows mutation actions remain untested. These are adapter smoke checks, not full product audits or cross-harness end-to-end validation.
+Observed adapter smoke checks on specific hosts are recorded in the [validation record](validation.md#host-capability-observations--2026-11-18); they are not capability evidence for the current run.
 
 The optional desktop VM facility does not by itself prove the filesystem, network or credential isolation required below. Verify those boundaries independently before executing target-controlled code.
+
+### Adapter pitfalls observed in audits
+
+- **Tool-name collisions.** A short name may be an unrelated system binary: on macOS `cu` is the UUCP "call up" command, not Computer Use. Resolve the adapter by its documented entry point and version output, never by `which <short name>` alone.
+- **Frontmost app.** Headed key presses go to the frontmost app, which may be the login window, another browser or a notification. Verify the frontmost app and window immediately before each key press.
+- **Keys agent-desktop cannot send as typed.** Escape needs an unscoped `--headed press` (a ref-scoped press does not reach the window); `?` and other shifted characters on a German layout are not sent reliably through `type`. Use the key name or a different path and record the limitation instead of reporting a missing shortcut.
+- **Snapshots for focus checks.** `snapshot -i` (interactive elements only) omits focused headings and static elements; check focus with a full snapshot.
+- **Private data in captures.** Menu-bar snapshots (Apple menu recent items), `list-windows` (foreign window titles) and screenshots can show personal data; AutoFill one-time codes have appeared in a screenshot. Filter snapshots to the target app and window, crop screenshots to the window, and redact before evidence leaves the machine.
 
 ### Host-first capability decision
 

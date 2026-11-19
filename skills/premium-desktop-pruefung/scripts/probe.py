@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only HTML discovery, opaque sRGB contrast and rendered contrast sweeps; not a conformance scanner."""
+"""Read-only HTML discovery, opaque sRGB contrast and rendered text/non-text contrast sweeps; not a conformance scanner."""
 import argparse
 from html.parser import HTMLParser
 import json
@@ -80,9 +80,70 @@ def sweep(path):
                          in_viewport=item.get('in_viewport', True), uncertain=reasons))
     order = {'fail': 0, 'uncertain': 1, 'exempt-candidate': 2, 'pass': 3}
     rows.sort(key=lambda r: (order[r['status']], r['ratio']))
-    return dict(url=data.get('url'), viewport=data.get('viewport'), counts=counts, items=rows,
+    return dict(url=data.get('url'), viewport=data.get('viewport'), color_scheme=data.get('color_scheme'),
+                canvas=_hex(_premultiplied(canvas)), skipped_hidden=data.get('skipped', {}), counts=counts, items=rows,
                 limitation='Composites DOM ancestors only. Overlapping non-ancestor layers, images, filters, '
                            'shadows and anti-aliasing need a pixel check of a screenshot; one state per sweep.')
+
+
+NON_FIELD_INPUTS = ('button', 'submit', 'reset', 'image', 'checkbox', 'radio', 'range', 'color', 'file', 'hidden')
+NATIVE_HINT = 'native control: the platform draws its boundary; check a screenshot'
+
+
+def nontext(path):
+    """Evaluate output of scripts/nontext_sweep.js against WCAG 1.4.11 (3:1 for control boundaries).
+
+    A control passes when its fill or a visible border differs from the adjacent background by
+    at least 3:1. Without such an indicator, a text field fails (its boundary is what identifies
+    it); a control that shows its text label needs judgement (text-only buttons can conform),
+    so it is reported as `review`, never as pass."""
+    data = json.loads(Path(path).read_text(encoding='utf-8'))
+    canvas = data.get('canvas') or [255, 255, 255, 1]
+    rows, counts = [], {'fail': 0, 'review': 0, 'pass': 0, 'uncertain': 0, 'exempt-candidate': 0}
+    for item in data['items']:
+        control = item['control']
+        group = item['chain'] + [{**control, 'borders': None}]
+        adjacent = composite(item['chain'], canvas)
+        fill = composite(group, canvas)
+        indicators = [dict(part='fill', color=fill, ratio=round(contrast(fill, adjacent)['ratio'], 2))]
+        for border in control['borders']:
+            if border['width_px'] >= 1 and border['style'] not in ('none', 'hidden') and border['color'][3] > 0:
+                color = composite(group, canvas, border['color'])
+                indicators.append(dict(part='border-' + border['side'], color=color, width_px=border['width_px'],
+                                       ratio=round(contrast(color, adjacent)['ratio'], 2)))
+        best = max(indicators, key=lambda i: i['ratio'])
+        reasons = [name for name, flag in (
+            ('background image or gradient', any(l.get('background_image') for l in group)),
+            ('filter or backdrop filter', any(l.get('filter') for l in group)),
+            ('blend mode', any(l.get('blend') for l in group)),
+            ('box shadow may form the boundary', item.get('box_shadow')),
+            (NATIVE_HINT, item.get('native_appearance'))) if flag]
+        # Fields identified by their boundary: every input that takes a value, selects drawn by the
+        # author (appearance none) and editable regions, whatever text they already contain.
+        textual = (item.get('editable') or item['role'] in ('textarea', 'select', 'textbox', 'searchbox', 'combobox', 'spinbutton')
+                   or item['role'].startswith('input:') and item['role'][6:] not in NON_FIELD_INPUTS)
+        if item.get('disabled'):
+            status = 'exempt-candidate'  # inactive components are exempt from 1.4.11; verify they are truly inactive
+        elif item.get('native_appearance'):
+            status = 'uncertain'  # computed borders of a platform-drawn control are not what is painted
+        elif best['ratio'] >= 3:
+            status = 'pass'
+        elif reasons:
+            status = 'uncertain'
+        elif item.get('has_text') and not textual:
+            status = 'review'
+        else:
+            status = 'fail'
+        counts[status] += 1
+        rows.append(dict(element=item['element'], role=item['role'], label=item.get('label', ''), adjacent=adjacent,
+                         best=best, indicators=indicators, status=status, uncertain=reasons,
+                         in_viewport=item.get('in_viewport', True)))
+    order = {'fail': 0, 'uncertain': 1, 'review': 2, 'exempt-candidate': 3, 'pass': 4}
+    rows.sort(key=lambda r: (order[r['status']], r['best']['ratio']))
+    return dict(url=data.get('url'), viewport=data.get('viewport'), counts=counts, items=rows,
+                limitation='Default state only and DOM ancestors only: focus indicators (2.4.7/2.4.11), hover, checked '
+                           'and error states, icons, graphics and native controls need their own capture or a '
+                           'screenshot pixel check.')
 
 
 class Inventory(HTMLParser):
@@ -111,9 +172,11 @@ def main():
     c=sub.add_parser('contrast'); c.add_argument('foreground'); c.add_argument('background')
     h=sub.add_parser('html'); h.add_argument('path')
     w=sub.add_parser('sweep', help='evaluate JSON captured with scripts/contrast_sweep.js'); w.add_argument('path')
+    n=sub.add_parser('nontext', help='evaluate JSON captured with scripts/nontext_sweep.js (WCAG 1.4.11)'); n.add_argument('path')
     a=p.parse_args()
     try:
-        result=contrast(a.foreground,a.background) if a.command=='contrast' else html(a.path) if a.command=='html' else sweep(a.path)
+        result=(contrast(a.foreground,a.background) if a.command=='contrast' else html(a.path) if a.command=='html'
+                else sweep(a.path) if a.command=='sweep' else nontext(a.path))
         print(json.dumps(result,ensure_ascii=False,indent=2))
     except (OSError, ValueError, KeyError, TypeError) as exc:
         p.exit(2,str(exc)+'\n')

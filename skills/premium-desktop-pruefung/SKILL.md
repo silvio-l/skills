@@ -7,6 +7,23 @@ description: "Audit desktop and web UI/UX deeply with evidence, independent revi
 
 Deliver a target-audience-specific quality checklist, reproducible findings and tracked improvement issues. Perceived simplicity, clarity and total cognitive effort take precedence over decoration. Preserve the former skill's product profiling, four inventory views, desktop lifecycle checks and separate critics. **Replace its automatic fix loop with an issue workflow. Do not modify the audited product.** Requested corrections require a separate explicit assignment; re-audit the changed baseline afterwards.
 
+## Coordinator quickstart
+
+```sh
+A="python3 $SKILL/scripts/audit.py"
+$A init "$RUN" "$REPO" --revision "$REV"        # product source only; read the skipped list
+$A classify "$RUN" --actor C --prefix docs --exclude 'not product UI'   # bulk file decisions
+$A apply "$RUN" parts/inventory.json; $A plan "$RUN" --actor C
+$A inventory "$RUN"                              # compact view + warnings for the inventory critic
+$A next "$RUN" --first O-core-flow               # risk-ordered packages; claim one job per worker
+$A ingest "$RUN" result.json --actor W           # one worker result: evidence, units, findings, job
+$A digest "$RUN" --scope unit --targets-file ids # batch digests for critics
+$A apply-corrections "$RUN" --actor C; $A resolve-answered "$RUN" --actor C
+$A drift "$RUN"; $A check "$RUN"; $A report "$RUN"
+```
+
+Search the tracker for earlier audit runs first. Workers return the `ingest` format and critics return review drafts with machine-readable `corrections` ([fragments](references/fragments.md), [agents](references/agents.md)). A stale fragment on disjoint rows is rebased automatically.
+
 ## Start with the actual environment
 
 Resolve this skill's directory as `SKILL`; use absolute script paths. Python 3.10+ and its standard library suffice for ledger, discovery probes and tracker adapters. No dependency installation or model API key is required by the skill itself. Follow [platform compatibility](references/platform-compatibility.md) for installation and capability checks. Never assume a named agent type, browser tool, sandbox or screen reader exists.
@@ -45,15 +62,15 @@ python3 "$SKILL/scripts/audit.py" plan "$RUN" --actor coordinator
 
 ## Screen-reader scope: explicit opt-in only
 
-Screen-reader execution is off by default. Do not launch, install, configure or delegate VoiceOver, NVDA, JAWS or other screen readers unless the user explicitly requests these additional tests. A general UI/UX, accessibility or WCAG audit request is not opt-in. Do not repeatedly ask to enable them. Keep keyboard, focus, semantics/accessibility-tree, contrast and adaptive checks in the standard audit. Record this scope in `profile.scope` with the request as evidence and pass it to every worker and critic. See M6 in [methods](references/methods.md) for recording exclusions and remaining evidence limits.
+Screen-reader execution is off by default: never launch, install, configure or delegate one unless the user explicitly requests it (a general accessibility or WCAG audit is not opt-in), and do not ask repeatedly. Keyboard, focus, accessibility-tree, contrast and adaptive checks stay in scope. Record the scope in `profile.scope` and pass it to every worker and critic; M6 in [methods](references/methods.md) covers the exclusion record.
 
 ## Perform and challenge the checks
 
 Assign disjoint, bounded jobs. Workers get product profile, baseline, assigned unit IDs, relevant criteria/methods and raw-source locations; load other modules only when needed. Only the coordinator merges fragments. One worker at a time controls a shared GUI; one build at a time; default maximum three workers, reduced for machine pressure. Never reduce coverage to fit concurrency.
 
-Apply source tracing, task walkthroughs, rendered observation, state transitions, keyboard and accessibility-tree checks, adaptive matrices and cross-component consistency checks as appropriate. Discover available Computer Use, Agent Desktop / Desktop Agent and browser capabilities; follow their applicable skills and host rules. Choose the most token-efficient method that supplies sufficient evidence for the specific check. Prefer focused structured queries for semantics and state; inspect rendered images for visual claims and whenever structured evidence leaves appearance uncertain. Use the capability selection guidance in [platform compatibility](references/platform-compatibility.md); tool names are not requirements. Capture environment, steps, expected/actual, source positions or runtime traces, limitations and imported evidence for passes as well as failures. Use `probe.py html FILE` only for discovery, `probe.py contrast '#RRGGBB' '#RRGGBB'` for measured opaque-color thresholds, and `scripts/contrast_sweep.js` plus `probe.py sweep` for a rendered page state (M5). Neither is a complete accessibility audit. Unattempted runtime checks stay pending; only demonstrated unavailable methods become blocked.
+Apply source tracing, task walkthroughs, rendered observation, state transitions, keyboard and accessibility-tree checks, adaptive matrices and cross-component consistency checks as appropriate. Discover available Computer Use, Agent Desktop / Desktop Agent and browser capabilities; follow their applicable skills and host rules. Choose the most token-efficient method that supplies sufficient evidence for the specific check. Prefer focused structured queries for semantics and state; inspect rendered images for visual claims and whenever structured evidence leaves appearance uncertain. Use the capability selection guidance in [platform compatibility](references/platform-compatibility.md); tool names are not requirements. Capture environment, steps, expected/actual, source positions or runtime traces, limitations and imported evidence for passes as well as failures. Use `probe.py html FILE` only for discovery, `probe.py contrast '#RRGGBB' '#RRGGBB'` for measured opaque-color thresholds, `scripts/contrast_sweep.js` plus `probe.py sweep` for text and `scripts/nontext_sweep.js` plus `probe.py nontext` for control boundaries (1.4.11) in a rendered page state (M5). Prove the active variant (mode, theme, language, window size, first-run state) in the evidence before any pass. Neither is a complete accessibility audit. Unattempted runtime checks stay pending; only demonstrated unavailable methods become blocked.
 
-A fresh critic examines raw repository and runtime artifacts without the original verdicts first, independently reconstructs inventory and paths, then reconciles the ledger. Review every terminal unit, including passes and exclusions; challenge confirmed candidates with alternative explanations. Record rejected suspicions as `refuted`, unresolved ones as `suspected`. Group findings by demonstrated shared root cause; retain every affected unit. See [agent contracts](references/agents.md).
+A fresh critic examines raw repository and runtime artifacts without the original verdicts first, independently reconstructs inventory and paths, then reconciles the ledger. Review every terminal unit, including passes and exclusions; challenge confirmed candidates with alternative explanations. Record rejected suspicions as `refuted`, unresolved ones as `suspected`, twins as reviewed `duplicate` of their primary, and known or already fixed defects with `tracking`. Group findings by demonstrated shared root cause; retain every affected unit. See [agent contracts](references/agents.md).
 
 Independent validation requires a different actual agent/session, not merely a different actor label. Where separate execution is unavailable, perform a separated second pass with `mode: separated`, explain its weaker independence, and deliver an **incomplete** audit. Never invent agent execution. Inventory review and final review bind to current digests; changed evidence or results invalidate acceptance.
 
@@ -73,7 +90,7 @@ Exit 0 means formal ledger completeness; 1 means incomplete; 2 means invalid inp
 
 Follow [issues](references/issues.md) to prepare, deduplicate and create issues for independently confirmed findings on the repository's defined tracker. This audit invocation authorizes its described issue workflow; follow any narrower user instruction. Verify destination and disclosure rules before publishing. Never send private evidence to a public tracker. Include reproduction, user impact, criterion, acceptance tests and recommendation; reference local evidence safely. Unconfirmed candidates remain in the audit report, not asserted as defects. Persist issue URLs/receipts, report publication failures and keep unsent work queued. No silent fallback to an arbitrary tracker.
 
-Use `next RUN --limit 12` for packages across surfaces and `resume RUN --object OBJECT_ID --status pending --limit 20` for bounded work queues and `digest RUN --scope unit --target UNIT_ID` for review hashes. Change single fields of a current row with `patch RUN --actor A --table T --id X --set JSON` / `--add JSON` / `--append-variant V` instead of hand-built fragments. `check`/`report` print compact diagnostics and retain all errors in `validation.json`. See protocol for safe review-draft wrapping.
+Use `resume RUN --object OBJECT_ID --status pending --limit 20` for bounded work queues. Change single fields of a current row with `patch RUN --actor A --table T --id X --set JSON` / `--add JSON` / `--append-variant V` instead of hand-built fragments; register many artifacts with `evidence RUN BATCH.json --batch` (a directory becomes a hash manifest). `check`/`report` print compact diagnostics and retain all errors in `validation.json`. See [protocol](references/protocol.md) for every command and review-draft wrapping.
 
 On interruption, resume the ledger (`audit.db`), inspect active jobs and pending outbox entries, verify `drift`, and reopen affected units. A changed source baseline requires a new linked run; never reuse old evidence as if captured on the new build. After separately authorized fixes, retest original and adjacent paths, restart/persistence where relevant, and link outcomes to the existing issues.
 

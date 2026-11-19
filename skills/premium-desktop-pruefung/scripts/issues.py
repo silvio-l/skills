@@ -127,6 +127,35 @@ def config_check(config, require_transport=True):
     return config
 
 
+STEP_NUMBER = re.compile(r"^\s*(?:\d{1,3}[.)]|[-*])\s+")
+ISSUE_NUMBER = re.compile(r"#?(\d{1,9})")
+
+
+def numbered(steps):
+    # Workers often number their steps themselves; strip that so the issue does not read "1. 1. Open".
+    return "\n".join(str(i + 1) + ". " + STEP_NUMBER.sub("", s, count=1) for i, s in enumerate(steps))
+
+
+def tracked_issue(reference, config):
+    """Issue number of a tracking reference in the configured repository, else None.
+
+    Accepts '#12', '12' or an issue URL of the same tracker and repository; a URL of another
+    repository must not be mistaken for the issue with the same number here."""
+    if not isinstance(reference, str):
+        return None
+    reference = reference.strip()
+    found = ISSUE_NUMBER.fullmatch(reference)
+    if found:
+        return int(found.group(1))
+    url, api = urllib.parse.urlsplit(reference), urllib.parse.urlsplit(config["base_url"])
+    host = (api.hostname or "").lower()
+    if url.scheme not in ("http", "https") or (url.hostname or "").lower() not in (host, host[4:] if host.startswith("api.") else host):
+        return None
+    prefix = re.sub(r"/api(?:/v\d+)?/?$", "", api.path.rstrip("/"))
+    found = re.fullmatch(re.escape(prefix + "/" + config["repository"]) + r"(?:/-)?/issues/(\d{1,9})/?", url.path)
+    return int(found.group(1)) if found and not url.query else None
+
+
 def skip_reason(finding):
     """Name the actual gate, so a blocked confirmed finding is not mistaken for a missing review."""
     if finding.get("status") != "confirmed":
@@ -171,17 +200,23 @@ def prepare(export, config):
     result = {"run_id": export["run_id"], "repository": config["repository"],
               "provider": config["provider"], "base_url": config["base_url"], "issues": [], "skipped": [],
               "coverage_notices": notices, "transport": transport}
-    seen_ids, by_marker = set(), {}
+    result["linked"] = []
+    seen_ids, by_marker, by_finding, duplicates = set(), {}, {}, []
     for finding in export["findings"]:
         if isinstance(finding, dict) and isinstance(finding.get("steps"), list):
             if not finding["steps"] or any(not isinstance(s, str) or not s.strip() for s in finding["steps"]):
                 raise IssueError("invalid reproduction steps")
-            finding = {**finding, "steps": "\n".join(str(i + 1) + ". " + s for i, s in enumerate(finding["steps"]))}
+            finding = {**finding, "steps": numbered(finding["steps"])}
         if not isinstance(finding, dict) or not isinstance(finding.get("id"), str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,120}", finding["id"]):
             raise IssueError("invalid finding identifier")
         if finding["id"] in seen_ids:
             raise IssueError("duplicate finding identifier")
         seen_ids.add(finding["id"])
+        if finding.get("status") == "duplicate":
+            if not isinstance(finding.get("duplicate_of"), str):
+                raise IssueError(finding["id"] + ": duplicate without duplicate_of")
+            duplicates.append(finding)
+            continue
         reason = skip_reason(finding)
         if reason:
             result["skipped"].append({"id": finding["id"], "reason": reason})
@@ -193,10 +228,24 @@ def prepare(export, config):
             raise IssueError("finding title must be one line, at most 240 characters")
         if not isinstance(finding.get("evidence"), list) or not finding["evidence"] or any(not isinstance(x, str) or not x.strip() for x in finding["evidence"]):
             raise IssueError("confirmed finding requires evidence references")
+        tracking = finding.get("tracking")
+        if isinstance(tracking, dict) and tracking.get("kind") == "fixed":
+            result["skipped"].append({"id": finding["id"], "reason": "fixed after the audit baseline: " + str(tracking.get("reference"))})
+            continue
+        if isinstance(tracking, dict) and tracking.get("kind") == "issue":
+            number = tracked_issue(tracking.get("reference"), config)
+            if number is None:
+                raise IssueError(finding["id"] + ": tracking reference is no issue number or issue URL of "
+                                 + config["repository"])
+            result["linked"].append({"id": finding["id"], "number": number, "reason": str(tracking.get("reason", "")),
+                                     "finding_ids": [finding["id"]]})
+            by_finding[finding["id"]] = result["linked"][-1]
+            continue
         key = fingerprint(config, finding)
         marker = "<!-- ui-ux-audit:" + key + " -->"
         if key in by_marker:
             by_marker[key]["finding_ids"].append(finding["id"])
+            by_finding[finding["id"]] = by_marker[key]
             continue
         title = finding["title"]
         if config["visibility"] == "public" and not config.get("public_details", False):
@@ -212,8 +261,21 @@ def prepare(export, config):
                                  + "). This finding was confirmed independently on its own evidence."))
             body = "\n\n".join("## " + head + "\n\n" + text for head, text in sections) + "\n\n" + marker
         row = {"key": key, "marker": marker, "finding_ids": [finding["id"]], "title": title, "body": body}
-        by_marker[key] = row
+        by_marker[key] = by_finding[finding["id"]] = row
         result["issues"].append(row)
+    for finding in duplicates:
+        # A duplicate never gets its own issue: it travels with its primary's issue or link.
+        target = by_finding.get(finding["duplicate_of"])
+        # Its own gates still apply: an unreviewed or integrity-failed duplicate joins no issue.
+        own = skip_reason({**finding, "status": "confirmed"})
+        if own:
+            result["skipped"].append({"id": finding["id"], "reason": "duplicate of " + finding["duplicate_of"] + ", but "
+                                      + own.replace("confirmed, but ", "").replace("confirmed without", "without")})
+        elif target is None:
+            primary = next((r["reason"] for r in result["skipped"] if r["id"] == finding["duplicate_of"]), "not in this export")
+            result["skipped"].append({"id": finding["id"], "reason": "duplicate of " + finding["duplicate_of"] + " (" + primary + ")"})
+        else:
+            target["finding_ids"].append(finding["id"])
     return result
 
 
@@ -386,6 +448,12 @@ def publish(outbox, config, receipt_path, client=None):
         if any(receipt.get(k) != v for k, v in identity.items()) or not isinstance(receipt.get("deliveries"), dict):
             raise IssueError("receipt belongs to a different tracker or is invalid")
         verify_visibility(client, config)
+        linked = []
+        for item in outbox.get("linked", []):
+            row = client.request("GET", paths(config)[1] + "/" + str(item["number"]))
+            if not isinstance(row, dict):
+                raise IssueError("tracking issue #" + str(item["number"]) + " not readable")
+            linked.append((item, record_link(row, config)))
         existing = list_issues(client, config)
         plans = []
         for item in outbox["issues"]:
@@ -401,6 +469,9 @@ def publish(outbox, config, receipt_path, client=None):
             else:
                 plans.append((item, None))
         # Reconciliation of every candidate succeeds before the first mutation.
+        for item, link in linked:
+            receipt["deliveries"]["tracking:" + item["id"]] = {"finding_ids": item["finding_ids"], "status": "existing", **link}
+            atomic(receipt_path, receipt)
         for item, link in plans:
             record = {"finding_ids": item["finding_ids"], "payload_sha256": hashlib.sha256((item["title"] + "\n" + item["body"]).encode()).hexdigest()}
             if link:
