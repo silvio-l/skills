@@ -8,6 +8,7 @@ import json
 import os
 import re
 from pathlib import Path
+import shutil
 import sqlite3
 import sys
 import tempfile
@@ -581,6 +582,106 @@ def adopt_scan_policy(run, includes=()):
             con.close()
         return dict(sequence=meta['sequence'], rows_no_longer_compared=len(dropped), not_inventoried=ignored,
                     next='repeat the inventory review: its digest now binds the scan policy')
+
+
+def relocate(run, new_path, copy_missing=False):
+    """Point the run at another checkout of the same baseline, without rewriting its journal.
+
+    The source baseline is bound to file hashes, not to a path: a checkout that a tool moved on
+    (a background `git pull`) can be replaced by a pinned worktree at the audited revision.
+    Allowed only when a scan of NEW_PATH with the run's policy reproduces the compared baseline
+    exactly. With copy_missing, files missing under NEW_PATH that Git does not track there (ignored
+    or untracked inputs a fresh worktree lacks, such as built binaries) are copied from the current
+    repository, but only when the source file still has its baseline hash; a missing tracked file
+    means a different revision and is refused. Without Git at NEW_PATH only files under the scan
+    includes are copied. Reviews stay valid: no reviewed row changes."""
+    run = Path(run)
+    new = Path(new_path).resolve()
+    if not new.is_dir():
+        raise ValueError('relocation target is not a directory: ' + str(new))
+    if run.resolve() == new or new in run.resolve().parents:
+        raise ValueError('audit workspace must be outside target repository')
+    with write_lock(run):
+        ensure_ledger(run)
+        data = load(run)
+        old = Path(data['repository'])
+        if old.resolve() == new:
+            raise ValueError('run already points at ' + str(new))
+        base = {k: v['sha256'] for k, v in baseline_files(data).items()}
+        policy = scan_policy(data)
+        def compare():
+            files, limits, *_ = scan(new, exclusions=data.get('scan_exclusions', {}), policy=policy)
+            current = {k: v['sha256'] for k, v in files.items()}
+            missing = sorted(set(base) - set(current))
+            differ = sorted(k for k in set(base) & set(current) if base[k] != current[k])
+            extra = sorted(set(current) - set(base))
+            return limits, missing, differ, extra
+        limits, missing, differ, extra = compare()
+        copied = []
+        if copy_missing and missing and not (limits or differ or extra):
+            tracked = tracked_files(new)
+            if tracked is None:
+                includes = data.get('scan_includes', [])
+                refused = [k for k in missing if not under_any(k, includes)]
+                why = ' missing files lie outside the scan includes (no Git at NEW_PATH) and are not copied, e.g. '
+            else:
+                refused = [k for k in missing if k in tracked]
+                why = ' missing files are tracked by Git at NEW_PATH, so it is not the audited checkout, e.g. '
+            if refused:
+                raise ValueError(str(len(refused)) + why + ', '.join(refused[:5]) + '; check out the audited revision')
+            for key in missing:
+                source = old / key
+                if not source.is_file() or source.is_symlink() or filehash(source) != base[key]:
+                    raise ValueError('cannot copy ' + key + ': missing or changed under ' + str(old))
+            for key in missing:
+                target = new / key
+                if target.exists() or target.is_symlink():
+                    raise ValueError('refusing to overwrite ' + key + ' under ' + str(new))
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(old / key, target)
+                copied.append(key)
+            limits, missing, differ, extra = compare()
+        if limits or missing or differ or extra:
+            parts = [(name, paths) for name, paths in (('unreadable', sorted(limits)), ('missing', missing),
+                                                       ('different', differ), ('not in baseline', extra)) if paths]
+            raise ValueError('NEW_PATH does not reproduce the baseline: ' + '; '.join(
+                name + ' ' + str(len(paths)) + ' (e.g. ' + ', '.join(paths[:5]) + ')' for name, paths in parts)
+                + ('; missing files under the scan includes can be copied with --copy-missing' if missing and not copy_missing else ''))
+        entry = dict(at_sequence=data['sequence'], previous=str(old), repository=str(new), files_compared=len(base))
+        if copied:
+            entry['copied'] = copied
+        meta = dict(repository=str(new), relocations=data.get('relocations', []) + [entry], sequence=data['sequence'] + 1)
+        con = connect(run)
+        try:
+            con.execute('BEGIN IMMEDIATE')
+            try:
+                (stored,) = con.execute("SELECT value FROM meta WHERE key = 'sequence'").fetchone()
+                if json.loads(stored) != data['sequence']:
+                    raise ValueError('ledger changed during relocation; retry')
+                con.executemany('INSERT INTO meta(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+                                [(k, canonical(v)) for k, v in meta.items()])
+                mark(con, meta['sequence'])
+                con.execute('COMMIT')
+            except BaseException:
+                con.execute('ROLLBACK')
+                raise
+        finally:
+            con.close()
+        return dict(sequence=meta['sequence'], repository=str(new), previous=str(old), files_compared=len(base), copied=copied)
+
+
+def tracked_files(repo):
+    """Paths Git tracks in REPO (read-only, no optional locks); None without Git or a repository."""
+    import subprocess
+    git = shutil.which('git')
+    if not git or not (Path(repo) / '.git').exists():
+        return None
+    env = {**os.environ, 'GIT_OPTIONAL_LOCKS': '0', 'GIT_TERMINAL_PROMPT': '0'}
+    done = subprocess.run([git, '-C', str(repo), '-c', 'core.fsmonitor=false', 'ls-files', '-z'],
+                          capture_output=True, env=env, timeout=120)
+    if done.returncode:
+        return None
+    return {p.decode('utf-8', 'surrogateescape') for p in done.stdout.split(b'\0') if p}
 
 
 def scan(repo, max_files=50000, max_bytes=16 * 1024 * 1024, exclusions=None, checkpoint=None, policy=None):
@@ -1862,6 +1963,10 @@ def main():
     init.add_argument('--include', action='append', default=[], help='scan this directory although the policy skips it (repeatable)')
     init.add_argument('--scan-all', action='store_true', help='no relevance policy: also scan dependency, Git-ignored and nested-checkout directories')
     app = sub.add_parser('apply'); app.add_argument('run'); app.add_argument('fragment')
+    rl = sub.add_parser('relocate', help='point the run at another checkout that reproduces the baseline exactly')
+    rl.add_argument('run'); rl.add_argument('new_path')
+    rl.add_argument('--copy-missing', action='store_true',
+                    help='copy files missing under NEW_PATH that lie in the scan includes from the current repository, if their hashes match')
     ad = sub.add_parser('adopt-scan-policy', help='switch a run created before the relevance policy to it; requires a new inventory review')
     ad.add_argument('run'); ad.add_argument('--include', action='append', default=[], help='keep scanning this skipped directory (repeatable)')
     mig = sub.add_parser('migrate', help='convert a JSON ledger (audit.json) to audit.db; apply does this on its first write'); mig.add_argument('run')
@@ -1918,6 +2023,8 @@ def main():
             print(json.dumps(dict(sequence=apply(args.run, read(args.fragment), info), **info)))
         elif args.command == 'adopt-scan-policy':
             print(json.dumps(adopt_scan_policy(args.run, args.include), ensure_ascii=False, indent=2))
+        elif args.command == 'relocate':
+            print(json.dumps(relocate(args.run, args.new_path, args.copy_missing), ensure_ascii=False, indent=2))
         elif args.command == 'migrate':
             with write_lock(args.run):
                 print('migrated' if migrate(args.run) else 'nothing to migrate')

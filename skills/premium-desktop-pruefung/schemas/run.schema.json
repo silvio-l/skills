@@ -878,6 +878,45 @@
           "minimum": 0
         }
       }
+    },
+    "relocations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "at_sequence",
+          "previous",
+          "repository",
+          "files_compared"
+        ],
+        "properties": {
+          "at_sequence": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "previous": {
+            "type": "string",
+            "minLength": 1
+          },
+          "repository": {
+            "type": "string",
+            "minLength": 1
+          },
+          "files_compared": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "copied": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "uniqueItems": true
+          }
+        }
+      }
     }
   },
   "required": [
