@@ -1,6 +1,6 @@
 # Fragment and worker-result examples
 
-One complete example per table, in the exact shape `apply` accepts. Every block is checked against `schemas/run.schema.json` by the skill's tests, so a field that is missing here is not optional. Replace every value with observed facts; digests come from `audit.py digest`, the context digest from `audit.py next`. [protocol.md](protocol.md) explains the rules behind each field.
+One complete example per table, in the exact shape `apply` accepts. Every block is checked against `schemas/run.schema.json` by the skill's tests, so a field that is missing here is not optional; the one exception is `sha256` in a files operation, which `apply` copies from the manifest. Replace every value with observed facts; digests come from `audit.py digest`, the context digest from `audit.py next`. [protocol.md](protocol.md) explains the rules behind each field.
 
 A fragment wraps operations; `base_sequence` is the ledger sequence the author read (an older one is rebased when the written rows did not change since):
 
@@ -11,7 +11,7 @@ A fragment wraps operations; `base_sequence` is the ledger sequence the author r
   "operations": [
     {"table": "profile", "id": "scope", "value": {"value": "Full audit of the desktop app, macOS 15 exercised; Windows supported but not exercised. Screen readers excluded (not requested).", "evidence": ["E-brief"]}},
     {"table": "objects", "id": "O-settings", "value": {"label": "Settings window", "kind": "view", "sources": ["src/settings/SettingsView.tsx"], "variants": ["light-wide-en", "dark-compact-de"], "relations": ["O-main-window"], "audience": "All users; administrators change sync options"}},
-    {"table": "files", "id": "src/settings/SettingsView.tsx", "value": {"sha256": "copy the sha256 of the current files row", "decision": "mapped", "reason": "", "objects": ["O-settings"]}},
+    {"table": "files", "id": "src/settings/SettingsView.tsx", "value": {"decision": "mapped", "reason": "", "objects": ["O-settings"]}},
     {"table": "applicability", "id": "NA-dialog-resize", "value": {"kinds": ["dialog"], "objects": [], "criteria": [], "dimensions": ["05"], "variants": [], "reason": "Dialogs have a fixed size set in src/ui/Dialog.tsx:12; window-resizing criteria cannot apply.", "evidence": ["E-dialog-source"], "actor": "coordinator"}},
     {"table": "equivalences", "id": "Q-settings-theme", "value": {"object": "O-settings", "representative": "light-wide-en", "variants": ["dark-wide-en"], "criteria": ["WCAG-2.4.3"], "dimensions": [], "reason": "Focus order is theme-independent: one component tree, theme only swaps tokens (src/theme.ts).", "evidence": ["E-theme-source"], "actor": "coordinator"}},
     {"table": "jobs", "id": "J-settings-1", "value": {"owner": "coordinator", "units": ["U-0a1b2c3d4e5f60718293"], "status": "active", "reason": "Settings keyboard walk, light-wide-en"}}

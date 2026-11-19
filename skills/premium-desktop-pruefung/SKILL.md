@@ -10,16 +10,16 @@ Deliver a target-audience-specific quality checklist, reproducible findings and 
 ## Coordinator quickstart
 
 ```sh
-A="python3 $SKILL/scripts/audit.py"
-$A init "$RUN" "$REPO" --revision "$REV"        # product source only; read the skipped list
-$A classify "$RUN" --actor C --prefix docs --exclude 'not product UI'   # bulk file decisions
-$A apply "$RUN" parts/inventory.json; $A plan "$RUN" --actor C
-$A inventory "$RUN"                              # compact view + warnings for the inventory critic
-$A next "$RUN" --first O-core-flow               # risk-ordered packages; claim one job per worker
-$A ingest "$RUN" result.json --actor W           # one worker result: evidence, units, findings, job
-$A digest "$RUN" --scope unit --targets-file ids # batch digests for critics
-$A apply-corrections "$RUN" --actor C; $A resolve-answered "$RUN" --actor C
-$A drift "$RUN"; $A check "$RUN"; $A report "$RUN"
+A() { python3 -I "$SKILL/scripts/audit.py" "$@"; }   # a function also works in zsh
+A init "$RUN" "$REPO" --revision "$REV"        # product source only; read the skipped list
+A classify "$RUN" --actor C --prefix docs --exclude 'not product UI'   # bulk file decisions
+A apply "$RUN" parts/inventory.json; A plan "$RUN" --actor C
+A inventory "$RUN"                              # compact view + warnings for the inventory critic
+A next "$RUN" --first O-core-flow               # risk-ordered packages; claim one job per worker
+A ingest "$RUN" result.json --actor W           # one worker result: evidence, units, findings, job
+A digest "$RUN" --scope unit --targets-file ids # batch digests for critics
+A apply-corrections "$RUN" --actor C; A resolve-answered "$RUN" --actor C
+A drift "$RUN"; A check "$RUN"; A report "$RUN"
 ```
 
 Search the tracker for earlier audit runs first. Workers return the `ingest` format and critics return review drafts with machine-readable `corrections` ([fragments](references/fragments.md), [agents](references/agents.md)). A stale fragment on disjoint rows is rebased automatically.

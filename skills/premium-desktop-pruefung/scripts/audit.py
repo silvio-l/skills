@@ -1147,6 +1147,10 @@ def apply_operations(data, fragment):
     for op in fragment['operations']:
         if not isinstance(op, dict) or set(op) != {'table', 'id', 'value'}:
             raise ValueError('malformed operation')
+        if op['table'] == 'files' and isinstance(op['value'], dict) and 'sha256' not in op['value'] \
+                and data['files'].get(op['id']) is not None:
+            # The manifest hash is immutable, so a mapping need not copy it from the files row.
+            op['value'] = {**op['value'], 'sha256': data['files'][op['id']]['sha256']}
         if op['table'] == 'units' and isinstance(op['value'], dict) and op['value'].get('status') == 'blocked':
             row = op['value'] = normalize_blocked(data, op['value'])
             if not row.get('blocker') or blocker_state(data, row) != 'documented':
@@ -1762,7 +1766,8 @@ def next_work(data, limit=12, first=()):
     return dict(sequence=data['sequence'], context_digest=context_digest(data), blockers=blockers,
                 unclassified_files=unclassified, actions=actions,
                 package_count=len(packages), packages=[dict(object=k[0], variant=k[1], action=k[2],
-                units=packages[k][:limit], remaining=max(0, len(packages[k])-limit)) for k in ordered],
+                units=packages[k][:limit], criteria={u: data['units'][u]['criterion'] for u in packages[k][:limit]},
+                remaining=max(0, len(packages[k])-limit)) for k in ordered],
                 review_units=review_units[:limit], review_remaining=max(0, len(review_units)-limit),
                 active_jobs={k:v for k,v in data['jobs'].items() if v['status']=='active'})
 
@@ -1778,7 +1783,16 @@ def wrap_reviews(run, draft, actor):
         schema_check(row, schema)
         if row['actor'] != actor:
             raise ValueError('review actor mismatch: ' + key)
-        if row['digest'] != review_digest(data, row['scope'], row['target']):
+        if row.get('corrections') is not None and row['scope'] in ('unit', 'finding'):
+            # A correcting review reviews the corrected row; its base_digest binds the row as read.
+            current = data[{'unit': 'units', 'finding': 'findings'}[row['scope']]].get(row['target'])
+            if current is None:
+                raise ValueError('review target missing: ' + key)
+            if row.get('base_digest') != row_digest(row['scope'], current):
+                raise ValueError('stale base_digest: ' + key + '; the target changed since the review, inspect it again')
+            if row['digest'] != row_digest(row['scope'], {**current, **row['corrections']}):
+                raise ValueError('digest of ' + key + ' is not the digest of the corrected row; use digest --corrections')
+        elif row['digest'] != review_digest(data, row['scope'], row['target']):
             raise ValueError('stale review digest: ' + key + '; reviewer must inspect current primary evidence')
         operations.append(dict(table='reviews', id=key, value=row))
     fragment = dict(base_sequence=data['sequence'], actor=actor, operations=operations)
@@ -1842,7 +1856,9 @@ def main():
                               args.include, args.scan_all)
             print(json.dumps(dict(files=len(data['files']), limits=len(data['scan_limits']),
                                   not_inventoried=data.get('scan_ignored', {})), ensure_ascii=False, indent=2))
-        elif args.command == 'apply': apply(args.run, read(args.fragment))
+        elif args.command == 'apply':
+            info = {}
+            print(json.dumps(dict(sequence=apply(args.run, read(args.fragment), info), **info)))
         elif args.command == 'adopt-scan-policy':
             print(json.dumps(adopt_scan_policy(args.run, args.include), ensure_ascii=False, indent=2))
         elif args.command == 'migrate':
@@ -1866,11 +1882,13 @@ def main():
             if not isinstance(change, dict) or not isinstance(add, dict) or not (change or add):
                 raise ValueError('patch needs --set, --add or --append-variant with a JSON object')
             out = patch_row(args.run, args.actor, args.table, args.id, change, add, args.fragment)
-            if args.fragment: print(out)
+            print(out if args.fragment else json.dumps(dict(sequence=out)))
         elif args.command == 'evidence' and not args.batch and not (args.id and args.kind and args.locator and args.environment):
             raise ValueError('evidence needs --id, --kind, --locator and --environment (or --batch)')
-        elif args.command == 'evidence' and args.batch: evidence_batch(args.run, args.actor, args.source)
-        elif args.command == 'evidence': evidence(args.run,args.actor,args.id,args.source,args.kind,args.locator,args.environment)
+        elif args.command == 'evidence' and args.batch:
+            print(json.dumps(dict(sequence=evidence_batch(args.run, args.actor, args.source))))
+        elif args.command == 'evidence':
+            print(json.dumps(dict(sequence=evidence(args.run,args.actor,args.id,args.source,args.kind,args.locator,args.environment))))
         else:
             data = load(args.run)
             if args.command == 'next':
