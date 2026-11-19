@@ -712,7 +712,11 @@ def validate(data, run, complete=False, check_source=None):
             if row['status'] in ('pass', 'fail', 'excluded'):
                 need(accepted(data, 'unit', key, row['actor'], index), key + ': independent unit review missing/stale')
             if row['status'] == 'fail':
-                need(covering_finding(data, key), key + ': failure has no confirmed finding (list the unit in a finding\'s units)')
+                if not covering_finding(data, key):
+                    listed = sorted(k for k, f in data['findings'].items() if key in f['units'])
+                    need(False, key + (': failure has no confirmed finding; listed in ' + ', '.join(listed)
+                                       + ', which still needs its independent review and promotion' if listed
+                                       else ': failure has no confirmed finding (list the unit in a finding\'s units)'))
     assigned = set()
     for key, job in data['jobs'].items():
         # Closed jobs may name units that a later applicability/equivalence rule pruned.
@@ -1221,6 +1225,24 @@ def current_row(run, table, key):
     con, data = open_view(run)
     try:
         return data['sequence'], copy.deepcopy(data[table].get(key))
+    finally:
+        con.close()
+
+
+def show(run, table, keys):
+    """Current rows by ID, read-only and without loading the ledger (for critics and workers)."""
+    if table not in TABLES:
+        raise ValueError('unknown table: ' + str(table) + '; one of ' + ', '.join(TABLES))
+    if not keys:
+        raise ValueError('show needs at least one --id')
+    ensure_ledger(run)
+    con, data = open_view(run)
+    try:
+        rows = {k: copy.deepcopy(data[table].get(k)) for k in keys}
+        missing = sorted(k for k, row in rows.items() if row is None)
+        if missing:
+            raise ValueError('unknown ' + table + ' row: ' + ', '.join(missing[:10]))
+        return dict(sequence=data['sequence'], table=table, rows=rows)
     finally:
         con.close()
 
@@ -1825,6 +1847,8 @@ def main():
     ev.add_argument('--kind'); ev.add_argument('--locator'); ev.add_argument('--environment')
     wrap = sub.add_parser('wrap-reviews'); wrap.add_argument('run'); wrap.add_argument('draft'); wrap.add_argument('--actor', required=True)
     res = sub.add_parser('resume'); res.add_argument('run'); res.add_argument('--object'); res.add_argument('--status', choices=list(TRANSITIONS)); res.add_argument('--limit', type=int, default=20)
+    sh = sub.add_parser('show', help='print current rows read-only'); sh.add_argument('run'); sh.add_argument('--table', required=True)
+    sh.add_argument('--id', action='append', default=[], help='row ID (repeatable)')
     nxt = sub.add_parser('next'); nxt.add_argument('run'); nxt.add_argument('--limit', type=int, default=12)
     nxt.add_argument('--first', action='append', default=[], help='schedule this object first (repeatable, risk order)')
     ev.add_argument('--batch', action='store_true', help='SOURCE is a JSON array of {id, source, kind, locator, environment}; one write')
@@ -1856,6 +1880,8 @@ def main():
                               args.include, args.scan_all)
             print(json.dumps(dict(files=len(data['files']), limits=len(data['scan_limits']),
                                   not_inventoried=data.get('scan_ignored', {})), ensure_ascii=False, indent=2))
+        elif args.command == 'show':
+            print(json.dumps(show(args.run, args.table, args.id), ensure_ascii=False, indent=2))
         elif args.command == 'apply':
             info = {}
             print(json.dumps(dict(sequence=apply(args.run, read(args.fragment), info), **info)))
